@@ -6,6 +6,38 @@ test("buildLoadingText returns plain Thinking... when no progress", () => {
   assert.equal(buildLoadingText({ progress: null, now: Date.now() }), "Thinking...");
 });
 
+test("buildLoadingText shows running process elapsed time before thinking progress", () => {
+  const startedAt = "2026-04-28T00:00:00.000Z";
+  const now = Date.parse(startedAt) + 5_750;
+  const processes = new Map([
+    ["123", { startTime: startedAt, command: "yarn install" }]
+  ]);
+  const text = buildLoadingText({
+    processes,
+    progress: {
+      requestId: "r",
+      startedAt,
+      estimatedTokens: 850,
+      formattedTokens: "850",
+      phase: "update"
+    },
+    now
+  });
+  assert.equal(text, "(5s) yarn install");
+});
+
+test("buildLoadingText formats long-running process time with minutes", () => {
+  const startedAt = "2026-04-28T00:00:00.000Z";
+  const now = Date.parse(startedAt) + 65_250;
+  const processes = new Map([
+    ["web-search", { startTime: startedAt, command: "WebSearch: latest node release" }]
+  ]);
+  assert.equal(
+    buildLoadingText({ processes, progress: null, now }),
+    "(1m5s) WebSearch: latest node release"
+  );
+});
+
 test("buildLoadingText returns plain Thinking... while elapsed below 3s", () => {
   const startedAt = "2026-04-28T00:00:00.000Z";
   const now = Date.parse(startedAt) + 1500;

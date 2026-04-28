@@ -39,6 +39,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
   const [statusLine, setStatusLine] = useState<string>("");
   const [errorLine, setErrorLine] = useState<string | null>(null);
   const [streamProgress, setStreamProgress] = useState<LlmStreamProgress | null>(null);
+  const [runningProcesses, setRunningProcesses] = useState<SessionEntry["processes"]>(null);
   const [, setNowTick] = useState(0);
 
   const messagesRef = useRef<SessionMessage[]>([]);
@@ -55,6 +56,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       },
       onSessionEntryUpdated: (entry) => {
         setStatusLine(buildStatusLine(entry));
+        setRunningProcesses(entry.processes);
       },
       onLlmStreamProgress: (progress) => {
         if (progress.phase === "end") {
@@ -83,6 +85,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       sessionManager.setActiveSessionId(latest.id);
       setMessages(loadVisibleMessages(sessionManager, latest.id));
       setStatusLine(buildStatusLine(latest));
+      setRunningProcesses(latest.processes);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -117,6 +120,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
         setMessages([]);
         setStatusLine("");
         setErrorLine(null);
+        setRunningProcesses(null);
         await refreshSkills();
         refreshSessionsList();
         return;
@@ -147,6 +151,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
 
       setBusy(true);
       setErrorLine(null);
+      setRunningProcesses(null);
       try {
         await sessionManager.handleUserPrompt(prompt);
         await refreshSkills();
@@ -157,6 +162,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       } finally {
         setBusy(false);
         setStreamProgress(null);
+        setRunningProcesses(null);
       }
     },
     [exit, sessionManager, write]
@@ -172,6 +178,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       setMessages(loadVisibleMessages(sessionManager, sessionId));
       const session = sessionManager.getSession(sessionId);
       setStatusLine(session ? buildStatusLine(session) : "");
+      setRunningProcesses(session?.processes ?? null);
       setView("chat");
       await refreshSkills(sessionId);
     },
@@ -187,7 +194,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
   }, [messages]);
   const expandedThinkingId = findExpandedThinkingId(messages);
   const loadingText = busy
-    ? buildLoadingText({ progress: streamProgress, now: Date.now() })
+    ? buildLoadingText({ progress: streamProgress, processes: runningProcesses, now: Date.now() })
     : null;
 
   return (
