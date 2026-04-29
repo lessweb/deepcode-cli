@@ -1,8 +1,11 @@
 import { spawn } from "child_process";
+import React from "react";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import * as readline from "readline/promises";
+import { render, type Instance } from "ink";
+import chalk from "chalk";
+import { UpdatePrompt, type UpdatePromptChoice } from "./ui/UpdatePrompt";
 
 export type PackageInfo = {
   name: string;
@@ -52,7 +55,7 @@ export async function promptForPendingUpdate(packageInfo: PackageInfo): Promise<
     const ok = await runNpmInstallGlobal(installSpec);
     if (ok) {
       writeUpdateState({ ...state, pending: null });
-      process.stdout.write("Deep Code has been updated. Please restart the CLI to use the new version.\n");
+      process.stdout.write(`\n${chalk.red("Deep Code has been updated. Please restart the CLI to use the new version.")}\n\n`);
     }
     return { installed: ok };
   }
@@ -129,29 +132,28 @@ async function promptUpdateChoice({
   latestVersion: string;
   installCommand: string;
 }): Promise<"install" | "ignore-once" | "ignore-version"> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    process.stdout.write(`Deep Code latest version has been released: ${currentVersion} -> ${latestVersion}\n`);
-    process.stdout.write(`1. Install the latest version with \`${installCommand}\`\n`);
-    process.stdout.write("2. Ignore once\n");
-    process.stdout.write(`3. Ignore this version (${latestVersion})\n`);
+  return new Promise<UpdatePromptChoice>((resolve) => {
+    let selected = false;
+    let instance: Instance | null = null;
+    const handleSelect = (choice: UpdatePromptChoice): void => {
+      if (selected) {
+        return;
+      }
+      selected = true;
+      resolve(choice);
+      instance?.unmount();
+    };
 
-    while (true) {
-      const answer = (await rl.question("Choose 1, 2, or 3: ")).trim();
-      if (answer === "1") {
-        return "install";
-      }
-      if (answer === "2" || answer === "") {
-        return "ignore-once";
-      }
-      if (answer === "3") {
-        return "ignore-version";
-      }
-      process.stdout.write("Please enter 1, 2, or 3.\n");
-    }
-  } finally {
-    rl.close();
-  }
+    instance = render(
+      React.createElement(UpdatePrompt, {
+        currentVersion,
+        latestVersion,
+        installCommand,
+        onSelect: handleSelect
+      }),
+      { exitOnCtrlC: false }
+    );
+  });
 }
 
 async function runNpmInstallGlobal(installSpec: string): Promise<boolean> {
