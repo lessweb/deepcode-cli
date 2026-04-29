@@ -109,12 +109,72 @@ function buildToolSummary(message: SessionMessage): { name: string; params: stri
     message.meta?.function && typeof (message.meta.function as { name?: unknown }).name === "string"
       ? (message.meta.function as { name: string }).name
       : null;
+  const name = payload.name || metaFunctionName || "tool";
+  const params = name === "AskUserQuestion"
+    ? extractAskUserQuestionParams(message) || getMetaParams(message)
+    : getMetaParams(message);
 
   return {
-    name: payload.name || metaFunctionName || "tool",
-    params: typeof message.meta?.paramsMd === "string" ? message.meta.paramsMd.trim() : "",
+    name,
+    params,
     ok: payload.ok !== false
   };
+}
+
+function getMetaParams(message: SessionMessage): string {
+  return typeof message.meta?.paramsMd === "string" ? message.meta.paramsMd.trim() : "";
+}
+
+function extractAskUserQuestionParams(message: SessionMessage): string {
+  const fromFunction = extractQuestionsFromToolFunction(message.meta?.function);
+  if (fromFunction) {
+    return fromFunction;
+  }
+
+  const params = getMetaParams(message);
+  if (!params) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(params);
+    return extractQuestionsFromValue(parsed);
+  } catch {
+    return "";
+  }
+}
+
+function extractQuestionsFromToolFunction(toolFunction: unknown): string {
+  if (!toolFunction || typeof toolFunction !== "object") {
+    return "";
+  }
+  const args = (toolFunction as { arguments?: unknown }).arguments;
+  if (typeof args !== "string" || !args.trim()) {
+    return "";
+  }
+  try {
+    const parsed = JSON.parse(args);
+    return extractQuestionsFromValue((parsed as { questions?: unknown })?.questions);
+  } catch {
+    return "";
+  }
+}
+
+function extractQuestionsFromValue(value: unknown): string {
+  if (!Array.isArray(value)) {
+    return "";
+  }
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object" || Array.isArray(item)) {
+        return "";
+      }
+      return typeof (item as { question?: unknown }).question === "string"
+        ? (item as { question: string }).question.trim()
+        : "";
+    })
+    .filter(Boolean)
+    .join(" / ");
 }
 
 function parseToolPayload(content: string | null): { name: string | null; ok: boolean } {

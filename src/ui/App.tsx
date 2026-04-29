@@ -9,6 +9,7 @@ import {
   type LlmStreamProgress,
   type SessionEntry,
   type SessionMessage,
+  type SessionStatus,
   type SkillInfo,
   type UserPromptContent
 } from "../session";
@@ -18,6 +19,12 @@ import { MessageView } from "./MessageView";
 import { SessionList } from "./SessionList";
 import { buildLoadingText } from "./loadingText";
 import { findExpandedThinkingId } from "./thinkingState";
+import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
+import {
+  findPendingAskUserQuestion,
+  formatAskUserQuestionAnswers,
+  type AskUserQuestionAnswers
+} from "./askUserQuestion";
 
 const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -40,6 +47,8 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
   const [errorLine, setErrorLine] = useState<string | null>(null);
   const [streamProgress, setStreamProgress] = useState<LlmStreamProgress | null>(null);
   const [runningProcesses, setRunningProcesses] = useState<SessionEntry["processes"]>(null);
+  const [activeStatus, setActiveStatus] = useState<SessionStatus | null>(null);
+  const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [, setNowTick] = useState(0);
 
   const messagesRef = useRef<SessionMessage[]>([]);
@@ -57,6 +66,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       onSessionEntryUpdated: (entry) => {
         setStatusLine(buildStatusLine(entry));
         setRunningProcesses(entry.processes);
+        setActiveStatus(entry.status);
       },
       onLlmStreamProgress: (progress) => {
         if (progress.phase === "end") {
@@ -86,6 +96,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       setMessages(loadVisibleMessages(sessionManager, latest.id));
       setStatusLine(buildStatusLine(latest));
       setRunningProcesses(latest.processes);
+      setActiveStatus(latest.status);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -121,6 +132,8 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
         setStatusLine("");
         setErrorLine(null);
         setRunningProcesses(null);
+        setActiveStatus(null);
+        setDismissedQuestionIds(new Set());
         await refreshSkills();
         refreshSessionsList();
         return;
@@ -179,6 +192,7 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       const session = sessionManager.getSession(sessionId);
       setStatusLine(session ? buildStatusLine(session) : "");
       setRunningProcesses(session?.processes ?? null);
+      setActiveStatus(session?.status ?? null);
       setView("chat");
       await refreshSkills(sessionId);
     },
@@ -193,9 +207,33 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
       .filter((content) => content.length > 0);
   }, [messages]);
   const expandedThinkingId = findExpandedThinkingId(messages);
+  const pendingQuestion = useMemo(
+    () => findPendingAskUserQuestion(messages, activeStatus),
+    [activeStatus, messages]
+  );
+  const shouldShowQuestionPrompt = Boolean(
+    pendingQuestion && !dismissedQuestionIds.has(pendingQuestion.messageId)
+  );
   const loadingText = busy
     ? buildLoadingText({ progress: streamProgress, processes: runningProcesses, now: Date.now() })
     : null;
+
+  const handleQuestionAnswers = useCallback(
+    (answers: AskUserQuestionAnswers) => {
+      void handlePrompt({
+        text: formatAskUserQuestionAnswers(answers),
+        imageUrls: []
+      });
+    },
+    [handlePrompt]
+  );
+
+  const handleQuestionCancel = useCallback(() => {
+    if (!pendingQuestion) {
+      return;
+    }
+    setDismissedQuestionIds((prev) => new Set(prev).add(pendingQuestion.messageId));
+  }, [pendingQuestion]);
 
   return (
     <Box flexDirection="column" width={screenWidth}>
@@ -223,6 +261,12 @@ export function App({ projectRoot }: AppProps): React.ReactElement {
           sessions={sessions}
           onSelect={(id) => void handleSelectSession(id)}
           onCancel={() => setView("chat")}
+        />
+      ) : shouldShowQuestionPrompt && pendingQuestion && !busy ? (
+        <AskUserQuestionPrompt
+          questions={pendingQuestion.questions}
+          onSubmit={handleQuestionAnswers}
+          onCancel={handleQuestionCancel}
         />
       ) : (
         <PromptInput

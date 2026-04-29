@@ -46,7 +46,7 @@ type Props = {
 const BACKSPACE_BYTES = new Set(["", ""]);
 const FORWARD_DELETE_SEQUENCES = new Set(["[3~", "[P"]);
 
-type InputKey = {
+export type InputKey = {
   upArrow: boolean;
   downArrow: boolean;
   leftArrow: boolean;
@@ -429,7 +429,7 @@ function renderBufferWithCursor(state: PromptBufferState): string {
   return before + chalk.inverse(at) + after;
 }
 
-function useTerminalInput(inputHandler: (input: string, key: InputKey) => void): void {
+export function useTerminalInput(inputHandler: (input: string, key: InputKey) => void): void {
   const { stdin, setRawMode, internal_exitOnCtrlC } = useStdin();
 
   useEffect(() => {
