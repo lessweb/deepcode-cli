@@ -901,7 +901,7 @@ ${skillMd}
           assistantRefusal: refusal,
           toolCalls,
           usage: accumulateUsage(entry.usage, responseUsage),
-          activeTokens: entry.activeTokens + getTotalTokens(responseUsage),
+          activeTokens: getTotalTokens(responseUsage),
           status: refusal
             ? "failed"
             : waitingForUser
@@ -1824,7 +1824,7 @@ ${skillMd}
       status: this.normalizeSessionStatus(value.status),
       failReason: typeof value.failReason === "string" ? value.failReason : null,
       usage: value.usage ?? null,
-      activeTokens: typeof value.activeTokens === "number" ? value.activeTokens : getTotalTokens(value.usage),
+      activeTokens: typeof value.activeTokens === "number" ? value.activeTokens : 0,
       createTime: typeof value.createTime === "string" ? value.createTime : new Date().toISOString(),
       updateTime: typeof value.updateTime === "string" ? value.updateTime : new Date().toISOString(),
       processes: this.deserializeProcesses(value.processes)
