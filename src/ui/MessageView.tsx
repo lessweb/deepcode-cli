@@ -30,10 +30,10 @@ export function MessageView({ message }: Props): React.ReactElement | null {
     const content = (message.content || "").trim();
 
     if (isThinking) {
-      const summary = firstNonEmptyLine(content) || "(thinking...)";
+      const summary = buildThinkingSummary(content, message.messageParams);
       return (
         <Box marginY={0}>
-          <StatusLine bulletColor="gray" name="Thinking" params={truncate(summary, 100)} />
+          <StatusLine bulletColor="gray" name="Thinking" params={summary} />
         </Box>
       );
     }
@@ -289,5 +289,23 @@ function firstNonEmptyLine(value: string): string {
       return trimmed;
     }
   }
+  return "";
+}
+
+function buildThinkingSummary(content: string, messageParams: unknown | null): string {
+  if (content) {
+    const normalized = content.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
+    let result = truncate(normalized, 100);
+    if (result.endsWith(":") || result.endsWith("：")) {
+      result = result.slice(0, -1);
+    }
+    return result;
+  }
+
+  const params = messageParams as { reasoning_content?: unknown } | null | undefined;
+  if (typeof params?.reasoning_content === "string" && params.reasoning_content.trim()) {
+    return "(reasoning...)";
+  }
+
   return "";
 }
