@@ -354,10 +354,6 @@ async function runDefaultWebSearchRequest(
       result?: unknown;
     };
 
-    if (payload.success !== true) {
-      throw new Error("WebSearch API returned success=false.");
-    }
-
     if (typeof payload.result === "string" && payload.result.trim()) {
       return payload.result.trim();
     }
