@@ -25,6 +25,7 @@ type UpdateState = {
 const UPDATE_STATE_FILE = "update-check.json";
 const NPM_VIEW_TIMEOUT_MS = 5000;
 const MAX_NPM_VIEW_OUTPUT_CHARS = 64 * 1024;
+const TENCENT_MIRROR_REGISTRY = "https://mirrors.cloud.tencent.com/npm/";
 
 export async function promptForPendingUpdate(packageInfo: PackageInfo): Promise<{ installed: boolean }> {
   const state = readUpdateState();
@@ -178,7 +179,14 @@ async function runNpmInstallGlobal(installSpec: string): Promise<boolean> {
 }
 
 async function fetchLatestNpmVersion(packageName: string): Promise<string | null> {
-  const result = await runNpmViewLatestVersion(packageName, NPM_VIEW_TIMEOUT_MS);
+  // Try Tencent mirror first for faster access in mainland China.
+  const mirrorResult = await runNpmViewLatestVersion(packageName, TENCENT_MIRROR_REGISTRY, NPM_VIEW_TIMEOUT_MS);
+  if (mirrorResult.ok) {
+    return parseNpmViewVersion(mirrorResult.stdout);
+  }
+
+  // Fall back to the official npm registry.
+  const result = await runNpmViewLatestVersion(packageName, undefined, NPM_VIEW_TIMEOUT_MS);
   if (!result.ok) {
     return null;
   }
@@ -187,10 +195,15 @@ async function fetchLatestNpmVersion(packageName: string): Promise<string | null
 
 function runNpmViewLatestVersion(
   packageName: string,
+  registry: string | undefined,
   timeoutMs: number
 ): Promise<{ ok: true; stdout: string } | { ok: false }> {
   return new Promise((resolve) => {
-    const child = spawn("npm", ["view", packageName, "dist-tags.latest", "--json"], {
+    const args = ["view", packageName, "dist-tags.latest", "--json"];
+    if (registry) {
+      args.push("--registry", registry);
+    }
+    const child = spawn("npm", args, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: process.platform === "win32"
     });
