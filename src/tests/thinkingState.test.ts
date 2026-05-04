@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { findExpandedThinkingId } from "../ui/thinkingState";
+import { findExpandedThinkingId } from "../ui";
 import type { SessionMessage } from "../session";
 
 function buildMessage(

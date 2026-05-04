@@ -245,7 +245,7 @@ export function App({ projectRoot, version = "" }: AppProps): React.ReactElement
 
   return (
     <Box flexDirection="column" width={screenWidth}>
-      {view === "chat" && messages.length === 0 ? (
+      {view === "chat" ? (
         <WelcomeScreen
           projectRoot={projectRoot}
           settings={welcomeSettings}

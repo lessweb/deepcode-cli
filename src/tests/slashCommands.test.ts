@@ -6,7 +6,7 @@ import {
   findExactSlashCommand,
   formatSlashCommandDescription,
   formatSlashCommandLabel
-} from "../ui/slashCommands";
+} from "../ui";
 import type { SkillInfo } from "../session";
 
 const skills: SkillInfo[] = [

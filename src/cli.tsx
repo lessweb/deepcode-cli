@@ -1,6 +1,6 @@
 import React from "react";
 import { render } from "ink";
-import { App } from "./ui/App";
+import { App } from "./ui";
 import { setShellIfWindows } from "./tools/shell-utils";
 import { checkForNpmUpdate, promptForPendingUpdate, type PackageInfo } from "./updateCheck";
 

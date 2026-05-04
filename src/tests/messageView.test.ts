@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { MessageView, parseDiffPreview } from "../ui/MessageView";
+import { MessageView, parseDiffPreview } from "../ui";
 import type { SessionMessage } from "../session";
 
 test("parseDiffPreview removes headers and classifies lines", () => {

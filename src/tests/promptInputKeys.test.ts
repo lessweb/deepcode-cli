@@ -11,7 +11,7 @@ import {
   removeCurrentSlashToken,
   toggleSkillSelection,
   renderBufferWithCursor
-} from "../ui/PromptInput";
+} from "../ui";
 import type { SkillInfo } from "../session";
 
 test("parseTerminalInput treats DEL bytes as backspace", () => {

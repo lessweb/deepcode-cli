@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { render, type Instance } from "ink";
 import chalk from "chalk";
-import { UpdatePrompt, type UpdatePromptChoice } from "./ui/UpdatePrompt";
+import { UpdatePrompt, type UpdatePromptChoice } from "./ui";
 
 export type PackageInfo = {
   name: string;

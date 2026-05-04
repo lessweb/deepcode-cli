@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildLoadingText } from "../ui/loadingText";
+import { buildLoadingText } from "../ui";
 
 test("buildLoadingText returns plain Thinking... when no progress", () => {
   assert.equal(buildLoadingText({ progress: null, now: Date.now() }), "Thinking...");

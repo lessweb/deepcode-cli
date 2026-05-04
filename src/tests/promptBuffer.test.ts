@@ -16,7 +16,7 @@ import {
   moveWordLeft,
   moveWordRight,
   moveUp
-} from "../ui/promptBuffer";
+} from "../ui";
 
 test("insertText appends text and advances the cursor", () => {
   const next = insertText(EMPTY_BUFFER, "hello");

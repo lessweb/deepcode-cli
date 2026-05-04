@@ -4,7 +4,7 @@ import {
   findPendingAskUserQuestion,
   formatAskUserQuestionAnswers,
   formatAskUserQuestionDecline
-} from "../ui/askUserQuestion";
+} from "../ui";
 import type { SessionMessage } from "../session";
 
 function message(content: unknown): SessionMessage {

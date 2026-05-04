@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildWelcomeTips, formatHomeRelativePath } from "../ui/WelcomeScreen";
+import { buildWelcomeTips, formatHomeRelativePath } from "../ui";
 
 test("formatHomeRelativePath returns tilde for the home directory", () => {
   assert.equal(formatHomeRelativePath("/Users/example", "/Users/example"), "~");
