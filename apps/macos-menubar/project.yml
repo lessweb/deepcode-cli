@@ -30,9 +30,31 @@ targets:
           - "Resources/sidecar/**"
           - "Info.plist"
     resources:
-      - path: DeepCode/Resources/sidecar
-        type: folder
       - path: DeepCode/Resources/Assets.xcassets
     settings:
       base:
         PRODUCT_NAME: DeepCode
+    postBuildScripts:
+      - name: Copy sidecar bundle
+        # Embeds the staged sidecar directory (cli.cjs, node binary, node_modules,
+        # docs/tools) into the app bundle. We avoid the standard "Copy Bundle
+        # Resources" phase because folder references lose the executable bit on
+        # the universal `node` binary; rsync + explicit chmod preserves it.
+        runOnlyWhenInstalling: false
+        shell: /bin/bash
+        script: |
+          set -euo pipefail
+          SRC="${SRCROOT}/DeepCode/Resources/sidecar"
+          DST="${BUILT_PRODUCTS_DIR}/${WRAPPER_NAME}/Contents/Resources/sidecar"
+          if [ ! -d "$SRC" ]; then
+            echo "warning: sidecar source $SRC missing; the app will not be runnable. Run apps/macos-menubar/scripts/stage-sidecar.sh."
+            exit 0
+          fi
+          mkdir -p "$DST"
+          rsync -a --delete \
+            --exclude '.gitkeep' \
+            --exclude '.DS_Store' \
+            "$SRC/" "$DST/"
+          if [ -f "$DST/node" ]; then
+            chmod +x "$DST/node"
+          fi

@@ -19,16 +19,22 @@ echo "[stage-sidecar] Building CLI…"
 npm run build
 
 echo "[stage-sidecar] Resetting $SIDECAR"
-rm -rf "$SIDECAR"
+# Wipe the contents but keep the directory + .gitkeep so the path stays
+# committed and ready for Xcode to find at build time.
+if [ -d "$SIDECAR" ]; then
+  find "$SIDECAR" -mindepth 1 -not -name '.gitkeep' -delete
+fi
 mkdir -p "$SIDECAR"
+touch "$SIDECAR/.gitkeep"
 
 cp "$ROOT/dist/cli.cjs" "$SIDECAR/cli.cjs"
 
 echo "[stage-sidecar] Installing prod-only node_modules…"
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+NPM_CACHE="$(mktemp -d)"
+trap 'rm -rf "$WORK" "$NPM_CACHE"' EXIT
 cp "$ROOT/package.json" "$ROOT/package-lock.json" "$WORK/"
-( cd "$WORK" && npm ci --omit=dev --ignore-scripts )
+( cd "$WORK" && npm ci --omit=dev --ignore-scripts --cache "$NPM_CACHE" )
 cp -R "$WORK/node_modules" "$SIDECAR/node_modules"
 
 mkdir -p "$SIDECAR/docs/tools"
