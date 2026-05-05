@@ -60,6 +60,7 @@ struct ServerMessage: Decodable {
     let visible: Bool?
     let createTime: String?
     let meta: ServerMessageMeta?
+    let messageParams: ServerMessageParams?
 }
 
 struct ServerMessageMeta: Decodable {
@@ -68,6 +69,17 @@ struct ServerMessageMeta: Decodable {
     let paramsMd: String?
     let resultMd: String?
     let function: ServerFunctionRef?
+}
+
+/// CLI sometimes returns the assistant reply only inside `messageParams.reasoning_content`
+/// (thinking-only models like deepseek-v3.2 on Volcano Ark). UI must fall back to it
+/// when `content` is empty.
+struct ServerMessageParams: Decodable {
+    let reasoningContent: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case reasoningContent = "reasoning_content"
+    }
 }
 
 struct ServerFunctionRef: Decodable {

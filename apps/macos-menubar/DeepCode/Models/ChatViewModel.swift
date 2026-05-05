@@ -113,14 +113,20 @@ final class ChatViewModel: ObservableObject {
     private func apply(message: ServerMessage) {
         guard message.visible ?? true else { return }
         let role = message.role
-        let content = message.content ?? ""
+        let rawContent = message.content ?? ""
+        // Thinking-only models (e.g. deepseek-v3.2) return the full reply in
+        // messageParams.reasoning_content with content="". Fall back to it.
+        let reasoning = message.messageParams?.reasoningContent ?? ""
+        let content = rawContent.isEmpty ? reasoning : rawContent
         if role == "user" {
             // The CLI echoes user messages but we already appended locally on submit;
             // skip duplicates by checking the latest entry.
             if messages.last?.role == "user", messages.last?.content == content { return }
             messages.append(.init(id: message.id, role: "user", content: content, isThinking: false, isTool: false, toolName: nil, toolParams: nil, toolResult: nil))
         } else if role == "assistant" {
-            let isThinking = message.meta?.asThinking ?? false
+            // Empty assistant message with no reasoning fallback → skip (avoid blank bubble).
+            if content.isEmpty { return }
+            let isThinking = (message.meta?.asThinking ?? false) || (rawContent.isEmpty && !reasoning.isEmpty)
             messages.append(.init(id: message.id, role: "assistant", content: content, isThinking: isThinking, isTool: false, toolName: nil, toolParams: nil, toolResult: nil))
         } else if role == "tool" {
             let name = message.meta?.function?.name ?? "tool"
