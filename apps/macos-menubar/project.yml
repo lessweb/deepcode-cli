@@ -1,0 +1,38 @@
+name: DeepCode
+options:
+  bundleIdPrefix: com.vegamo.deepcode
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.9"
+    MACOSX_DEPLOYMENT_TARGET: "13.0"
+    PRODUCT_BUNDLE_IDENTIFIER: com.vegamo.deepcode.menubar
+    INFOPLIST_FILE: DeepCode/Info.plist
+    CODE_SIGN_STYLE: Manual
+    CODE_SIGN_IDENTITY: "-"
+    CODE_SIGNING_REQUIRED: "NO"
+    CODE_SIGNING_ALLOWED: "NO"
+    DEVELOPMENT_TEAM: ""
+    ENABLE_HARDENED_RUNTIME: "NO"
+    ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+    GENERATE_INFOPLIST_FILE: "NO"
+
+targets:
+  DeepCode:
+    type: application
+    platform: macOS
+    sources:
+      - path: DeepCode
+        excludes:
+          - "Resources/sidecar/**"
+          - "Info.plist"
+    resources:
+      - path: DeepCode/Resources/sidecar
+        type: folder
+      - path: DeepCode/Resources/Assets.xcassets
+    settings:
+      base:
+        PRODUCT_NAME: DeepCode

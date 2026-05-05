@@ -1,0 +1,156 @@
+name: Release macOS App
+
+on:
+  push:
+    tags:
+      - "macos-v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Tag to release (e.g. macos-v0.1.0)"
+        required: true
+        default: "macos-v0.0.0-dev"
+
+permissions:
+  contents: write
+
+env:
+  NODE_VERSION: "18.20.4"
+  XCODEGEN_VERSION: "2.42.0"
+
+jobs:
+  build:
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - name: Resolve tag name
+        id: tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "name=${{ inputs.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "18.17"
+          cache: "npm"
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Build CLI bundle
+        run: npm run build
+
+      - name: Run tests (incl. headless)
+        run: npm test
+
+      - name: Stage sidecar resources
+        run: |
+          set -euxo pipefail
+          SIDECAR_DIR=apps/macos-menubar/DeepCode/Resources/sidecar
+          rm -rf "$SIDECAR_DIR"
+          mkdir -p "$SIDECAR_DIR"
+          cp dist/cli.cjs "$SIDECAR_DIR/"
+          # Stage prod-only node_modules for the sidecar.
+          mkdir -p /tmp/sidecar-prod
+          cp package.json package-lock.json /tmp/sidecar-prod/
+          (cd /tmp/sidecar-prod && npm ci --omit=dev --ignore-scripts)
+          mkdir -p "$SIDECAR_DIR/node_modules"
+          cp -R /tmp/sidecar-prod/node_modules/. "$SIDECAR_DIR/node_modules/"
+          # Ship docs/tools/* used at runtime by SYSTEM prompt assembly.
+          mkdir -p "$SIDECAR_DIR/docs/tools"
+          cp -R docs/tools/. "$SIDECAR_DIR/docs/tools/"
+
+      - name: Download universal Node binary
+        run: |
+          set -euxo pipefail
+          NODE_VERSION_TAG="v${NODE_VERSION}"
+          curl -fsSL "https://nodejs.org/dist/${NODE_VERSION_TAG}/node-${NODE_VERSION_TAG}-darwin-arm64.tar.gz" -o node-arm64.tgz
+          curl -fsSL "https://nodejs.org/dist/${NODE_VERSION_TAG}/node-${NODE_VERSION_TAG}-darwin-x64.tar.gz" -o node-x64.tgz
+          tar xzf node-arm64.tgz
+          tar xzf node-x64.tgz
+          lipo -create \
+            "node-${NODE_VERSION_TAG}-darwin-arm64/bin/node" \
+            "node-${NODE_VERSION_TAG}-darwin-x64/bin/node" \
+            -output apps/macos-menubar/DeepCode/Resources/sidecar/node
+          chmod +x apps/macos-menubar/DeepCode/Resources/sidecar/node
+          rm -rf node-arm64.tgz node-x64.tgz "node-${NODE_VERSION_TAG}-darwin-arm64" "node-${NODE_VERSION_TAG}-darwin-x64"
+
+      - name: Install xcodegen
+        run: |
+          brew install xcodegen
+
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Generate Xcode project
+        working-directory: apps/macos-menubar
+        run: xcodegen generate
+
+      - name: Set marketing version
+        working-directory: apps/macos-menubar
+        run: |
+          set -euxo pipefail
+          MARKETING_VERSION="${TAG_NAME#macos-v}"
+          # Strip any -rcN / -dev suffix for marketing version (Apple is strict)
+          MARKETING_VERSION="${MARKETING_VERSION%%-*}"
+          if [ -z "$MARKETING_VERSION" ]; then
+            MARKETING_VERSION="0.0.0"
+          fi
+          /usr/bin/xcrun agvtool new-marketing-version "$MARKETING_VERSION"
+          /usr/bin/xcrun agvtool new-version -all "${GITHUB_RUN_NUMBER}"
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.name }}
+
+      - name: Xcode archive
+        run: |
+          set -euxo pipefail
+          xcodebuild \
+            -project apps/macos-menubar/DeepCode.xcodeproj \
+            -scheme DeepCode \
+            -configuration Release \
+            -archivePath build/DeepCode.xcarchive \
+            -destination "generic/platform=macOS" \
+            CODE_SIGN_IDENTITY="-" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            archive
+
+      - name: Export .app
+        run: |
+          set -euxo pipefail
+          mkdir -p build/export
+          cp -R build/DeepCode.xcarchive/Products/Applications/DeepCode.app build/export/
+
+      - name: Create DMG
+        run: |
+          set -euxo pipefail
+          hdiutil create \
+            -volname "DeepCode" \
+            -srcfolder build/export/DeepCode.app \
+            -ov -format UDZO \
+            "build/DeepCode-${TAG_NAME}.dmg"
+        env:
+          TAG_NAME: ${{ steps.tag.outputs.name }}
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepCode-${{ steps.tag.outputs.name }}
+          path: build/DeepCode-${{ steps.tag.outputs.name }}.dmg
+          if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: build/DeepCode-${{ steps.tag.outputs.name }}.dmg
+          generate_release_notes: true
+          prerelease: ${{ contains(steps.tag.outputs.name, '-rc') || contains(steps.tag.outputs.name, '-dev') }}

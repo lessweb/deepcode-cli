@@ -1,0 +1,2 @@
+# sidecar/ is filled by CI from dist/cli.cjs + universal Node binary + prod node_modules.
+# Local dev: run `bash apps/macos-menubar/scripts/stage-sidecar.sh` to populate.

@@ -3,6 +3,7 @@ import { render } from "ink";
 import { App } from "./ui/App";
 import { setShellIfWindows } from "./tools/shell-utils";
 import { checkForNpmUpdate, promptForPendingUpdate, type PackageInfo } from "./updateCheck";
+import { runHeadless } from "./headless";
 
 const args = process.argv.slice(2);
 const packageInfo = readPackageInfo();
@@ -19,8 +20,12 @@ if (args.includes("--help") || args.includes("-h")) {
       "",
       "Usage:",
       "  deepcode               Launch the interactive TUI in the current directory",
+      "  deepcode headless      Run a headless NDJSON server over stdio (for native frontends)",
       "  deepcode --version     Print the version",
       "  deepcode --help        Show this help",
+      "",
+      "Headless options:",
+      "  --project-root <path>  Use the given directory as the project root (default: cwd)",
       "",
       "Configuration:",
       "  ~/.deepcode/settings.json   API key, model, base URL",
@@ -46,20 +51,29 @@ if (args.includes("--help") || args.includes("-h")) {
   process.exit(0);
 }
 
-const projectRoot = process.cwd();
-configureWindowsShell();
+if (args[0] === "headless") {
+  configureWindowsShell();
+  void runHeadless(args.slice(1), packageInfo.version || "unknown").catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`deepcode headless: ${message}\n`);
+    process.exit(1);
+  });
+} else {
+  const projectRoot = process.cwd();
+  configureWindowsShell();
 
-if (!process.stdin.isTTY) {
-  process.stderr.write(
-    "deepcode requires an interactive terminal (TTY). " +
-      "Re-run from a real terminal session.\n"
-  );
-  process.exit(1);
+  if (!process.stdin.isTTY) {
+    process.stderr.write(
+      "deepcode requires an interactive terminal (TTY). " +
+        "Re-run from a real terminal session, or use `deepcode headless` for a programmatic interface.\n"
+    );
+    process.exit(1);
+  }
+
+  void main(projectRoot);
 }
 
-void main();
-
-async function main(): Promise<void> {
+async function main(projectRoot: string): Promise<void> {
   const updatePromptResult = await promptForPendingUpdate(packageInfo);
 
   const inkInstance = render(<App projectRoot={projectRoot} version={packageInfo.version} />, {

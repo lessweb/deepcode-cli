@@ -5,3 +5,13 @@ dist/
 .vscode/
 *.tgz
 *.log
+
+# Xcode (macOS app generated artifacts)
+apps/macos-menubar/DeepCode.xcodeproj/
+apps/macos-menubar/DeepCode.xcworkspace/
+apps/macos-menubar/build/
+apps/macos-menubar/DerivedData/
+apps/macos-menubar/DeepCode/Resources/sidecar/cli.cjs
+apps/macos-menubar/DeepCode/Resources/sidecar/node
+apps/macos-menubar/DeepCode/Resources/sidecar/node_modules/
+apps/macos-menubar/DeepCode/Resources/sidecar/docs/
