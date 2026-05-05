@@ -44,6 +44,19 @@ private struct HeaderBar: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            Menu {
+                Button("退出 DeepCode") {
+                    NSApp.terminate(nil)
+                }
+                .keyboardShortcut("q", modifiers: .command)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .imageScale(.medium)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .help("更多")
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)

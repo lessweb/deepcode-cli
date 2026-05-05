@@ -126,7 +126,10 @@ final class ChatViewModel: ObservableObject {
         } else if role == "assistant" {
             // Empty assistant message with no reasoning fallback → skip (avoid blank bubble).
             if content.isEmpty { return }
-            let isThinking = (message.meta?.asThinking ?? false) || (rawContent.isEmpty && !reasoning.isEmpty)
+            // Only treat as a "Thinking" summary bubble when the sidecar explicitly tags it.
+            // For thinking-only models like deepseek-v3.2 where reasoning_content IS the
+            // primary reply (content==""), render it as a normal assistant bubble.
+            let isThinking = message.meta?.asThinking ?? false
             messages.append(.init(id: message.id, role: "assistant", content: content, isThinking: isThinking, isTool: false, toolName: nil, toolParams: nil, toolResult: nil))
         } else if role == "tool" {
             let name = message.meta?.function?.name ?? "tool"
