@@ -26,8 +26,16 @@ final class ChatViewModel: ObservableObject {
     private let sidecar = SidecarProcess()
     private var pendingSubmitId: String?
     private var pumpTask: Task<Void, Never>?
+    private var didStart = false
 
     func start() async {
+        // Idempotent: ChatPopover.onAppear fires every time the user opens the
+        // menu bar popover. Re-running launch() would spawn a second sidecar
+        // process sharing the same inputPipe and silently break stdin writes,
+        // making the second user message vanish.
+        guard !didStart else { return }
+        didStart = true
+
         // Read settings (sync, fast).
         let settings = SettingsLoader.load()
         modelLabel = settings.model
