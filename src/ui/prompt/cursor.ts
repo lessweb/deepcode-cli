@@ -44,7 +44,7 @@ export function getPromptCursorPlacement(
   state: PromptBufferState,
   screenWidth: number,
   prefixWidth: number,
-  footerText: string
+  belowRows: number
 ): CursorPlacement {
   const width = Math.max(1, screenWidth);
   const cursor = Math.max(0, Math.min(state.cursor, state.text.length));
@@ -55,15 +55,14 @@ export function getPromptCursorPlacement(
 
   const cursorPosition = measureTextPosition(beforeCursor, width, prefixWidth);
   const promptRows = measureTextRows(displayText, width, prefixWidth);
-  const footerRows = 1 + measureTextRows(footerText, width, 0);
 
   return {
-    rowsUp: (promptRows - 1 - cursorPosition.row) + footerRows + 1,
+    rowsUp: (promptRows - 1 - cursorPosition.row) + belowRows + 1,
     column: cursorPosition.column
   };
 }
 
-function measureTextRows(text: string, width: number, initialColumn: number): number {
+export function measureTextRows(text: string, width: number, initialColumn: number): number {
   return measureTextPosition(text, width, initialColumn).row + 1;
 }
 
@@ -131,11 +130,12 @@ export function usePromptTerminalCursor(
 ): void {
   const directWriteRef = useRef<((data: string) => void) | null>(null);
   const activePlacementRef = useRef<CursorPlacement | null>(null);
-  const lastPlacementRef = useRef<CursorPlacement | null>(null);
   const unmountingRef = useRef(false);
 
+  // Patch stdout.write to hide the cursor before every write. This prevents
+  // the terminal cursor from appearing mid-render at the wrong position.
   useLayoutEffect(() => {
-    if (!stdout?.isTTY) {
+    if (!isActive || !stdout?.isTTY) {
       return;
     }
 
@@ -144,45 +144,27 @@ export function usePromptTerminalCursor(
     const directWrite = (data: string) => {
       originalWrite.call(stdout, data);
     };
-    const restorePromptCursor = () => {
-      if (unmountingRef.current) {
-        return;
-      }
-      const activePlacement = activePlacementRef.current;
-      if (!activePlacement) {
-        return;
-      }
-      directWrite("\r" + cursorDown(activePlacement.rowsUp) + hideCursor());
-      activePlacementRef.current = null;
-      // Schedule a deferred re-position in case the layout effect does not
-      // re-run (e.g. a dropdown closed without changing the buffer).
-      Promise.resolve().then(() => {
-        if (unmountingRef.current || activePlacementRef.current) {
-          return;
-        }
-        const latest = directWriteRef.current;
-        const p = lastPlacementRef.current;
-        if (latest && p) {
-          latest(showCursor() + cursorUp(p.rowsUp) + "\r" + cursorForward(p.column));
-          activePlacementRef.current = p;
-        }
-      });
-    };
+
+    directWriteRef.current = directWrite;
+
     const patchedWrite: WriteFn = (...args) => {
-      restorePromptCursor();
+      // Before each write, move the cursor back to the bottom and hide it.
+      if (!unmountingRef.current && activePlacementRef.current) {
+        directWrite("\r" + cursorDown(activePlacementRef.current.rowsUp) + hideCursor());
+        activePlacementRef.current = null;
+      }
       return originalWrite.apply(stdout, args);
     };
 
-    directWriteRef.current = directWrite;
     stream.write = patchedWrite;
-
     return () => {
-      restorePromptCursor();
+      unmountingRef.current = true;
       stream.write = originalWrite;
       directWriteRef.current = null;
     };
-  }, [stdout]);
+  }, [isActive, stdout]);
 
+  // Show and position the terminal cursor after each render.
   useLayoutEffect(() => {
     if (!isActive || !stdout?.isTTY) {
       return;
@@ -196,19 +178,17 @@ export function usePromptTerminalCursor(
 
     directWrite(showCursor() + cursorUp(placement.rowsUp) + "\r" + cursorForward(placement.column));
     activePlacementRef.current = placement;
-    lastPlacementRef.current = placement;
 
     return () => {
       unmountingRef.current = true;
-      lastPlacementRef.current = null;
-      const activePlacement = activePlacementRef.current;
-      if (!activePlacement) {
+      const p = activePlacementRef.current;
+      if (!p) {
         return;
       }
-      directWrite("\r" + cursorDown(activePlacement.rowsUp) + hideCursor());
+      directWrite("\r" + cursorDown(p.rowsUp) + hideCursor());
       activePlacementRef.current = null;
     };
-  }, [isActive, placement.column, placement.rowsUp, stdout]);
+  }, [isActive, placement.rowsUp, placement.column, stdout]);
 }
 
 export function useTerminalFocusReporting(stdout: NodeJS.WriteStream | undefined, isActive: boolean): void {

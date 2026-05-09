@@ -118,23 +118,23 @@ test("renderBufferWithCursor draws the simulated cursor when focused", () => {
 });
 
 test("getPromptCursorPlacement targets the prompt row above divider and footer", () => {
-  const placement = getPromptCursorPlacement({ text: "hello", cursor: 5 }, 80, 2, "Enter send");
+  const placement = getPromptCursorPlacement({ text: "hello", cursor: 5 }, 80, 2, 2);
   assert.deepEqual(placement, { rowsUp: 3, column: 7 });
 });
 
 test("getPromptCursorPlacement targets the reserved row after a trailing newline", () => {
-  const placement = getPromptCursorPlacement({ text: "hello\n", cursor: 6 }, 80, 2, "Enter send");
+  const placement = getPromptCursorPlacement({ text: "hello\n", cursor: 6 }, 80, 2, 2);
   assert.deepEqual(placement, { rowsUp: 3, column: 2 });
 });
 
 test("getPromptCursorPlacement accounts for CJK character width", () => {
-  const placement = getPromptCursorPlacement({ text: "你好", cursor: 2 }, 80, 2, "Enter send");
+  const placement = getPromptCursorPlacement({ text: "你好", cursor: 2 }, 80, 2, 2);
   assert.equal(placement.column, 6);
 });
 
 test("getPromptCursorPlacement accounts for multiline buffer rows", () => {
-  const placement = getPromptCursorPlacement({ text: "hello\nworld", cursor: 11 }, 80, 2, "Enter send");
+  const placement = getPromptCursorPlacement({ text: "hello\nworld", cursor: 11 }, 80, 2, 2);
   assert.deepEqual(placement, { rowsUp: 3, column: 7 });
-  const middle = getPromptCursorPlacement({ text: "hello\nworld", cursor: 2 }, 80, 2, "Enter send");
+  const middle = getPromptCursorPlacement({ text: "hello\nworld", cursor: 2 }, 80, 2, 2);
   assert.deepEqual(middle, { rowsUp: 4, column: 4 });
 });

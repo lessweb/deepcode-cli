@@ -50,9 +50,7 @@ const SlashCommandMenu = React.memo(function SlashCommandMenu({
               </Text>
             </Box>
             <Box flexGrow={1}>
-              <Text color={actualIndex === activeIndex ? "#229ac3" : undefined} wrap="truncate-end">
-                <Text dimColor>{formatSlashCommandDescription(item.description)}</Text>
-              </Text>
+              <Text color={actualIndex === activeIndex ? "#229ac3" : undefined} wrap="truncate-end" dimColor>{formatSlashCommandDescription(item.description)}</Text>
             </Box>
           </Box>
         );
