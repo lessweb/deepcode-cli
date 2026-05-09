@@ -25,8 +25,6 @@ import {
   buildSlashCommands,
   filterSlashCommands,
   findExactSlashCommand,
-  formatSlashCommandDescription,
-  formatSlashCommandLabel
 } from "./slashCommands";
 import { readClipboardImageAsync } from "./clipboard";
 import type { SkillInfo } from "../session";
@@ -35,9 +33,9 @@ import type { SkillInfo } from "../session";
 export { useTerminalInput, parseTerminalInput } from "./prompt";
 export type { InputKey } from "./prompt";
 
-import { useTerminalInput, parseTerminalInput } from "./prompt";
 import type { InputKey } from "./prompt";
-import { usePromptTerminalCursor, useTerminalFocusReporting, getPromptCursorPlacement } from "./prompt/cursor";
+import { useTerminalInput, usePromptTerminalCursor, useTerminalFocusReporting, getPromptCursorPlacement } from "./prompt";
+import SlashCommandMenu from "./SlashCommandMenu";
 
 export type PromptSubmission = {
   text: string;
@@ -561,6 +559,13 @@ export const PromptInput = React.memo(function PromptInput({
           <Text dimColor> (use /skills to edit)</Text>
         </Box>
       ) : null}
+      {/* Input */}
+      <Text dimColor wrap="truncate-end">{divider}</Text>
+      <Box>
+        <PromptPrefixLine busy={busy} />
+        <Text>{renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder)}</Text>
+      </Box>
+      <Text dimColor wrap="truncate-end">{divider}</Text>
       {showSkillsDropdown ? (
         <Box flexDirection="column" marginBottom={1}>
           <Text color="magenta" bold>Select Skills</Text>
@@ -586,28 +591,10 @@ export const PromptInput = React.memo(function PromptInput({
           {visibleSkillStart + visibleSkills.length < skills.length ? (
             <Text dimColor>… {skills.length - visibleSkillStart - visibleSkills.length} more</Text>
           ) : null}
-          <Text dimColor>space toggle · enter toggle · esc close</Text>
+          <Text dimColor>space toggle · enter toggle · esc to close</Text>
         </Box>
       ) : null}
-      {showMenu ? (
-        <Box flexDirection="column" marginBottom={1}>
-          {slashMenu.slice(0, 8).map((item, idx) => (
-            <Text key={item.label} color={idx === menuIndex ? "cyanBright" : undefined} wrap="truncate-end">
-              {idx === menuIndex ? "› " : "  "}
-              <Text bold>{formatSlashCommandLabel(item)}</Text>
-              <Text dimColor>  {formatSlashCommandDescription(item.description)}</Text>
-            </Text>
-          ))}
-          {slashMenu.length > 8 ? <Text dimColor>… {slashMenu.length - 8} more</Text> : null}
-        </Box>
-      ) : null}
-      {/* Input */}
-      <Text dimColor wrap="truncate-end">{divider}</Text>
-      <Box>
-        <PromptPrefixLine busy={busy} />
-        <Text>{renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder)}</Text>
-      </Box>
-      <Text dimColor wrap="truncate-end">{divider}</Text>
+      <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       <Box>
         <Text dimColor>{footerText}</Text>
       </Box>
