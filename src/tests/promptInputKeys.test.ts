@@ -117,6 +117,12 @@ test("renderBufferWithCursor draws the simulated cursor when focused", () => {
   assert.equal(stripAnsi(renderBufferWithCursor({ text: "\n", cursor: 1 }, true)), "\n ");
 });
 
+test("renderBufferWithCursor styles exactly one simulated cursor", () => {
+  assert.equal((renderBufferWithCursor({ text: "", cursor: 0 }, true).match(ANSI_RE) ?? []).length, 2);
+  assert.equal((renderBufferWithCursor({ text: "hello", cursor: 1 }, true).match(ANSI_RE) ?? []).length, 2);
+  assert.equal((renderBufferWithCursor({ text: "hello\nworld", cursor: 6 }, true).match(ANSI_RE) ?? []).length, 2);
+});
+
 test("getPromptCursorPlacement targets the prompt row above divider and footer", () => {
   const placement = getPromptCursorPlacement({ text: "hello", cursor: 5 }, 80, 2, 2);
   assert.deepEqual(placement, { rowsUp: 3, column: 7 });

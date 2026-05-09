@@ -34,7 +34,8 @@ export { useTerminalInput, parseTerminalInput } from "./prompt";
 export type { InputKey } from "./prompt";
 
 import type { InputKey } from "./prompt";
-import { useTerminalInput, usePromptTerminalCursor, useTerminalFocusReporting, getPromptCursorPlacement, measureTextRows } from "./prompt";
+
+import { useTerminalInput, usePromptTerminalCursor, useTerminalFocusReporting, useHiddenTerminalCursor, getPromptCursorPlacement, measureTextRows } from "./prompt";
 import SlashCommandMenu from "./SlashCommandMenu";
 
 export type PromptSubmission = {
@@ -115,6 +116,7 @@ export const PromptInput = React.memo(function PromptInput({
         ? loadingText
         : "esc to interrupt · ctrl+c to cancel input"
       : "enter send · shift+enter newline · ctrl+v image · / commands · ctrl+d exit";
+
   const cursorPlacement = React.useMemo(() => {
     const menuRows = showMenu
       ? (() => {
@@ -134,6 +136,7 @@ export const PromptInput = React.memo(function PromptInput({
       : 1 + measureTextRows(footerText, screenWidth, 0);
     return getPromptCursorPlacement(buffer, screenWidth, PROMPT_PREFIX_WIDTH, belowRows);
   }, [buffer, footerText, screenWidth, showMenu, slashMenu.length, menuIndex]);
+
   useTerminalFocusReporting(stdout, !disabled);
   usePromptTerminalCursor(stdout, cursorPlacement, !disabled);
 
@@ -699,7 +702,7 @@ export function renderBufferWithCursor(state: PromptBufferState, isFocused: bool
   const after = text.slice(cursor + 1);
 
   if (text.length === 0 && placeholder) {
-    return chalk.dim("  " + placeholder);
+    return chalk.dim(`  ${placeholder}`);
   }
 
   if (!isFocused) {
@@ -707,10 +710,16 @@ export function renderBufferWithCursor(state: PromptBufferState, isFocused: bool
   }
 
   if (typeof at === "undefined") {
-    return before + chalk.inverse(" ");
+    return before + renderCursorCell(" ");
   }
   if (at === "\n") {
-    return before + chalk.inverse(" ") + "\n" + after;
+    return before + renderCursorCell(" ") + "\n" + after;
   }
-  return before + chalk.inverse(at) + after;
+  return before + renderCursorCell(at) + after;
+}
+
+// Use explicit ANSI instead of chalk.inverse so cursor rendering stays enabled
+// in non-TTY environments such as tests, where Chalk may strip styling.
+function renderCursorCell(value: string): string {
+  return `\u001B[7m${value}\u001B[27m`;
 }
