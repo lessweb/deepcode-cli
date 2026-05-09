@@ -74,7 +74,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
   }, [busy]);
 
   const prefix = busy ? `${SPINNER_FRAMES[spinnerIndex]} ` : "> ";
-  return <Text color={busy ? "yellow" : "green"}>{prefix}</Text>;
+  return <Text color={busy ? "yellow" : "#229ac3"}>{prefix}</Text>;
 });
 
 export const PromptInput = React.memo(function PromptInput({
@@ -595,9 +595,9 @@ export const PromptInput = React.memo(function PromptInput({
         </Box>
       ) : null}
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
-      <Box>
+      {!showMenu && <Box>
         <Text dimColor>{footerText}</Text>
-      </Box>
+      </Box>}
     </Box>
   );
 });
