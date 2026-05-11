@@ -148,15 +148,23 @@ export function useTerminalInput(
       // \u001B[200~ (start) and \u001B[201~ (end).  Accumulate everything
       // between them and deliver as a single input chunk with
       // normalized line endings.
-      if (raw === BRACKETED_PASTE_START) {
-        pasteRef.current = "";
-        return;
-      }
-      if (raw === BRACKETED_PASTE_END) {
+      //
+      // Use indexOf scanning instead of exact-match so we correctly
+      // handle the case where markers and content arrive in the same
+      // data event (e.g. "\u001B[200~hello\u001B[201~").
+
+      // In the middle of a paste: accumulate and look for end marker.
+      if (pasteRef.current !== null) {
+        const endIdx = raw.indexOf(BRACKETED_PASTE_END);
+        if (endIdx === -1) {
+          pasteRef.current += raw;
+          return;
+        }
+        // End marker found: flush accumulated content.
+        pasteRef.current += raw.slice(0, endIdx);
         const pasted = pasteRef.current;
         pasteRef.current = null;
-        if (pasted != null && pasted.length > 0) {
-          // Normalize any line-ending variant to \n.
+        if (pasted.length > 0) {
           const normalized = pasted.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
           handlerRef.current(normalized, {
             upArrow: false,
@@ -180,15 +188,73 @@ export function useTerminalInput(
             paste: true,
           });
         }
-        return;
-      }
-      if (typeof pasteRef.current === "string") {
-        pasteRef.current += raw;
+        // Process any text after the end marker as normal input.
+        const after = raw.slice(endIdx + BRACKETED_PASTE_END.length);
+        if (after.length > 0) {
+          const { input, key } = parseTerminalInput(after);
+          handlerRef.current(input, key);
+        }
         return;
       }
 
-      const { input, key } = parseTerminalInput(data);
-      handlerRef.current(input, key);
+      // Not in paste mode: look for a paste start marker.
+      const startIdx = raw.indexOf(BRACKETED_PASTE_START);
+      if (startIdx === -1) {
+        // No paste marker: normal input.
+        const { input, key } = parseTerminalInput(data);
+        handlerRef.current(input, key);
+        return;
+      }
+
+      // Process text before the start marker as normal input.
+      if (startIdx > 0) {
+        const { input, key } = parseTerminalInput(raw.slice(0, startIdx));
+        handlerRef.current(input, key);
+      }
+
+      // Text after the start marker.
+      const afterStart = raw.slice(startIdx + BRACKETED_PASTE_START.length);
+
+      // Check if end marker is also in this chunk.
+      const endIdx = afterStart.indexOf(BRACKETED_PASTE_END);
+      if (endIdx !== -1) {
+        // Complete paste within this chunk.
+        const pasted = afterStart.slice(0, endIdx);
+        if (pasted.length > 0) {
+          const normalized = pasted.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          handlerRef.current(normalized, {
+            upArrow: false,
+            downArrow: false,
+            leftArrow: false,
+            rightArrow: false,
+            home: false,
+            end: false,
+            pageDown: false,
+            pageUp: false,
+            return: false,
+            escape: false,
+            ctrl: false,
+            shift: false,
+            tab: false,
+            backspace: false,
+            delete: false,
+            meta: false,
+            focusIn: false,
+            focusOut: false,
+            paste: true,
+          });
+        }
+        // Process text after the end marker.
+        const after = afterStart.slice(endIdx + BRACKETED_PASTE_END.length);
+        if (after.length > 0) {
+          const { input, key } = parseTerminalInput(after);
+          handlerRef.current(input, key);
+        }
+        return;
+      }
+
+      // End marker not found: start accumulating.
+      pasteRef.current = afterStart;
     };
 
     stdin?.on("data", handleData);
