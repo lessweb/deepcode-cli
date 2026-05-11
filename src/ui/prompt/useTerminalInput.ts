@@ -20,6 +20,8 @@ export type InputKey = {
   meta: boolean;
   focusIn: boolean;
   focusOut: boolean;
+  /** The input was received as part of a bracketed paste (sent by the terminal). */
+  paste: boolean;
 };
 
 const BACKSPACE_BYTES = new Set(["\u007F", "\b"]);
@@ -34,6 +36,9 @@ const META_LEFT_SEQUENCES = new Set(["\u001B[1;3D", "\u001B[3D", "\u001Bb"]);
 const META_RIGHT_SEQUENCES = new Set(["\u001B[1;3C", "\u001B[3C", "\u001Bf"]);
 const TERMINAL_FOCUS_IN = "\u001B[I";
 const TERMINAL_FOCUS_OUT = "\u001B[O";
+/** Bracketed paste mode markers: start and end delimiters sent by terminals. */
+const BRACKETED_PASTE_START = "\u001B[200~";
+const BRACKETED_PASTE_END = "\u001B[201~";
 
 export function parseTerminalInput(data: Buffer | string): { input: string; key: InputKey } {
   const raw = String(data);
@@ -57,6 +62,7 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
     meta: META_LEFT_SEQUENCES.has(raw) || META_RIGHT_SEQUENCES.has(raw) || META_RETURN_SEQUENCES.has(raw),
     focusIn: raw === TERMINAL_FOCUS_IN,
     focusOut: raw === TERMINAL_FOCUS_OUT,
+    paste: false,
   };
 
   if (input <= "\u001A" && !key.return) {
@@ -112,13 +118,22 @@ export function useTerminalInput(
   const handlerRef = useRef(inputHandler);
   handlerRef.current = inputHandler;
 
+  // Accumulates text between bracketed paste start and end markers.
+  // Non-null means a paste is in progress.
+  const pasteRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!isActive) {
       return;
     }
     setRawMode(true);
+    // Enable bracketed paste mode so the terminal wraps pasted text in
+    // \u001B[200~ / \u001B[201~ markers, allowing us to deliver the full
+    // paste as a single atomic input instead of fragmented key events.
+    process.stdout.write("\u001B[?2004h");
     return () => {
       setRawMode(false);
+      process.stdout.write("\u001B[?2004l");
     };
   }, [isActive, setRawMode]);
 
@@ -127,6 +142,51 @@ export function useTerminalInput(
       return;
     }
     const handleData = (data: Buffer | string) => {
+      const raw = String(data);
+
+      // Bracketed paste mode: the terminal wraps pasted content in
+      // \u001B[200~ (start) and \u001B[201~ (end).  Accumulate everything
+      // between them and deliver as a single input chunk with
+      // normalized line endings.
+      if (raw === BRACKETED_PASTE_START) {
+        pasteRef.current = "";
+        return;
+      }
+      if (raw === BRACKETED_PASTE_END) {
+        const pasted = pasteRef.current;
+        pasteRef.current = null;
+        if (pasted != null && pasted.length > 0) {
+          // Normalize any line-ending variant to \n.
+          const normalized = pasted.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+          handlerRef.current(normalized, {
+            upArrow: false,
+            downArrow: false,
+            leftArrow: false,
+            rightArrow: false,
+            home: false,
+            end: false,
+            pageDown: false,
+            pageUp: false,
+            return: false,
+            escape: false,
+            ctrl: false,
+            shift: false,
+            tab: false,
+            backspace: false,
+            delete: false,
+            meta: false,
+            focusIn: false,
+            focusOut: false,
+            paste: true,
+          });
+        }
+        return;
+      }
+      if (typeof pasteRef.current === "string") {
+        pasteRef.current += raw;
+        return;
+      }
+
       const { input, key } = parseTerminalInput(data);
       handlerRef.current(input, key);
     };
