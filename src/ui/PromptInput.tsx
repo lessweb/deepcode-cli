@@ -482,7 +482,7 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
     if (item.kind === "init") {
-      onSubmit({ text: "/init", imageUrls: [] });
+      onSubmit(buildInitPromptSubmission(selectedSkills));
       setBuffer(EMPTY_BUFFER);
       setImageUrls([]);
       setSelectedSkills([]);
@@ -647,6 +647,14 @@ export function addUniqueSkill(skills: SkillInfo[], skill: SkillInfo): SkillInfo
 
 export function toggleSkillSelection(skills: SkillInfo[], skill: SkillInfo): SkillInfo[] {
   return isSkillSelected(skills, skill) ? skills.filter((item) => item.name !== skill.name) : [...skills, skill];
+}
+
+export function buildInitPromptSubmission(selectedSkills: SkillInfo[]): PromptSubmission {
+  return {
+    text: "/init",
+    imageUrls: [],
+    selectedSkills: selectedSkills.length > 0 ? selectedSkills : undefined,
+  };
 }
 
 export function removeCurrentSlashToken(state: PromptBufferState): PromptBufferState {

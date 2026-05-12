@@ -32,7 +32,7 @@ export function findGitBashPath(): string {
   }
 
   throw new Error(
-    "Deep Code on Windows requires Git Bash. Install Git for Windows and ensure git.exe is available in PATH."
+    "Deep Code on Windows requires Git Bash. Install Git Bash for Windows and ensure bash.exe is available in PATH."
   );
 }
 

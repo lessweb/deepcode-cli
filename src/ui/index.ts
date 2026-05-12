@@ -12,6 +12,7 @@ export {
   removeCurrentSlashToken,
   isClearImageAttachmentsShortcut,
   renderBufferWithCursor,
+  buildInitPromptSubmission,
   useTerminalInput,
   parseTerminalInput,
   type PromptSubmission,

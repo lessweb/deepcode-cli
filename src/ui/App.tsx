@@ -248,6 +248,37 @@ export function App({ projectRoot, version = "", onRestart }: AppProps): React.R
     const timer = setTimeout(() => setStableColumns(columns), 100);
     return () => clearTimeout(timer);
   }, [columns]);
+  const lastRenderedColumnsRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!stdout?.isTTY) {
+      return;
+    }
+    if (stableColumns <= 0) {
+      return;
+    }
+    if (lastRenderedColumnsRef.current === null) {
+      lastRenderedColumnsRef.current = stableColumns;
+      return;
+    }
+    if (lastRenderedColumnsRef.current === stableColumns) {
+      return;
+    }
+    lastRenderedColumnsRef.current = stableColumns;
+
+    // Force full redraw on terminal resize to avoid stale wrapped rows.
+    writeRef.current("\u001B[2J\u001B[H");
+    setMessages([]);
+    setShowWelcome(false);
+    setWelcomeNonce((n) => n + 1);
+
+    const activeSessionId = sessionManager.getActiveSessionId();
+    const nextMessages =
+      activeSessionId && !busy ? loadVisibleMessages(sessionManager, activeSessionId) : messagesRef.current;
+    setTimeout(() => {
+      setMessages(nextMessages);
+      setShowWelcome(true);
+    }, 0);
+  }, [busy, sessionManager, stableColumns, stdout]);
   const screenWidth = useMemo(() => stableColumns ?? stdout?.columns ?? 80, [stableColumns, stdout]);
   const promptHistory = useMemo(() => {
     return messages

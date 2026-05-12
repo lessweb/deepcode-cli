@@ -17,6 +17,7 @@ import {
   removeCurrentSlashToken,
   toggleSkillSelection,
   renderBufferWithCursor,
+  buildInitPromptSubmission,
 } from "../ui";
 import type { SkillInfo } from "../session";
 
@@ -89,6 +90,17 @@ test("formatImageAttachmentStatus formats the image count label", () => {
   assert.equal(formatImageAttachmentStatus(1), "📎 1 image attached");
   assert.equal(formatImageAttachmentStatus(2), "📎 2 images attached");
   assert.equal(IMAGE_ATTACHMENT_CLEAR_HINT, "ctrl+x clear images");
+});
+
+test("buildInitPromptSubmission preserves manually selected skills", () => {
+  const skill: SkillInfo = { name: "skill-writer", path: "/skills/skill-writer/SKILL.md", description: "Write skills" };
+
+  assert.deepEqual(buildInitPromptSubmission([skill]), {
+    text: "/init",
+    imageUrls: [],
+    selectedSkills: [skill],
+  });
+  assert.deepEqual(buildInitPromptSubmission([]), { text: "/init", imageUrls: [], selectedSkills: undefined });
 });
 
 test("selected skill helpers format, dedupe, toggle, and clear slash tokens", () => {
