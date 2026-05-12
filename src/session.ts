@@ -779,7 +779,6 @@ The candidate skills are as follows:\n\n`;
     this.reportNewPrompt();
     const signal = controller?.signal;
     this.throwIfAborted(signal);
-    this.applyInitCommandPrompt(userPrompt);
 
     if (userPrompt.text) {
       const skills = await this.listSkills();
@@ -870,7 +869,6 @@ ${skillMd}
   async replySession(sessionId: string, userPrompt: UserPromptContent, controller?: AbortController): Promise<void> {
     const signal = controller?.signal;
     this.throwIfAborted(signal);
-    this.applyInitCommandPrompt(userPrompt);
     const now = new Date().toISOString();
     const updated = this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
@@ -1461,13 +1459,6 @@ ${skillMd}
     };
   }
 
-  private applyInitCommandPrompt(userPrompt: UserPromptContent): void {
-    if (userPrompt.text !== "/init") {
-      return;
-    }
-    userPrompt.text = this.renderInitCommandPrompt();
-  }
-
   private renderInitCommandPrompt(): string {
     const templatePath = path.join(getExtensionRoot(), "docs", "prompts", "init_command.md.ejs");
     const template = fs.readFileSync(templatePath, "utf8");
@@ -1693,9 +1684,10 @@ ${skillMd}
   }
 
   private sessionMessageToOpenAIMessage(message: SessionMessage, thinkingEnabled: boolean): ChatCompletionMessageParam {
+    const content = this.renderOpenAIMessageContent(message);
     const base: ChatCompletionMessageParam = {
       role: message.role,
-      content: message.content ?? "",
+      content,
     } as ChatCompletionMessageParam;
 
     const messageParams = message.messageParams as
@@ -1718,8 +1710,8 @@ ${skillMd}
 
     if ((message.role === "user" || message.role === "system") && message.contentParams) {
       const contentParts: ChatCompletionContentPart[] = [];
-      if (message.content) {
-        contentParts.push({ type: "text", text: message.content });
+      if (content) {
+        contentParts.push({ type: "text", text: content });
       }
       const params = Array.isArray(message.contentParams) ? message.contentParams : [message.contentParams];
       for (const param of params) {
@@ -1727,12 +1719,18 @@ ${skillMd}
           contentParts.push(param as ChatCompletionContentPart);
         }
       }
-      const contentValue: string | ChatCompletionContentPart[] =
-        contentParts.length > 0 ? contentParts : (message.content ?? "");
+      const contentValue: string | ChatCompletionContentPart[] = contentParts.length > 0 ? contentParts : content;
       (base as { content: string | ChatCompletionContentPart[] }).content = contentValue;
     }
 
     return base;
+  }
+
+  private renderOpenAIMessageContent(message: SessionMessage): string {
+    if (message.role === "user" && message.content === "/init") {
+      return this.renderInitCommandPrompt();
+    }
+    return message.content ?? "";
   }
 
   private pairToolMessages(messages: SessionMessage[]): Map<string, number> {

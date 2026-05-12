@@ -322,7 +322,7 @@ test("SessionManager lists project skills from .agents with legacy .deepcode com
   assert.equal(sharedSkill?.description, "Project .agents skill");
 });
 
-test("createSession expands /init with the active .deepcode project AGENTS path", async () => {
+test("createSession stores /init and sends the active .deepcode project AGENTS path to the LLM", async () => {
   const workspace = createTempDir("deepcode-init-deepcode-workspace-");
   const home = createTempDir("deepcode-init-deepcode-home-");
   process.env.HOME = home;
@@ -338,17 +338,23 @@ test("createSession expands /init with the active .deepcode project AGENTS path"
   const sessionId = await manager.createSession({ text: "/init" });
   const messages = manager.listSessionMessages(sessionId);
   const userMessage = messages.find((message) => message.role === "user");
+  const openAIMessages = (manager as any).buildOpenAIMessages(messages, false) as Array<{
+    role: string;
+    content: string;
+  }>;
+  const openAIUserMessage = openAIMessages.find((message) => message.role === "user");
   const systemContents = messages
     .filter((message) => message.role === "system")
     .map((message) => message.content ?? "");
 
-  assert.match(userMessage?.content ?? "", /Update \.\/\.deepcode\/AGENTS\.md/);
-  assert.doesNotMatch(userMessage?.content ?? "", /Update \.\/AGENTS\.md/);
+  assert.equal(userMessage?.content, "/init");
+  assert.match(openAIUserMessage?.content ?? "", /Update \.\/\.deepcode\/AGENTS\.md/);
+  assert.doesNotMatch(openAIUserMessage?.content ?? "", /Update \.\/AGENTS\.md/);
   assert.ok(systemContents.includes("deepcode project instructions"));
   assert.ok(!systemContents.includes("root project instructions"));
 });
 
-test("replySession expands /init with the active root project AGENTS path", async () => {
+test("replySession stores /init and sends the active root project AGENTS path to the LLM", async () => {
   const workspace = createTempDir("deepcode-init-root-workspace-");
   const home = createTempDir("deepcode-init-root-home-");
   process.env.HOME = home;
@@ -361,13 +367,21 @@ test("replySession expands /init with the active root project AGENTS path", asyn
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   await manager.replySession(sessionId, { text: "/init" });
-  const userMessages = manager.listSessionMessages(sessionId).filter((message) => message.role === "user");
+  const messages = manager.listSessionMessages(sessionId);
+  const userMessages = messages.filter((message) => message.role === "user");
   const replyMessage = userMessages[userMessages.length - 1];
+  const openAIMessages = (manager as any).buildOpenAIMessages(messages, false) as Array<{
+    role: string;
+    content: string;
+  }>;
+  const openAIUserMessages = openAIMessages.filter((message) => message.role === "user");
+  const openAIReplyMessage = openAIUserMessages[openAIUserMessages.length - 1];
 
-  assert.match(replyMessage?.content ?? "", /Update \.\/AGENTS\.md/);
+  assert.equal(replyMessage?.content, "/init");
+  assert.match(openAIReplyMessage?.content ?? "", /Update \.\/AGENTS\.md/);
 });
 
-test("createSession expands /init as generate when no project AGENTS file is effective", async () => {
+test("createSession stores /init and sends generate prompt when no project AGENTS file is effective", async () => {
   const workspace = createTempDir("deepcode-init-generate-workspace-");
   const home = createTempDir("deepcode-init-generate-home-");
   process.env.HOME = home;
@@ -380,10 +394,17 @@ test("createSession expands /init as generate when no project AGENTS file is eff
   (manager as any).activateSession = async () => {};
 
   const sessionId = await manager.createSession({ text: "/init" });
-  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  const messages = manager.listSessionMessages(sessionId);
+  const userMessage = messages.find((message) => message.role === "user");
+  const openAIMessages = (manager as any).buildOpenAIMessages(messages, false) as Array<{
+    role: string;
+    content: string;
+  }>;
+  const openAIUserMessage = openAIMessages.find((message) => message.role === "user");
 
-  assert.match(userMessage?.content ?? "", /Generate a file named \.\/AGENTS\.md/);
-  assert.doesNotMatch(userMessage?.content ?? "", /Update \.\/AGENTS\.md/);
+  assert.equal(userMessage?.content, "/init");
+  assert.match(openAIUserMessage?.content ?? "", /Generate a file named \.\/AGENTS\.md/);
+  assert.doesNotMatch(openAIUserMessage?.content ?? "", /Update \.\/AGENTS\.md/);
 });
 
 test("createSession reports a new prompt with the machineId token", async () => {

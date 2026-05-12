@@ -1,6 +1,6 @@
 import type { SkillInfo } from "../session";
 
-export type SlashCommandKind = "skill" | "skills" | "new" | "init" | "resume" | "exit";
+export type SlashCommandKind = "skill" | "skills" | "model" | "new" | "init" | "resume" | "exit";
 
 export type SlashCommandItem = {
   kind: SlashCommandKind;
@@ -16,6 +16,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "skills",
     label: "/skills",
     description: "List available skills",
+  },
+  {
+    kind: "model",
+    name: "model",
+    label: "/model",
+    description: "Select model, thinking mode and thinking effort",
   },
   {
     kind: "new",

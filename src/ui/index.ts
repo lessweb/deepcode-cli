@@ -1,4 +1,11 @@
-export { App, readSettings, resolveCurrentSettings, createOpenAIClient } from "./App";
+export {
+  App,
+  readSettings,
+  writeSettings,
+  writeModelConfigSelection,
+  resolveCurrentSettings,
+  createOpenAIClient,
+} from "./App";
 export { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 export { MessageView, parseDiffPreview } from "./MessageView";
 export {
@@ -13,6 +20,9 @@ export {
   isClearImageAttachmentsShortcut,
   renderBufferWithCursor,
   buildInitPromptSubmission,
+  getThinkingOptionIndex,
+  MODEL_COMMAND_MODELS,
+  MODEL_COMMAND_THINKING_OPTIONS,
   useTerminalInput,
   parseTerminalInput,
   type PromptSubmission,
@@ -50,6 +60,7 @@ export {
   moveLineEnd,
   killLine,
   deleteWordBefore,
+  deleteWordAfter,
   reset,
   isEmpty,
   getCurrentSlashToken,

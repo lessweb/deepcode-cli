@@ -61,6 +61,20 @@ test("parseTerminalInput recognizes word navigation modifiers", () => {
   assert.equal(metaRight.key.meta, true);
 });
 
+test("parseTerminalInput keeps DEL payload for meta+backspace", () => {
+  const { input, key } = parseTerminalInput("\u001B\u007F");
+  assert.equal(input, "\u007F");
+  assert.equal(key.meta, true);
+  assert.equal(key.backspace, false);
+});
+
+test("parseTerminalInput keeps BS payload for meta+backspace", () => {
+  const { input, key } = parseTerminalInput("\u001B\b");
+  assert.equal(input, "\b");
+  assert.equal(key.meta, true);
+  assert.equal(key.backspace, false);
+});
+
 test("parseTerminalInput recognizes shifted return sequences", () => {
   const { input, key } = parseTerminalInput("\u001B\r");
   assert.equal(input, "\r");

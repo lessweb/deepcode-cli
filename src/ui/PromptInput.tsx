@@ -6,6 +6,7 @@ import {
   backspace,
   deleteForward,
   deleteWordBefore,
+  deleteWordAfter,
   getCurrentSlashToken,
   insertText,
   isEmpty,
@@ -33,6 +34,7 @@ import { useTerminalInput } from "./prompt";
 import type { InputKey } from "./prompt";
 import { useHiddenTerminalCursor, useTerminalFocusReporting } from "./prompt";
 import SlashCommandMenu from "./SlashCommandMenu";
+import type { ModelConfigSelection, ReasoningEffort } from "../settings";
 
 export type PromptSubmission = {
   text: string;
@@ -43,6 +45,7 @@ export type PromptSubmission = {
 
 type Props = {
   skills: SkillInfo[];
+  modelConfig: ModelConfigSelection;
   screenWidth: number;
   promptHistory: string[];
   busy: boolean;
@@ -50,10 +53,26 @@ type Props = {
   disabled?: boolean;
   placeholder?: string;
   onSubmit: (submission: PromptSubmission) => void;
+  onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
   onInterrupt: () => void;
 };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+export const MODEL_COMMAND_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"] as const;
+
+type ThinkingModeOption = {
+  label: string;
+  thinkingEnabled: boolean;
+  reasoningEffort?: ReasoningEffort;
+};
+
+export const MODEL_COMMAND_THINKING_OPTIONS: ThinkingModeOption[] = [
+  { label: "Thinking mode [max]", thinkingEnabled: true, reasoningEffort: "max" },
+  { label: "Thinking mode [high]", thinkingEnabled: true, reasoningEffort: "high" },
+  { label: "No thinking", thinkingEnabled: false },
+];
+
+type ModelDropdownStep = "model" | "thinking";
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: boolean }): React.ReactElement {
   const [spinnerIndex, setSpinnerIndex] = useState(0);
@@ -75,6 +94,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
 
 export const PromptInput = React.memo(function PromptInput({
   skills,
+  modelConfig,
   screenWidth,
   promptHistory,
   busy,
@@ -82,6 +102,7 @@ export const PromptInput = React.memo(function PromptInput({
   disabled,
   placeholder,
   onSubmit,
+  onModelConfigChange,
   onInterrupt,
 }: Props): React.ReactElement {
   const { exit } = useApp();
@@ -94,6 +115,9 @@ export const PromptInput = React.memo(function PromptInput({
   const [menuIndex, setMenuIndex] = useState(0);
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [skillsDropdownIndex, setSkillsDropdownIndex] = useState(0);
+  const [modelDropdownStep, setModelDropdownStep] = useState<ModelDropdownStep | null>(null);
+  const [modelDropdownIndex, setModelDropdownIndex] = useState(0);
+  const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [historyCursor, setHistoryCursor] = useState(-1);
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string | null>(null);
   const [hasTerminalFocus, setHasTerminalFocus] = useState(true);
@@ -102,8 +126,9 @@ export const PromptInput = React.memo(function PromptInput({
   const slashItems = React.useMemo(() => buildSlashCommands(skills), [skills]);
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
-    () => (showSkillsDropdown ? [] : slashToken ? filterSlashCommands(slashItems, slashToken) : []),
-    [showSkillsDropdown, slashToken, slashItems]
+    () =>
+      showSkillsDropdown || modelDropdownStep ? [] : slashToken ? filterSlashCommands(slashItems, slashToken) : [],
+    [showSkillsDropdown, modelDropdownStep, slashToken, slashItems]
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
@@ -134,6 +159,17 @@ export const PromptInput = React.memo(function PromptInput({
   }, [skills.length, skillsDropdownIndex]);
 
   useEffect(() => {
+    if (!modelDropdownStep) {
+      return;
+    }
+    const optionCount =
+      modelDropdownStep === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
+    if (modelDropdownIndex >= optionCount) {
+      setModelDropdownIndex(Math.max(0, optionCount - 1));
+    }
+  }, [modelDropdownIndex, modelDropdownStep]);
+
+  useEffect(() => {
     if (!statusMessage) {
       return;
     }
@@ -162,6 +198,10 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.escape) {
+        if (modelDropdownStep) {
+          closeModelDropdown();
+          return;
+        }
         if (showSkillsDropdown) {
           setShowSkillsDropdown(false);
           return;
@@ -232,6 +272,27 @@ export const PromptInput = React.memo(function PromptInput({
             setShowSkillsDropdown(false);
             return;
           }
+        }
+      }
+
+      if (modelDropdownStep) {
+        const optionCount =
+          modelDropdownStep === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
+        if (key.upArrow) {
+          setModelDropdownIndex((idx) => (idx - 1 + optionCount) % optionCount);
+          return;
+        }
+        if (key.downArrow) {
+          setModelDropdownIndex((idx) => (idx + 1) % optionCount);
+          return;
+        }
+        if ((input === " " && !key.ctrl && !key.meta) || (key.return && !key.shift && !key.meta)) {
+          selectModelDropdownItem();
+          return;
+        }
+        if (key.tab) {
+          closeModelDropdown();
+          return;
         }
       }
 
@@ -400,11 +461,18 @@ export const PromptInput = React.memo(function PromptInput({
         updateBuffer((s) => deleteWordBefore(s));
         return;
       }
+      if (key.meta && (input === "d" || input === "D")) {
+        updateBuffer((s) => deleteWordAfter(s));
+        return;
+      }
+      if (key.meta && (input === "\u007F" || input === "\b")) {
+        updateBuffer((s) => deleteWordBefore(s));
+        return;
+      }
       if (key.ctrl && (input === "j" || input === "J")) {
         updateBuffer((s) => insertText(s, "\n"));
         return;
       }
-
       if (input.startsWith("\u001B")) {
         // Unhandled escape sequence (e.g. function keys); ignore to avoid inserting garbage.
         return;
@@ -471,6 +539,11 @@ export const PromptInput = React.memo(function PromptInput({
     if (item.kind === "skills") {
       clearSlashToken();
       setShowSkillsDropdown(true);
+      return;
+    }
+    if (item.kind === "model") {
+      clearSlashToken();
+      openModelDropdown();
       return;
     }
     if (item.kind === "new") {
@@ -547,8 +620,61 @@ export const PromptInput = React.memo(function PromptInput({
     setBuffer((state) => removeCurrentSlashToken(state));
   }
 
+  function openModelDropdown(): void {
+    const currentModelIndex = MODEL_COMMAND_MODELS.findIndex((model) => model === modelConfig.model);
+    setPendingModel(null);
+    setModelDropdownStep("model");
+    setModelDropdownIndex(currentModelIndex >= 0 ? currentModelIndex : 0);
+    setShowSkillsDropdown(false);
+  }
+
+  function closeModelDropdown(): void {
+    setModelDropdownStep(null);
+    setPendingModel(null);
+  }
+
+  function selectModelDropdownItem(): void {
+    if (modelDropdownStep === "model") {
+      const model = MODEL_COMMAND_MODELS[modelDropdownIndex] ?? modelConfig.model;
+      setPendingModel(model);
+      setModelDropdownStep("thinking");
+      setModelDropdownIndex(getThinkingOptionIndex(modelConfig));
+      return;
+    }
+
+    const option = MODEL_COMMAND_THINKING_OPTIONS[modelDropdownIndex] ?? MODEL_COMMAND_THINKING_OPTIONS[0];
+    const selection: ModelConfigSelection = {
+      model: pendingModel ?? modelConfig.model,
+      thinkingEnabled: option.thinkingEnabled,
+      reasoningEffort: option.reasoningEffort ?? modelConfig.reasoningEffort,
+    };
+    closeModelDropdown();
+    Promise.resolve(onModelConfigChange(selection))
+      .then((message) => {
+        if (message) {
+          setStatusMessage(message);
+        }
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        setStatusMessage(`Failed to update model settings: ${message}`);
+      });
+  }
+
   const visibleSkillStart = Math.min(Math.max(0, skillsDropdownIndex - 7), Math.max(0, skills.length - 8));
   const visibleSkills = skills.slice(visibleSkillStart, visibleSkillStart + 8);
+  const modelDropdownItems =
+    modelDropdownStep === "model"
+      ? MODEL_COMMAND_MODELS.map((model) => ({
+          label: model,
+          selected: model === (pendingModel ?? modelConfig.model),
+          description: model === modelConfig.model ? "current model" : "",
+        }))
+      : MODEL_COMMAND_THINKING_OPTIONS.map((option) => ({
+          label: option.label,
+          selected: getThinkingOptionIndex(modelConfig) === MODEL_COMMAND_THINKING_OPTIONS.indexOf(option),
+          description: option.thinkingEnabled ? `reasoningEffort: ${option.reasoningEffort}` : "thinking disabled",
+        }));
 
   return (
     <Box flexDirection="column" width={screenWidth}>
@@ -607,6 +733,28 @@ export const PromptInput = React.memo(function PromptInput({
           <Text dimColor>space toggle · enter toggle · esc to close</Text>
         </Box>
       ) : null}
+      {modelDropdownStep ? (
+        <Box flexDirection="column" marginBottom={1}>
+          <Text color="magenta" bold>
+            {modelDropdownStep === "model" ? "Select Model" : "Select Thinking Mode"}
+          </Text>
+          {modelDropdownItems.map((item, idx) => {
+            const active = idx === modelDropdownIndex;
+            return (
+              <Text key={item.label} color={active ? "cyanBright" : undefined} wrap="truncate-end">
+                {active ? "› " : "  "}
+                {item.selected ? "●" : "○"} <Text bold>{item.label}</Text>
+                {item.description ? <Text dimColor>{`  ${item.description}`}</Text> : null}
+              </Text>
+            );
+          })}
+          <Text dimColor>
+            {modelDropdownStep === "model"
+              ? "space/enter select model · esc to cancel"
+              : "space/enter apply · esc to cancel"}
+          </Text>
+        </Box>
+      ) : null}
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showMenu && (
         <Box>
@@ -655,6 +803,18 @@ export function buildInitPromptSubmission(selectedSkills: SkillInfo[]): PromptSu
     imageUrls: [],
     selectedSkills: selectedSkills.length > 0 ? selectedSkills : undefined,
   };
+}
+
+export function getThinkingOptionIndex(
+  config: Pick<ModelConfigSelection, "thinkingEnabled" | "reasoningEffort">
+): number {
+  const index = MODEL_COMMAND_THINKING_OPTIONS.findIndex((option) => {
+    if (!config.thinkingEnabled) {
+      return !option.thinkingEnabled;
+    }
+    return option.thinkingEnabled && option.reasoningEffort === config.reasoningEffort;
+  });
+  return index >= 0 ? index : 0;
 }
 
 export function removeCurrentSlashToken(state: PromptBufferState): PromptBufferState {
