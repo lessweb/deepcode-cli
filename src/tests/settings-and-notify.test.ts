@@ -33,6 +33,45 @@ test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool
   assert.equal(resolved.webSearchTool, "/tmp/web-search.sh");
 });
 
+test("resolveSettings uses DEEPSEEK_API_KEY when settings omit API_KEY", () => {
+  const resolved = resolveSettings(
+    {
+      env: {
+        MODEL: "deepseek-v4-pro",
+        BASE_URL: "https://api.deepseek.com",
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    {
+      DEEPSEEK_API_KEY: "  sk-from-env  ",
+    }
+  );
+
+  assert.equal(resolved.apiKey, "sk-from-env");
+});
+
+test("resolveSettings gives settings API_KEY priority over DEEPSEEK_API_KEY", () => {
+  const resolved = resolveSettings(
+    {
+      env: {
+        API_KEY: "sk-from-settings",
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    {
+      DEEPSEEK_API_KEY: "sk-from-env",
+    }
+  );
+
+  assert.equal(resolved.apiKey, "sk-from-settings");
+});
+
 test("resolveSettings gives top-level model priority over env MODEL", () => {
   const resolved = resolveSettings(
     {

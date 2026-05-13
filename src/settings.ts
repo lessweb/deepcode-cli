@@ -4,6 +4,7 @@ export type DeepcodingEnv = {
   MODEL?: string;
   BASE_URL?: string;
   API_KEY?: string;
+  DEEPSEEK_API_KEY?: string;
   THINKING?: string;
 };
 
@@ -61,9 +62,19 @@ function resolveThinkingEnabled(settings: DeepcodingSettings | null | undefined,
   return defaultsToThinkingMode(model);
 }
 
+function trimmedValue(value: string | undefined): string | undefined {
+  const trimmed = value?.trim();
+  return trimmed || undefined;
+}
+
+function resolveApiKey(env: DeepcodingEnv, runtimeEnv: NodeJS.ProcessEnv): string | undefined {
+  return trimmedValue(env.API_KEY) || trimmedValue(env.DEEPSEEK_API_KEY) || trimmedValue(runtimeEnv.DEEPSEEK_API_KEY);
+}
+
 export function resolveSettings(
   settings: DeepcodingSettings | null | undefined,
-  defaults: { model: string; baseURL: string }
+  defaults: { model: string; baseURL: string },
+  runtimeEnv: NodeJS.ProcessEnv = process.env
 ): ResolvedDeepcodingSettings {
   const env = settings?.env ?? {};
   const topLevelModel = typeof settings?.model === "string" ? settings.model.trim() : "";
@@ -74,7 +85,7 @@ export function resolveSettings(
   const mcpServers = settings?.mcpServers;
 
   return {
-    apiKey: env.API_KEY?.trim(),
+    apiKey: resolveApiKey(env, runtimeEnv),
     baseURL: env.BASE_URL?.trim() || defaults.baseURL,
     model,
     thinkingEnabled: resolveThinkingEnabled(settings, model),
