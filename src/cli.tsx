@@ -64,19 +64,22 @@ async function main(): Promise<void> {
   const restartRef: { current: (() => void) | null } = { current: null };
 
   function startApp(): void {
+    let restarting = false;
     const inkInstance = render(
       <App projectRoot={projectRoot} version={packageInfo.version} onRestart={() => restartRef.current?.()} />,
       { exitOnCtrlC: false }
     );
 
     restartRef.current = () => {
+      restarting = true;
       process.stdout.write("\u001B[2J\u001B[3J\u001B[H");
       inkInstance.unmount();
       startApp();
     };
 
     inkInstance.waitUntilExit().then(() => {
-      if (!restartRef.current) {
+      if (!restarting) {
+        restartRef.current = null;
         process.exit(0);
       }
     });

@@ -419,7 +419,7 @@ export type ToolDefinition = {
   };
 };
 
-export function getTools(_options: PromptToolOptions = {}): ToolDefinition[] {
+export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDefinition[] = []): ToolDefinition[] {
   const tools: ToolDefinition[] = [
     {
       type: "function",
@@ -609,6 +609,10 @@ export function getTools(_options: PromptToolOptions = {}): ToolDefinition[] {
       },
     },
   });
+
+  for (const tool of externalTools) {
+    tools.push(tool);
+  }
 
   return tools;
 }

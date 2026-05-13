@@ -9,8 +9,9 @@ import type { ChatCompletionMessageParam, ChatCompletionContentPart } from "open
 import { launchNotifyScript } from "./notify";
 import { buildThinkingRequestOptions } from "./openai-thinking";
 import { DEEPSEEK_V4_MODELS } from "./model-capabilities";
-import { getCompactPrompt, getSystemPrompt, getTools, AGENT_DRIFT_GUARD_SKILL } from "./prompt";
+import { getCompactPrompt, getSystemPrompt, getTools, AGENT_DRIFT_GUARD_SKILL, type ToolDefinition } from "./prompt";
 import { ToolExecutor, type CreateOpenAIClient } from "./tools/executor";
+import { McpManager } from "./tools/mcp-manager";
 import { logApiError } from "./error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./debug-logger";
 
@@ -180,6 +181,8 @@ export class SessionManager {
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
   private readonly toolExecutor: ToolExecutor;
+  private readonly mcpManager = new McpManager();
+  private mcpToolDefinitions: ToolDefinition[] = [];
 
   constructor(options: SessionManagerOptions) {
     this.projectRoot = options.projectRoot;
@@ -188,7 +191,22 @@ export class SessionManager {
     this.onAssistantMessage = options.onAssistantMessage;
     this.onSessionEntryUpdated = options.onSessionEntryUpdated;
     this.onLlmStreamProgress = options.onLlmStreamProgress;
-    this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient);
+    this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
+  }
+
+  async initMcpServers(
+    servers?: Record<string, { command: string; args?: string[]; env?: Record<string, string> }>
+  ): Promise<void> {
+    await this.mcpManager.initialize(servers);
+    this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
+  }
+
+  getMcpStatus() {
+    return this.mcpManager.getStatus();
+  }
+
+  dispose(): void {
+    this.mcpManager.disconnect();
   }
 
   private estimateStreamTokens(text: string): number {
@@ -999,7 +1017,7 @@ ${skillMd}
           {
             model,
             messages,
-            tools: getTools(this.getPromptToolOptions()),
+            tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
             ...thinkingOptions,
           },
           { signal: sessionController.signal },

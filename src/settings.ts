@@ -9,6 +9,12 @@ export type DeepcodingEnv = {
 
 export type ReasoningEffort = "high" | "max";
 
+export type McpServerConfig = {
+  command: string;
+  args?: string[];
+  env?: Record<string, string>;
+};
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   model?: string;
@@ -17,6 +23,7 @@ export type DeepcodingSettings = {
   debugLogEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  mcpServers?: Record<string, McpServerConfig>;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -28,6 +35,7 @@ export type ResolvedDeepcodingSettings = {
   debugLogEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  mcpServers?: Record<string, McpServerConfig>;
 };
 
 export type ModelConfigSelection = {
@@ -63,6 +71,8 @@ export function resolveSettings(
   const notify = typeof settings?.notify === "string" ? settings.notify.trim() : "";
   const webSearchTool = typeof settings?.webSearchTool === "string" ? settings.webSearchTool.trim() : "";
 
+  const mcpServers = settings?.mcpServers;
+
   return {
     apiKey: env.API_KEY?.trim(),
     baseURL: env.BASE_URL?.trim() || defaults.baseURL,
@@ -72,6 +82,7 @@ export function resolveSettings(
     debugLogEnabled: settings?.debugLogEnabled === true,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
+    mcpServers,
   };
 }
 

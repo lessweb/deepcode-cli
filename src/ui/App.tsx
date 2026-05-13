@@ -126,6 +126,17 @@ export function App({ projectRoot, version = "", onRestart }: AppProps): React.R
     void refreshSkills();
   }, [refreshSessionsList, refreshSkills]);
 
+  useEffect(() => {
+    const settings = resolveCurrentSettings();
+    void sessionManager.initMcpServers(settings.mcpServers);
+  }, [sessionManager]);
+
+  useEffect(() => {
+    return () => {
+      sessionManager.dispose();
+    };
+  }, [sessionManager]);
+
   const writeRef = useRef(write);
   writeRef.current = write;
   const handlePrompt = useCallback(
@@ -145,6 +156,7 @@ export function App({ projectRoot, version = "", onRestart }: AppProps): React.R
           process.stdout.write("\n\n");
           process.stdout.write(summary);
           process.stdout.write("\n\n");
+          sessionManager.dispose();
           exit();
         }, 0);
         return;
@@ -172,6 +184,38 @@ export function App({ projectRoot, version = "", onRestart }: AppProps): React.R
         setShowWelcome(false);
         refreshSessionsList();
         setView("session-list");
+        return;
+      }
+      if (submission.command === "mcp") {
+        process.stdout.write("\n");
+        process.stdout.write(chalk.bold.cyan("MCP Server Status\n"));
+        process.stdout.write(chalk.dim("─────────────────\n"));
+        const statuses = sessionManager.getMcpStatus();
+        if (statuses.length === 0) {
+          process.stdout.write(chalk.dim("  No MCP servers configured.\n"));
+        } else {
+          for (const s of statuses) {
+            const icon = s.connected ? chalk.green("✔") : chalk.red("✖");
+            process.stdout.write(`  ${icon} ${chalk.bold(s.name)}`);
+            if (s.connected) {
+              process.stdout.write(chalk.dim(`  (${s.toolCount} tools)`));
+            } else {
+              process.stdout.write(chalk.dim(`  — ${s.error ?? "failed"}`));
+            }
+            process.stdout.write("\n");
+            if (s.connected && s.tools.length > 0) {
+              for (const tool of s.tools) {
+                process.stdout.write(chalk.dim(`    - mcp__${s.name}__${tool}\n`));
+              }
+            }
+          }
+        }
+        process.stdout.write(chalk.dim("─────────────────\n"));
+        process.stdout.write(
+          chalk.dim(`  Total: ${statuses.filter((s) => s.connected).length} connected, `) +
+            chalk.dim(`${statuses.filter((s) => !s.connected).length} failed\n`)
+        );
+        process.stdout.write("\n");
         return;
       }
 

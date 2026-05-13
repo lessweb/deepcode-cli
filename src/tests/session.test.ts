@@ -322,6 +322,46 @@ test("SessionManager lists project skills from .agents with legacy .deepcode com
   assert.equal(sharedSkill?.description, "Project .agents skill");
 });
 
+test("SessionManager dispose disconnects MCP servers", async () => {
+  const workspace = createTempDir("deepcode-mcp-dispose-workspace-");
+  const serverPath = path.join(workspace, "mcp-server.cjs");
+  fs.writeFileSync(
+    serverPath,
+    `
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+rl.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (!("id" in request)) {
+    return;
+  }
+  if (request.method === "initialize") {
+    send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} } } });
+    return;
+  }
+  if (request.method === "tools/list") {
+    send({ jsonrpc: "2.0", id: request.id, result: { tools: [{ name: "echo", inputSchema: { type: "object", properties: {} } }] } });
+    return;
+  }
+  send({ jsonrpc: "2.0", id: request.id, result: { content: [] } });
+});
+`,
+    "utf8"
+  );
+
+  const manager = createSessionManager(workspace, "machine-id-mcp-dispose");
+  await manager.initMcpServers({ smoke: { command: process.execPath, args: [serverPath] } });
+
+  assert.deepEqual(manager.getMcpStatus(), [{ name: "smoke", connected: true, toolCount: 1, tools: ["echo"] }]);
+
+  manager.dispose();
+
+  assert.deepEqual(manager.getMcpStatus(), []);
+});
+
 test("createSession stores /init and sends the active .deepcode project AGENTS path to the LLM", async () => {
   const workspace = createTempDir("deepcode-init-deepcode-workspace-");
   const home = createTempDir("deepcode-init-deepcode-home-");
