@@ -598,7 +598,7 @@ The candidate skills are as follows:\n\n`;
       if (!fs.existsSync(root)) {
         return [];
       }
-      let entries: fs.Dirent[] = [];
+      let entries: fs.Dirent[];
       try {
         entries = fs.readdirSync(root, { withFileTypes: true });
       } catch {

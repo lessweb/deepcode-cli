@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
 import chalk from "chalk";
 import {
@@ -33,6 +33,7 @@ export type { InputKey } from "./prompt";
 import { useTerminalInput } from "./prompt";
 import type { InputKey } from "./prompt";
 import { useHiddenTerminalCursor, useTerminalFocusReporting } from "./prompt";
+import DropdownMenu from "./DropdownMenu";
 import SlashCommandMenu from "./SlashCommandMenu";
 import type { ModelConfigSelection, ReasoningEffort } from "../settings";
 
@@ -89,7 +90,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
   }, [busy]);
 
   const prefix = busy ? `${SPINNER_FRAMES[spinnerIndex]} ` : "> ";
-  return <Text color={busy ? "yellow" : "green"}>{prefix}</Text>;
+  return <Text color={busy ? "yellow" : "#229ac3"}>{prefix}</Text>;
 });
 
 export const PromptInput = React.memo(function PromptInput({
@@ -669,8 +670,6 @@ export const PromptInput = React.memo(function PromptInput({
       });
   }
 
-  const visibleSkillStart = Math.min(Math.max(0, skillsDropdownIndex - 7), Math.max(0, skills.length - 8));
-  const visibleSkills = skills.slice(visibleSkillStart, visibleSkillStart + 8);
   const modelDropdownItems =
     modelDropdownStep === "model"
       ? MODEL_COMMAND_MODELS.map((model) => ({
@@ -683,6 +682,11 @@ export const PromptInput = React.memo(function PromptInput({
           selected: getThinkingOptionIndex(modelConfig) === MODEL_COMMAND_THINKING_OPTIONS.indexOf(option),
           description: option.thinkingEnabled ? `reasoningEffort: ${option.reasoningEffort}` : "thinking disabled",
         }));
+
+  const showFooterText = useMemo(
+    () => showMenu || showSkillsDropdown || modelDropdownStep !== null,
+    [showMenu, showSkillsDropdown, modelDropdownStep]
+  );
 
   return (
     <Box flexDirection="column" width={screenWidth}>
@@ -713,58 +717,45 @@ export const PromptInput = React.memo(function PromptInput({
         <Text>{renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder)}</Text>
       </Box>
       {showSkillsDropdown ? (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color="magenta" bold>
-            Select Skills
-          </Text>
-          {skills.length === 0 ? (
-            <Text dimColor>No skills found</Text>
-          ) : (
-            visibleSkills.map((skill, idx) => {
-              const skillIndex = visibleSkillStart + idx;
-              const selected = isSkillSelected(selectedSkills, skill);
-              const active = skillIndex === skillsDropdownIndex;
-              return (
-                <Text key={skill.path || skill.name} color={active ? "cyanBright" : undefined} wrap="truncate-end">
-                  {active ? "› " : "  "}
-                  {selected ? "●" : "○"} <Text bold>{skill.name}</Text>
-                  {skill.isLoaded ? <Text color="green"> ✓</Text> : null}
-                  <Text dimColor>{`  ${skill.path}`}</Text>
-                </Text>
-              );
-            })
-          )}
-          {visibleSkillStart > 0 ? <Text dimColor>… {visibleSkillStart} above</Text> : null}
-          {visibleSkillStart + visibleSkills.length < skills.length ? (
-            <Text dimColor>… {skills.length - visibleSkillStart - visibleSkills.length} more</Text>
-          ) : null}
-          <Text dimColor>space toggle · enter toggle · esc to close</Text>
-        </Box>
+        <DropdownMenu
+          width={screenWidth}
+          title="Select Skills"
+          helpText="space toggle · enter toggle · esc to close"
+          emptyText="No skills found"
+          items={skills.map((skill) => ({
+            key: skill.path || skill.name,
+            label: skill.name,
+            description: skill.path,
+            selected: isSkillSelected(selectedSkills, skill),
+            statusIndicator: skill.isLoaded ? { symbol: "✓", color: "green" } : undefined,
+          }))}
+          activeIndex={skillsDropdownIndex}
+          activeColor="#229ac3"
+          maxVisible={8}
+        />
       ) : null}
       {modelDropdownStep ? (
-        <Box flexDirection="column" marginBottom={1}>
-          <Text color="magenta" bold>
-            {modelDropdownStep === "model" ? "Select Model" : "Select Thinking Mode"}
-          </Text>
-          {modelDropdownItems.map((item, idx) => {
-            const active = idx === modelDropdownIndex;
-            return (
-              <Text key={item.label} color={active ? "cyanBright" : undefined} wrap="truncate-end">
-                {active ? "› " : "  "}
-                {item.selected ? "●" : "○"} <Text bold>{item.label}</Text>
-                {item.description ? <Text dimColor>{`  ${item.description}`}</Text> : null}
-              </Text>
-            );
-          })}
-          <Text dimColor>
-            {modelDropdownStep === "model"
+        <DropdownMenu
+          width={screenWidth}
+          title={modelDropdownStep === "model" ? "Select Model" : "Select Thinking Mode"}
+          helpText={
+            modelDropdownStep === "model"
               ? "space/enter select model · esc to cancel"
-              : "space/enter apply · esc to cancel"}
-          </Text>
-        </Box>
+              : "space/enter apply · esc to cancel"
+          }
+          items={modelDropdownItems.map((item) => ({
+            key: item.label,
+            label: item.label,
+            description: item.description,
+            selected: item.selected,
+          }))}
+          activeIndex={modelDropdownIndex}
+          activeColor="#229ac3"
+          maxVisible={8}
+        />
       ) : null}
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
-      {!showMenu && (
+      {!showFooterText && (
         <Box>
           <Text dimColor>{footerText}</Text>
         </Box>
