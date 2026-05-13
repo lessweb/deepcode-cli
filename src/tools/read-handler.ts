@@ -340,9 +340,18 @@ function loadGitignoreMatcher(projectRoot: string): ((relPath: string, isDir: bo
     };
   }
 
-  let content = "";
   try {
-    content = fs.readFileSync(gitignorePath, "utf8");
+    const content = fs.readFileSync(gitignorePath, "utf8");
+    const ig = ignore();
+    ig.add(DEFAULT_GITIGNORE);
+    ig.add(content);
+    return (relPath: string, isDir: boolean) => {
+      if (!relPath) {
+        return false;
+      }
+      const candidate = isDir ? `${relPath}/` : relPath;
+      return ig.ignores(candidate);
+    };
   } catch {
     const ig = ignore();
     ig.add(DEFAULT_GITIGNORE);
@@ -354,17 +363,6 @@ function loadGitignoreMatcher(projectRoot: string): ((relPath: string, isDir: bo
       return ig.ignores(candidate);
     };
   }
-
-  const ig = ignore();
-  ig.add(DEFAULT_GITIGNORE);
-  ig.add(content);
-  return (relPath: string, isDir: boolean) => {
-    if (!relPath) {
-      return false;
-    }
-    const candidate = isDir ? `${relPath}/` : relPath;
-    return ig.ignores(candidate);
-  };
 }
 
 function parseLineNumber(
