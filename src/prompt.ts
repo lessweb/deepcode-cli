@@ -274,10 +274,29 @@ function readToolDocs(extensionRoot: string, _options: PromptToolOptions = {}): 
   return docs.join("\n\n");
 }
 
-export function getSystemPrompt(projectRoot: string, options: PromptToolOptions = {}): string {
+export function getSystemPrompt(
+  projectRoot: string,
+  options: PromptToolOptions = {},
+  systemPromptFile?: string
+): string {
+  let basePrompt: string;
+
+  if (systemPromptFile) {
+    const resolvedPath = path.resolve(projectRoot, systemPromptFile);
+    try {
+      basePrompt = fs.readFileSync(resolvedPath, "utf8").trim();
+    } catch (err) {
+      throw new Error(
+        `Failed to read systemPromptFile at ${resolvedPath}: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  } else {
+    basePrompt = SYSTEM_PROMPT_BASE;
+  }
+
   const toolDocs = readToolDocs(getExtensionRoot(), options);
-  const basePrompt = toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
-  return `${basePrompt}\n\n${getRuntimeContext(projectRoot)}`;
+  const promptWithTools = toolDocs ? `${basePrompt}\n\n# Available Tools\n\n${toolDocs}` : basePrompt;
+  return `${promptWithTools}\n\n${getRuntimeContext(projectRoot)}`;
 }
 
 export function getCompactPrompt(sessionMessages: SessionMessage[]): string {

@@ -155,7 +155,11 @@ export type SkillInfo = {
 type SessionManagerOptions = {
   projectRoot: string;
   createOpenAIClient: CreateOpenAIClient;
-  getResolvedSettings: () => { webSearchTool?: string; mcpServers?: Record<string, McpServerConfig> };
+  getResolvedSettings: () => {
+    webSearchTool?: string;
+    systemPromptFile?: string;
+    mcpServers?: Record<string, McpServerConfig>;
+  };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -174,7 +178,11 @@ export type LlmStreamProgress = {
 export class SessionManager {
   private readonly projectRoot: string;
   private readonly createOpenAIClient: CreateOpenAIClient;
-  private readonly getResolvedSettings: () => { webSearchTool?: string; mcpServers?: Record<string, McpServerConfig> };
+  private readonly getResolvedSettings: () => {
+    webSearchTool?: string;
+    systemPromptFile?: string;
+    mcpServers?: Record<string, McpServerConfig>;
+  };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
@@ -846,7 +854,11 @@ The candidate skills are as follows:\n\n`;
     this.saveSessionsIndex(index);
     this.removeSessionMessages(droppedEntries.map((item) => item.id));
 
-    const systemPrompt = getSystemPrompt(this.projectRoot, this.getPromptToolOptions());
+    const systemPrompt = getSystemPrompt(
+      this.projectRoot,
+      this.getPromptToolOptions(),
+      this.getResolvedSettings().systemPromptFile
+    );
     const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
     this.appendSessionMessage(sessionId, systemMessage);
 

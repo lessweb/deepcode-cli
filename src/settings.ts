@@ -25,6 +25,7 @@ export type DeepcodingSettings = {
   debugLogEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  systemPromptFile?: string;
   mcpServers?: Record<string, McpServerConfig>;
 };
 
@@ -38,6 +39,7 @@ export type ResolvedDeepcodingSettings = {
   debugLogEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  systemPromptFile?: string;
   mcpServers?: Record<string, McpServerConfig>;
 };
 
@@ -222,6 +224,14 @@ export function resolveSettingsSources(
     trimString(userSettings?.webSearchTool) ||
     "";
 
+  const systemPromptFile =
+    trimString(systemEnv.SYSTEM_PROMPT_FILE) ||
+    trimString(projectSettings?.systemPromptFile) ||
+    trimString(projectEnv.SYSTEM_PROMPT_FILE) ||
+    trimString(userSettings?.systemPromptFile) ||
+    trimString(userEnv.SYSTEM_PROMPT_FILE) ||
+    "";
+
   return {
     env,
     apiKey: trimString(env.API_KEY) || undefined,
@@ -232,6 +242,7 @@ export function resolveSettingsSources(
     debugLogEnabled,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
+    systemPromptFile: systemPromptFile || undefined,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
   };
 }
