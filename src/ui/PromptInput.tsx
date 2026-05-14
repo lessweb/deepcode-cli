@@ -32,6 +32,8 @@ import { buildSlashCommands, filterSlashCommands, findExactSlashCommand } from "
 import type { SlashCommandItem } from "./slashCommands";
 import { readClipboardImageAsync } from "./clipboard";
 import type { SkillInfo } from "../session";
+import { resolvePromptFileReferences } from "../prompt-file-references";
+import type { PromptFileReference } from "../prompt-file-references";
 
 // Re-exported from prompt modules for backward compatibility
 export { useTerminalInput, parseTerminalInput } from "./prompt";
@@ -47,12 +49,14 @@ import DropdownMenu from "./DropdownMenu";
 export type PromptSubmission = {
   text: string;
   imageUrls: string[];
+  fileReferences?: PromptFileReference[];
   selectedSkills?: SkillInfo[];
   command?: "new" | "resume" | "mcp" | "exit";
 };
 
 type Props = {
   skills: SkillInfo[];
+  projectRoot: string;
   modelConfig: ModelConfigSelection;
   screenWidth: number;
   promptHistory: string[];
@@ -102,6 +106,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
 
 export const PromptInput = React.memo(function PromptInput({
   skills,
+  projectRoot,
   modelConfig,
   screenWidth,
   promptHistory,
@@ -655,9 +660,19 @@ export const PromptInput = React.memo(function PromptInput({
       }
     }
 
+    const resolvedFileReferences = resolvePromptFileReferences(buffer.text, projectRoot);
+    if (resolvedFileReferences.errors.length > 0) {
+      const [firstError] = resolvedFileReferences.errors;
+      const suffix =
+        resolvedFileReferences.errors.length > 1 ? ` (+${resolvedFileReferences.errors.length - 1} more)` : "";
+      setStatusMessage(`${firstError?.message ?? "Invalid file reference"}${suffix}`);
+      return;
+    }
+
     onSubmit({
       text: buffer.text,
       imageUrls,
+      fileReferences: resolvedFileReferences.references.length > 0 ? resolvedFileReferences.references : undefined,
       selectedSkills,
     });
     setBuffer(EMPTY_BUFFER);

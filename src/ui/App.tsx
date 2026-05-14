@@ -225,14 +225,17 @@ export function App({ projectRoot, version = "", onRestart }: AppProps): React.R
       const prompt: UserPromptContent = {
         text: submission.text,
         imageUrls: submission.imageUrls,
+        fileReferences: submission.fileReferences,
         skills:
           submission.selectedSkills && submission.selectedSkills.length > 0 ? submission.selectedSkills : undefined,
       };
 
       const trimmedText = (submission.text ?? "").trim();
       const selectedSkillNames = submission.selectedSkills?.map((skill) => skill.name).filter(Boolean) ?? [];
+      const fileReferenceNames = submission.fileReferences?.map((file) => file.displayPath).filter(Boolean) ?? [];
       const userDisplayContent =
         trimmedText ||
+        (fileReferenceNames.length > 0 ? `Referenced files: ${fileReferenceNames.join(", ")}` : "") ||
         (selectedSkillNames.length > 0 ? `Use skills: ${selectedSkillNames.join(", ")}` : "") ||
         (submission.imageUrls.length > 0 ? "[Image]" : "");
 
@@ -483,6 +486,7 @@ export function App({ projectRoot, version = "", onRestart }: AppProps): React.R
         <PromptInput
           screenWidth={screenWidth}
           skills={skills}
+          projectRoot={projectRoot}
           modelConfig={resolvedSettings}
           promptHistory={promptHistory}
           busy={busy}

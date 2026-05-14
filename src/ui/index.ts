@@ -81,3 +81,11 @@ export {
 } from "./slashCommands";
 export { findExpandedThinkingId } from "./thinkingState";
 export { buildExitSummaryText } from "./exitSummary";
+export {
+  buildPromptTextWithFileReferences,
+  parsePromptFileReferenceTokens,
+  resolvePromptFileReferences,
+  type PromptFileReference,
+  type PromptFileReferenceError,
+  type PromptFileReferenceToken,
+} from "../prompt-file-references";

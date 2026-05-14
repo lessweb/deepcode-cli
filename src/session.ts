@@ -15,6 +15,7 @@ import { McpManager } from "./mcp/mcp-manager";
 import type { McpServerConfig } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
+import { buildPromptTextWithFileReferences, type PromptFileReference } from "./prompt-file-references";
 
 const MAX_SESSION_ENTRIES = 50;
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
@@ -143,6 +144,7 @@ export type SessionMessage = {
 export type UserPromptContent = {
   text?: string;
   imageUrls?: string[];
+  fileReferences?: PromptFileReference[];
   skills?: SkillInfo[];
 };
 
@@ -1481,7 +1483,8 @@ ${skillMd}
       role: "user",
       content: prompt.text ?? "",
       contentParams: imageParams.length > 0 ? imageParams : null,
-      messageParams: null,
+      messageParams:
+        prompt.fileReferences && prompt.fileReferences.length > 0 ? { file_references: prompt.fileReferences } : null,
       compacted: false,
       visible: true,
       createTime: now,
@@ -1778,7 +1781,31 @@ ${skillMd}
     if (message.role === "user" && message.content === "/init") {
       return this.renderInitCommandPrompt();
     }
+    if (message.role === "user") {
+      return buildPromptTextWithFileReferences(message.content ?? "", this.getPromptFileReferences(message));
+    }
     return message.content ?? "";
+  }
+
+  private getPromptFileReferences(message: SessionMessage): PromptFileReference[] | undefined {
+    const params = message.messageParams as { file_references?: unknown } | null | undefined;
+    if (!Array.isArray(params?.file_references)) {
+      return undefined;
+    }
+    const references = params.file_references.filter((reference): reference is PromptFileReference => {
+      if (!reference || typeof reference !== "object") {
+        return false;
+      }
+      const item = reference as Partial<PromptFileReference>;
+      return (
+        typeof item.raw === "string" &&
+        typeof item.path === "string" &&
+        typeof item.displayPath === "string" &&
+        typeof item.content === "string" &&
+        typeof item.sizeBytes === "number"
+      );
+    });
+    return references.length > 0 ? references : undefined;
   }
 
   private pairToolMessages(messages: SessionMessage[]): Map<string, number> {

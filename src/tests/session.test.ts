@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { SessionManager, type SessionMessage } from "../session";
+import type { PromptFileReference } from "../prompt-file-references";
 
 const originalFetch = globalThis.fetch;
 const originalHome = process.env.HOME;
@@ -114,6 +115,88 @@ test("SessionManager filters image content for non-multimodal models", () => {
 
   assert.equal(openAIMessages.length, 1);
   assert.deepEqual(openAIMessages[0]?.content, [{ type: "text", text: "The read tool has loaded `pixel.png`." }]);
+});
+
+test("SessionManager appends resolved @file references to user message content", () => {
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({
+      client: null,
+      model: "test-model",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  const fileReferences: PromptFileReference[] = [
+    {
+      raw: "@src/app.ts",
+      path: path.join(process.cwd(), "src", "app.ts"),
+      displayPath: "src/app.ts",
+      content: "export const value = 1;\n",
+      sizeBytes: 24,
+    },
+  ];
+
+  const message = (manager as any).buildUserMessage("session-1", {
+    text: "Please review @src/app.ts",
+    fileReferences,
+  }) as SessionMessage;
+
+  assert.equal(message.role, "user");
+  assert.equal(message.content, "Please review @src/app.ts");
+  assert.deepEqual(message.messageParams, { file_references: fileReferences });
+
+  const openAIMessages = (manager as any).buildOpenAIMessages([message], false, "test-model") as Array<{
+    content: unknown;
+  }>;
+  assert.match(String(openAIMessages[0]?.content), /Please review @src\/app\.ts/);
+  assert.match(String(openAIMessages[0]?.content), /<referenced_files>/);
+  assert.match(String(openAIMessages[0]?.content), /<file path="src\/app\.ts">/);
+  assert.match(String(openAIMessages[0]?.content), /export const value = 1;/);
+});
+
+test("SessionManager keeps referenced files inside text part when user prompt has images", () => {
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({
+      client: null,
+      model: "test-model",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const message = (manager as any).buildUserMessage("session-1", {
+    text: "Look at this @src/app.ts",
+    imageUrls: ["data:image/png;base64,abc123"],
+    fileReferences: [
+      {
+        raw: "@src/app.ts",
+        path: path.join(process.cwd(), "src", "app.ts"),
+        displayPath: "src/app.ts",
+        content: "const x = 1;\n",
+        sizeBytes: 13,
+      },
+    ],
+  }) as SessionMessage;
+  const openAIMessages = (manager as any).buildOpenAIMessages([message], false, "test-model") as Array<{
+    content: unknown;
+  }>;
+
+  assert.deepEqual(openAIMessages[0]?.content, [
+    {
+      type: "text",
+      text: 'Look at this @src/app.ts\n\n<referenced_files>\n<file path="src/app.ts">\n<![CDATA[\nconst x = 1;\n\n]]>\n</file>\n</referenced_files>',
+    },
+    {
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,abc123" },
+    },
+  ]);
 });
 
 test("SessionManager preserves empty reasoning content on assistant tool calls", () => {

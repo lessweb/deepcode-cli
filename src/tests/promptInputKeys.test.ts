@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 const ANSI_RE = /\u001b\[[0-9;]*m/g;
 function stripAnsi(text: string): string {
@@ -15,6 +18,8 @@ import {
   getPromptReturnKeyAction,
   isClearImageAttachmentsShortcut,
   parseTerminalInput,
+  parsePromptFileReferenceTokens,
+  resolvePromptFileReferences,
   removeCurrentSlashToken,
   toggleSkillSelection,
   renderBufferWithCursor,
@@ -182,6 +187,58 @@ test("buildInitPromptSubmission preserves manually selected skills", () => {
     selectedSkills: [skill],
   });
   assert.deepEqual(buildInitPromptSubmission([]), { text: "/init", imageUrls: [], selectedSkills: undefined });
+});
+
+test("parsePromptFileReferenceTokens supports unquoted and quoted @file paths", () => {
+  assert.deepEqual(parsePromptFileReferenceTokens('review @src/index.ts and @"docs/file with spaces.md"'), [
+    { raw: "@src/index.ts", path: "src/index.ts", start: 7, end: 20 },
+    { raw: '@"docs/file with spaces.md"', path: "docs/file with spaces.md", start: 25, end: 52 },
+  ]);
+});
+
+test("parsePromptFileReferenceTokens ignores email-like mentions and trims punctuation", () => {
+  assert.deepEqual(parsePromptFileReferenceTokens("mail a@b.com, then inspect @src/app.ts."), [
+    { raw: "@src/app.ts", path: "src/app.ts", start: 27, end: 38 },
+  ]);
+});
+
+test("resolvePromptFileReferences reads text files relative to the project root", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-file-ref-"));
+  try {
+    fs.mkdirSync(path.join(workspace, "src"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "src", "app.ts"), "export const value = 1;\r\n", "utf8");
+
+    const result = resolvePromptFileReferences("review @src/app.ts", workspace);
+
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.references.length, 1);
+    assert.equal(result.references[0]?.displayPath, "src/app.ts");
+    assert.equal(result.references[0]?.content, "export const value = 1;\n");
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
+test("resolvePromptFileReferences reports missing, directory, binary, and oversized files", () => {
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-file-ref-errors-"));
+  try {
+    fs.mkdirSync(path.join(workspace, "src"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "binary.dat"), Buffer.from([0, 1, 2]));
+    fs.writeFileSync(path.join(workspace, "large.txt"), "abcd", "utf8");
+
+    const result = resolvePromptFileReferences("check @missing.ts @src @binary.dat @large.txt", workspace, {
+      maxFileBytes: 3,
+      maxTotalBytes: 256,
+    });
+
+    assert.deepEqual(
+      result.errors.map((error) => error.raw),
+      ["@missing.ts", "@src", "@binary.dat", "@large.txt"]
+    );
+    assert.equal(result.references.length, 0);
+  } finally {
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
 });
 
 test("selected skill helpers format, dedupe, toggle, and clear slash tokens", () => {
