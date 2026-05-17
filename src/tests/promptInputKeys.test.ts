@@ -202,7 +202,7 @@ test("parsePromptFileReferenceTokens ignores email-like mentions and trims punct
   ]);
 });
 
-test("resolvePromptFileReferences reads text files relative to the project root", () => {
+test("resolvePromptFileReferences resolves text files relative to the project root", () => {
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-file-ref-"));
   try {
     fs.mkdirSync(path.join(workspace, "src"), { recursive: true });
@@ -213,7 +213,8 @@ test("resolvePromptFileReferences reads text files relative to the project root"
     assert.deepEqual(result.errors, []);
     assert.equal(result.references.length, 1);
     assert.equal(result.references[0]?.displayPath, "src/app.ts");
-    assert.equal(result.references[0]?.content, "export const value = 1;\n");
+    assert.equal(result.references[0]?.path, path.join(workspace, "src", "app.ts"));
+    assert.equal(result.references[0]?.content, undefined);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

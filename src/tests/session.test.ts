@@ -5,6 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { SessionManager, type SessionMessage } from "../session";
 import type { PromptFileReference } from "../prompt-file-references";
+import { getSnippet } from "../common/state";
 
 const originalFetch = globalThis.fetch;
 const originalHome = process.env.HOME;
@@ -117,7 +118,7 @@ test("SessionManager filters image content for non-multimodal models", () => {
   assert.deepEqual(openAIMessages[0]?.content, [{ type: "text", text: "The read tool has loaded `pixel.png`." }]);
 });
 
-test("SessionManager appends resolved @file references to user message content", () => {
+test("SessionManager stores resolved @file references on the user message", () => {
   const manager = new SessionManager({
     projectRoot: process.cwd(),
     createOpenAIClient: () => ({
@@ -134,7 +135,6 @@ test("SessionManager appends resolved @file references to user message content",
       raw: "@src/app.ts",
       path: path.join(process.cwd(), "src", "app.ts"),
       displayPath: "src/app.ts",
-      content: "export const value = 1;\n",
       sizeBytes: 24,
     },
   ];
@@ -146,18 +146,16 @@ test("SessionManager appends resolved @file references to user message content",
 
   assert.equal(message.role, "user");
   assert.equal(message.content, "Please review @src/app.ts");
-  assert.deepEqual(message.messageParams, { file_references: fileReferences });
+  assert.equal(message.messageParams, null);
+  assert.deepEqual(message.fileReferences, fileReferences);
 
   const openAIMessages = (manager as any).buildOpenAIMessages([message], false, "test-model") as Array<{
     content: unknown;
   }>;
-  assert.match(String(openAIMessages[0]?.content), /Please review @src\/app\.ts/);
-  assert.match(String(openAIMessages[0]?.content), /<referenced_files>/);
-  assert.match(String(openAIMessages[0]?.content), /<file path="src\/app\.ts">/);
-  assert.match(String(openAIMessages[0]?.content), /export const value = 1;/);
+  assert.equal(openAIMessages[0]?.content, "Please review @src/app.ts");
 });
 
-test("SessionManager keeps referenced files inside text part when user prompt has images", () => {
+test("SessionManager keeps file references separate from multimodal content", () => {
   const manager = new SessionManager({
     projectRoot: process.cwd(),
     createOpenAIClient: () => ({
@@ -178,7 +176,6 @@ test("SessionManager keeps referenced files inside text part when user prompt ha
         raw: "@src/app.ts",
         path: path.join(process.cwd(), "src", "app.ts"),
         displayPath: "src/app.ts",
-        content: "const x = 1;\n",
         sizeBytes: 13,
       },
     ],
@@ -190,13 +187,51 @@ test("SessionManager keeps referenced files inside text part when user prompt ha
   assert.deepEqual(openAIMessages[0]?.content, [
     {
       type: "text",
-      text: 'Look at this @src/app.ts\n\n<referenced_files>\n<file path="src/app.ts">\n<![CDATA[\nconst x = 1;\n\n]]>\n</file>\n</referenced_files>',
+      text: "Look at this @src/app.ts",
     },
     {
       type: "image_url",
       image_url: { url: "data:image/png;base64,abc123" },
     },
   ]);
+});
+
+test("createSession loads file references through Read tool hidden system messages", async () => {
+  const workspace = createTempDir("deepcode-file-ref-session-");
+  const home = createTempDir("deepcode-file-ref-home-");
+  process.env.HOME = home;
+  globalThis.fetch = (async () => ({ ok: true, text: async () => "" }) as Response) as typeof fetch;
+
+  fs.mkdirSync(path.join(workspace, "src"), { recursive: true });
+  const filePath = path.join(workspace, "src", "app.ts");
+  fs.writeFileSync(filePath, "export const value = 1;\n", "utf8");
+
+  const manager = createSessionManager(workspace, "machine-id-file-ref-read");
+  (manager as any).activateSession = async () => {};
+
+  const fileReferences: PromptFileReference[] = [
+    {
+      raw: "@src/app.ts",
+      path: filePath,
+      displayPath: "src/app.ts",
+      sizeBytes: fs.statSync(filePath).size,
+    },
+  ];
+
+  const sessionId = await manager.createSession({ text: "Please review @src/app.ts", fileReferences });
+  const messages = manager.listSessionMessages(sessionId);
+  const userMessage = messages.find((message) => message.role === "user");
+  const readSystemMessage = messages.find(
+    (message) => message.role === "system" && message.content?.includes("<read_tool_result>")
+  );
+
+  assert.deepEqual(userMessage?.fileReferences, fileReferences);
+  assert.equal(readSystemMessage?.visible, false);
+  assert.match(readSystemMessage?.content ?? "", /DeepCode loaded the referenced file by running the Read tool/);
+  assert.match(readSystemMessage?.content ?? "", /"name": "read"/);
+  assert.match(readSystemMessage?.content ?? "", /export const value = 1;/);
+  assert.match(readSystemMessage?.content ?? "", /"id": "snippet_1"/);
+  assert.equal(getSnippet(sessionId, "snippet_1")?.filePath, filePath);
 });
 
 test("SessionManager preserves empty reasoning content on assistant tool calls", () => {

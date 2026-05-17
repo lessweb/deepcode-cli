@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import { normalizeContent } from "./common/file-utils";
 
 export const MAX_PROMPT_FILE_REFERENCE_BYTES = 128 * 1024;
 export const MAX_PROMPT_FILE_REFERENCES_TOTAL_BYTES = 256 * 1024;
@@ -9,8 +8,8 @@ export type PromptFileReference = {
   raw: string;
   path: string;
   displayPath: string;
-  content: string;
   sizeBytes: number;
+  content?: string;
 };
 
 export type PromptFileReferenceToken = {
@@ -153,36 +152,16 @@ export function resolvePromptFileReferences(
       continue;
     }
 
-    const content = normalizeContent(buffer.toString("utf8"));
     references.push({
       raw: token.raw,
       path: absolutePath,
       displayPath,
-      content,
       sizeBytes: stat.size,
     });
     totalBytes += stat.size;
   }
 
   return { references, errors };
-}
-
-export function buildPromptTextWithFileReferences(
-  text: string | undefined,
-  references?: PromptFileReference[]
-): string {
-  const baseText = text ?? "";
-  if (!references || references.length === 0) {
-    return baseText;
-  }
-
-  const fileBlocks = references
-    .map((reference) => {
-      return `<file path="${escapeXmlAttribute(reference.displayPath)}">\n${escapeCdata(reference.content)}\n</file>`;
-    })
-    .join("\n\n");
-
-  return `${baseText}\n\n<referenced_files>\n${fileBlocks}\n</referenced_files>`;
 }
 
 function resolveReferencePath(referencePath: string, projectRoot: string): string {
@@ -214,14 +193,6 @@ function trimTrailingPunctuation(value: string): string {
 
 function isLikelyBinary(buffer: Buffer): boolean {
   return buffer.includes(0);
-}
-
-function escapeXmlAttribute(value: string): string {
-  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-function escapeCdata(value: string): string {
-  return `<![CDATA[\n${value.replace(/\]\]>/g, "]]]]><![CDATA[>")}\n]]>`;
 }
 
 function formatBytes(bytes: number): string {

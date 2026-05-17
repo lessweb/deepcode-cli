@@ -82,7 +82,6 @@ export {
 export { findExpandedThinkingId } from "./thinkingState";
 export { buildExitSummaryText } from "./exitSummary";
 export {
-  buildPromptTextWithFileReferences,
   parsePromptFileReferenceTokens,
   resolvePromptFileReferences,
   type PromptFileReference,

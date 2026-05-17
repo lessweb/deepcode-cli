@@ -10,12 +10,12 @@ import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
 import { DEEPSEEK_V4_MODELS, supportsMultimodal } from "./common/model-capabilities";
 import { getCompactPrompt, getSystemPrompt, getTools, AGENT_DRIFT_GUARD_SKILL, type ToolDefinition } from "./prompt";
-import { ToolExecutor, type CreateOpenAIClient } from "./tools/executor";
+import { ToolExecutor, type CreateOpenAIClient, type ToolCall } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
 import type { McpServerConfig } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
-import { buildPromptTextWithFileReferences, type PromptFileReference } from "./prompt-file-references";
+import type { PromptFileReference } from "./prompt-file-references";
 
 const MAX_SESSION_ENTRIES = 50;
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
@@ -133,6 +133,7 @@ export type SessionMessage = {
   content: string | null;
   contentParams: unknown | null;
   messageParams: unknown | null;
+  fileReferences?: PromptFileReference[];
   compacted: boolean;
   visible: boolean;
   createTime: string;
@@ -875,6 +876,8 @@ The candidate skills are as follows:\n\n`;
 
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    await this.appendFileReferenceReadMessages(sessionId, userMessage.fileReferences, signal);
+    this.throwIfAborted(signal);
 
     if (userPrompt.skills && userPrompt.skills.length > 0) {
       for (const skill of userPrompt.skills) {
@@ -932,6 +935,8 @@ ${skillMd}
 
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    await this.appendFileReferenceReadMessages(sessionId, userMessage.fileReferences, signal);
+    this.throwIfAborted(signal);
 
     if (userPrompt.skills && userPrompt.skills.length > 0) {
       for (const skill of userPrompt.skills) {
@@ -1341,26 +1346,81 @@ ${skillMd}
   }
 
   private normalizeSessionMessage(message: SessionMessage): SessionMessage {
-    if (message.role !== "tool") {
-      return message;
+    const normalizedMessage = this.normalizeSessionMessageFileReferences(message);
+    if (normalizedMessage.role !== "tool") {
+      return normalizedMessage;
     }
 
-    const nextMeta = message.meta ? { ...message.meta } : undefined;
+    const nextMeta = normalizedMessage.meta ? { ...normalizedMessage.meta } : undefined;
     const normalizedParamsMd = this.buildToolParamsSnippet(nextMeta?.function ?? null);
     if (nextMeta && normalizedParamsMd) {
       nextMeta.paramsMd = normalizedParamsMd;
     }
 
-    const normalizedResultMd = typeof message.content === "string" ? this.buildToolResultSnippet(message.content) : "";
+    const normalizedResultMd =
+      typeof normalizedMessage.content === "string" ? this.buildToolResultSnippet(normalizedMessage.content) : "";
     if (nextMeta && normalizedResultMd) {
       nextMeta.resultMd = normalizedResultMd;
     }
 
     return {
-      ...message,
-      visible: typeof message.content === "string" ? !this.isInvisibleExecution(message.content) : message.visible,
+      ...normalizedMessage,
+      visible:
+        typeof normalizedMessage.content === "string"
+          ? !this.isInvisibleExecution(normalizedMessage.content)
+          : normalizedMessage.visible,
       meta: nextMeta,
     };
+  }
+
+  private normalizeSessionMessageFileReferences(message: SessionMessage): SessionMessage {
+    const directReferences = this.normalizePromptFileReferences(message.fileReferences);
+    const messageParams = message.messageParams;
+    const legacyParams =
+      messageParams && typeof messageParams === "object" && !Array.isArray(messageParams)
+        ? (messageParams as Record<string, unknown> & { file_references?: unknown })
+        : null;
+    const legacyReferences = this.normalizePromptFileReferences(legacyParams?.file_references);
+    const fileReferences = directReferences ?? legacyReferences;
+
+    if (!fileReferences && !legacyReferences) {
+      return message;
+    }
+
+    let nextMessageParams = messageParams;
+    if (legacyParams && Object.hasOwn(legacyParams, "file_references")) {
+      const rest = { ...legacyParams };
+      delete rest.file_references;
+      nextMessageParams = Object.keys(rest).length > 0 ? rest : null;
+    }
+
+    return {
+      ...message,
+      messageParams: nextMessageParams,
+      fileReferences,
+    };
+  }
+
+  private normalizePromptFileReferences(value: unknown): PromptFileReference[] | undefined {
+    if (!Array.isArray(value)) {
+      return undefined;
+    }
+
+    const references = value.filter((reference): reference is PromptFileReference => {
+      if (!reference || typeof reference !== "object") {
+        return false;
+      }
+      const item = reference as Partial<PromptFileReference>;
+      return (
+        typeof item.raw === "string" &&
+        typeof item.path === "string" &&
+        typeof item.displayPath === "string" &&
+        typeof item.sizeBytes === "number" &&
+        (typeof item.content === "undefined" || typeof item.content === "string")
+      );
+    });
+
+    return references.length > 0 ? references : undefined;
   }
 
   private getProjectCode(projectRoot: string): string {
@@ -1483,8 +1543,8 @@ ${skillMd}
       role: "user",
       content: prompt.text ?? "",
       contentParams: imageParams.length > 0 ? imageParams : null,
-      messageParams:
-        prompt.fileReferences && prompt.fileReferences.length > 0 ? { file_references: prompt.fileReferences } : null,
+      messageParams: null,
+      fileReferences: prompt.fileReferences && prompt.fileReferences.length > 0 ? prompt.fileReferences : undefined,
       compacted: false,
       visible: true,
       createTime: now,
@@ -1650,6 +1710,75 @@ ${skillMd}
     };
   }
 
+  private async appendFileReferenceReadMessages(
+    sessionId: string,
+    fileReferences: PromptFileReference[] | undefined,
+    signal?: AbortSignal | null
+  ): Promise<void> {
+    if (!fileReferences || fileReferences.length === 0) {
+      return;
+    }
+    this.throwIfAborted(signal);
+
+    const toolCalls: ToolCall[] = fileReferences.map((reference, index) =>
+      this.buildFileReferenceReadToolCall(reference, index)
+    );
+    const referencesByToolCallId = new Map(toolCalls.map((toolCall, index) => [toolCall.id, fileReferences[index]]));
+    const executions = await this.toolExecutor.executeToolCalls(sessionId, toolCalls, {
+      shouldStop: () => Boolean(signal?.aborted),
+    });
+
+    for (const execution of executions) {
+      this.throwIfAborted(signal);
+      const reference = referencesByToolCallId.get(execution.toolCallId);
+      if (!reference) {
+        continue;
+      }
+
+      const readMessage = this.buildSystemMessage(
+        sessionId,
+        this.buildFileReferenceReadSystemPrompt(reference, execution.content),
+        null,
+        false
+      );
+      this.appendSessionMessage(sessionId, readMessage);
+
+      for (const followUpMessage of execution.result.followUpMessages ?? []) {
+        if (followUpMessage.role !== "system") {
+          continue;
+        }
+        this.appendSessionMessage(
+          sessionId,
+          this.buildSystemMessage(sessionId, followUpMessage.content, followUpMessage.contentParams ?? null, false)
+        );
+      }
+    }
+  }
+
+  private buildFileReferenceReadToolCall(reference: PromptFileReference, index: number): ToolCall {
+    return {
+      id: `file-reference-read-${index}-${crypto.randomUUID()}`,
+      type: "function",
+      function: {
+        name: "read",
+        arguments: JSON.stringify({ file_path: reference.path }),
+      },
+    };
+  }
+
+  private buildFileReferenceReadSystemPrompt(reference: PromptFileReference, readResult: string): string {
+    const displayPath = reference.displayPath || reference.path;
+    return [
+      `The user referenced \`${displayPath}\` with \`${reference.raw}\`.`,
+      "DeepCode loaded the referenced file by running the Read tool. The Read tool result is below.",
+      "If you edit this file, pass metadata.snippet.id from this result as `snippet_id` to the Edit tool when applicable.",
+      "",
+      "<read_tool_result>",
+      readResult,
+      "</read_tool_result>",
+    ].join("\n");
+  }
+
   private async appendToolMessages(sessionId: string, toolCalls: unknown[]): Promise<{ waitingForUser: boolean }> {
     const toolExecutions = await this.toolExecutor.executeToolCalls(sessionId, toolCalls, {
       onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
@@ -1781,31 +1910,7 @@ ${skillMd}
     if (message.role === "user" && message.content === "/init") {
       return this.renderInitCommandPrompt();
     }
-    if (message.role === "user") {
-      return buildPromptTextWithFileReferences(message.content ?? "", this.getPromptFileReferences(message));
-    }
     return message.content ?? "";
-  }
-
-  private getPromptFileReferences(message: SessionMessage): PromptFileReference[] | undefined {
-    const params = message.messageParams as { file_references?: unknown } | null | undefined;
-    if (!Array.isArray(params?.file_references)) {
-      return undefined;
-    }
-    const references = params.file_references.filter((reference): reference is PromptFileReference => {
-      if (!reference || typeof reference !== "object") {
-        return false;
-      }
-      const item = reference as Partial<PromptFileReference>;
-      return (
-        typeof item.raw === "string" &&
-        typeof item.path === "string" &&
-        typeof item.displayPath === "string" &&
-        typeof item.content === "string" &&
-        typeof item.sizeBytes === "number"
-      );
-    });
-    return references.length > 0 ? references : undefined;
   }
 
   private pairToolMessages(messages: SessionMessage[]): Map<string, number> {

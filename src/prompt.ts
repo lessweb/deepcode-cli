@@ -299,6 +299,7 @@ export function getCompactPrompt(sessionMessages: SessionMessage[]): string {
         role: message.role,
         content: message.content,
         contentParams: message.contentParams,
+        fileReferences: message.fileReferences,
         messageParams: message.messageParams,
         createTime: message.createTime,
       })
