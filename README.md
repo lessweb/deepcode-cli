@@ -1,4 +1,17 @@
-# Deep Code CLI
+<div align="center">
+<br/>
+<br/>
+<p align="center">
+  <a href='https://deepcode.vegamo.cn/'>
+    <img src='https://avatars.githubusercontent.com/u/118287711?s=200&v=4' width='100' alt="deepcode-cli"/>
+  </a>
+</p>
+<h1>Deep Code CLI</h1>
+
+[English](./README_en.md) · 中文
+
+<br/>
+</div>
 
 [Deep Code](https://github.com/lessweb/deepcode-cli) 是专为 `deepseek-v4` 模型优化的终端 AI 编码助手，支持深度思考、推理强度控制、Agent Skills 以及 MCP 集成。
 
@@ -53,6 +66,7 @@ Deep Code CLI 支持 agent skills，允许您扩展助手的能力：
 | `/new`          | 开始新对话                                  |
 | `/resume`       | 选择历史对话继续                            |
 | `/model`        | 切换模型、思考模式和推理强度                |
+| `/raw`          | 切换显示模式（Normal / Lite / Raw 滚动回溯）|
 | `/init`         | 初始化 AGENTS.md 文件                      |
 | `/skills`       | 列出可用 skills                             |
 | `/mcp`          | 查看 MCP 服务器状态和可用工具               |

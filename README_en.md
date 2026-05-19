@@ -1,6 +1,20 @@
-# Deep Code CLI
+<div align="center">
+<br/>
+<br/>
+<p align="center">
+  <a href='https://deepcode.vegamo.cn/'>
+    <img src='https://avatars.githubusercontent.com/u/118287711?s=200&v=4' width='100' alt="deepcode-cli"/>
+  </a>
+</p>
+<h1>Deep Code CLI</h1>
+
+English · [中文](./README.md)
+
+<br/>
+</div>
 
 [Deep Code](https://github.com/lessweb/deepcode-cli) is a terminal AI coding assistant optimized for the `deepseek-v4` model, with support for deep thinking, reasoning effort control, Agent Skills, and MCP (Model Context Protocol) integration.
+
 
 ## Installation
 
@@ -53,6 +67,7 @@ Deep Code CLI supports agent skills that allow you to extend the assistant's cap
 | `/new`           | Start a fresh conversation                               |
 | `/resume`        | Choose a previous conversation to continue               |
 | `/model`         | Switch model, thinking mode, and reasoning effort        |
+| `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)     |
 | `/init`          | Initialize an AGENTS.md file (LLM project instructions)  |
 | `/skills`        | List available skills                                    |
 | `/mcp`           | View MCP server status and available tools               |
