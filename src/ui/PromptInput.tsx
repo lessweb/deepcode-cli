@@ -49,9 +49,9 @@ import { useTerminalInput } from "./prompt";
 import type { InputKey } from "./prompt";
 import { useHiddenTerminalCursor, useTerminalExtendedKeys, useTerminalFocusReporting } from "./prompt";
 import SlashCommandMenu from "./SlashCommandMenu";
-import type { ModelConfigSelection, ReasoningEffort } from "../settings";
+import type { ModelConfigSelection } from "../settings";
 import DropdownMenu from "./DropdownMenu";
-import { RawModelDropdown } from "./components";
+import { ModelsDropdown, RawModelDropdown, SkillsDropdown } from "./components";
 
 export type PromptSubmission = {
   text: string;
@@ -79,21 +79,6 @@ type Props = {
 };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-export const MODEL_COMMAND_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"] as const;
-
-type ThinkingModeOption = {
-  label: string;
-  thinkingEnabled: boolean;
-  reasoningEffort?: ReasoningEffort;
-};
-
-export const MODEL_COMMAND_THINKING_OPTIONS: ThinkingModeOption[] = [
-  { label: "Thinking mode [max]", thinkingEnabled: true, reasoningEffort: "max" },
-  { label: "Thinking mode [high]", thinkingEnabled: true, reasoningEffort: "high" },
-  { label: "No thinking", thinkingEnabled: false },
-];
-
-type ModelDropdownStep = "model" | "thinking";
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: boolean }): React.ReactElement {
   const [spinnerIndex, setSpinnerIndex] = useState(0);
@@ -140,10 +125,7 @@ export const PromptInput = React.memo(function PromptInput({
   const [menuIndex, setMenuIndex] = useState(0);
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [openRawModelDropdown, setOpenRawModelDropdown] = useState(false);
-  const [skillsDropdownIndex, setSkillsDropdownIndex] = useState(0);
-  const [modelDropdownStep, setModelDropdownStep] = useState<ModelDropdownStep | null>(null);
-  const [modelDropdownIndex, setModelDropdownIndex] = useState(0);
-  const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
   const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
@@ -164,19 +146,19 @@ export const PromptInput = React.memo(function PromptInput({
   );
   const showFileMentionMenu =
     !showSkillsDropdown &&
-    !modelDropdownStep &&
+    !showModelDropdown &&
     fileMentionToken !== null &&
     fileMentionKey !== dismissedFileMentionKey;
   const slashItems = React.useMemo(() => buildSlashCommands(skills), [skills]);
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      showSkillsDropdown || modelDropdownStep || showFileMentionMenu
+      showSkillsDropdown || showModelDropdown || showFileMentionMenu
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
           : [],
-    [showSkillsDropdown, modelDropdownStep, showFileMentionMenu, slashToken, slashItems]
+    [showSkillsDropdown, showModelDropdown, showFileMentionMenu, slashToken, slashItems]
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
@@ -242,23 +224,6 @@ export const PromptInput = React.memo(function PromptInput({
   }, [fileMentionMatches.length, fileMentionIndex, showFileMentionMenu]);
 
   useEffect(() => {
-    if (skillsDropdownIndex >= skills.length) {
-      setSkillsDropdownIndex(Math.max(0, skills.length - 1));
-    }
-  }, [skills.length, skillsDropdownIndex]);
-
-  useEffect(() => {
-    if (!modelDropdownStep) {
-      return;
-    }
-    const optionCount =
-      modelDropdownStep === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
-    if (modelDropdownIndex >= optionCount) {
-      setModelDropdownIndex(Math.max(0, optionCount - 1));
-    }
-  }, [modelDropdownIndex, modelDropdownStep]);
-
-  useEffect(() => {
     if (!statusMessage) {
       return;
     }
@@ -287,14 +252,6 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.escape) {
-        if (modelDropdownStep) {
-          closeModelDropdown();
-          return;
-        }
-        if (showSkillsDropdown) {
-          setShowSkillsDropdown(false);
-          return;
-        }
         if (showFileMentionMenu && fileMentionKey) {
           setDismissedFileMentionKey(fileMentionKey);
           return;
@@ -348,59 +305,12 @@ export const PromptInput = React.memo(function PromptInput({
         setPendingExit(false);
       }
 
-      if (openRawModelDropdown) {
+      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
         return;
       }
 
       if (historyCursor !== -1 && !key.upArrow && !key.downArrow) {
         exitHistoryBrowsing();
-      }
-
-      if (showSkillsDropdown) {
-        if (skills.length === 0) {
-          setShowSkillsDropdown(false);
-        } else {
-          if (key.upArrow) {
-            setSkillsDropdownIndex((idx) => (idx - 1 + skills.length) % skills.length);
-            return;
-          }
-          if (key.downArrow) {
-            setSkillsDropdownIndex((idx) => (idx + 1) % skills.length);
-            return;
-          }
-          if ((input === " " && !key.ctrl && !key.meta) || (key.return && !key.shift && !key.meta)) {
-            const skill = skills[skillsDropdownIndex];
-            if (skill) {
-              toggleSelectedSkill(skill);
-            }
-            return;
-          }
-          if (key.tab) {
-            setShowSkillsDropdown(false);
-            return;
-          }
-        }
-      }
-
-      if (modelDropdownStep) {
-        const optionCount =
-          modelDropdownStep === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
-        if (key.upArrow) {
-          setModelDropdownIndex((idx) => (idx - 1 + optionCount) % optionCount);
-          return;
-        }
-        if (key.downArrow) {
-          setModelDropdownIndex((idx) => (idx + 1) % optionCount);
-          return;
-        }
-        if ((input === " " && !key.ctrl && !key.meta) || (key.return && !key.shift && !key.meta)) {
-          selectModelDropdownItem();
-          return;
-        }
-        if (key.tab) {
-          closeModelDropdown();
-          return;
-        }
       }
 
       if (key.ctrl && (input === "v" || input === "V")) {
@@ -722,7 +632,8 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "model") {
       clearSlashToken();
-      openModelDropdown();
+      setShowSkillsDropdown(false);
+      setShowModelDropdown(true);
       return;
     }
     if (item.kind === "raw") {
@@ -828,63 +739,9 @@ export const PromptInput = React.memo(function PromptInput({
     clearUndoRedoStacks();
   }
 
-  function openModelDropdown(): void {
-    const currentModelIndex = MODEL_COMMAND_MODELS.findIndex((model) => model === modelConfig.model);
-    setPendingModel(null);
-    setModelDropdownStep("model");
-    setModelDropdownIndex(currentModelIndex >= 0 ? currentModelIndex : 0);
-    setShowSkillsDropdown(false);
-  }
-
-  function closeModelDropdown(): void {
-    setModelDropdownStep(null);
-    setPendingModel(null);
-  }
-
-  function selectModelDropdownItem(): void {
-    if (modelDropdownStep === "model") {
-      const model = MODEL_COMMAND_MODELS[modelDropdownIndex] ?? modelConfig.model;
-      setPendingModel(model);
-      setModelDropdownStep("thinking");
-      setModelDropdownIndex(getThinkingOptionIndex(modelConfig));
-      return;
-    }
-
-    const option = MODEL_COMMAND_THINKING_OPTIONS[modelDropdownIndex] ?? MODEL_COMMAND_THINKING_OPTIONS[0];
-    const selection: ModelConfigSelection = {
-      model: pendingModel ?? modelConfig.model,
-      thinkingEnabled: option.thinkingEnabled,
-      reasoningEffort: option.reasoningEffort ?? modelConfig.reasoningEffort,
-    };
-    closeModelDropdown();
-    Promise.resolve(onModelConfigChange(selection))
-      .then((message) => {
-        if (message) {
-          setStatusMessage(message);
-        }
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        setStatusMessage(`Failed to update model settings: ${message}`);
-      });
-  }
-
-  const modelDropdownItems =
-    modelDropdownStep === "model"
-      ? MODEL_COMMAND_MODELS.map((model) => ({
-          label: model,
-          selected: model === (pendingModel ?? modelConfig.model),
-          description: model === modelConfig.model ? "current model" : "",
-        }))
-      : MODEL_COMMAND_THINKING_OPTIONS.map((option) => ({
-          label: option.label,
-          selected: getThinkingOptionIndex(modelConfig) === MODEL_COMMAND_THINKING_OPTIONS.indexOf(option),
-          description: option.thinkingEnabled ? `reasoningEffort: ${option.reasoningEffort}` : "thinking disabled",
-        }));
-
   const showFooterText = useMemo(
-    () => showMenu || showSkillsDropdown || openRawModelDropdown || modelDropdownStep !== null || showFileMentionMenu,
-    [showMenu, showSkillsDropdown, modelDropdownStep, openRawModelDropdown, showFileMentionMenu]
+    () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
+    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
   );
 
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
@@ -925,44 +782,22 @@ export const PromptInput = React.memo(function PromptInput({
         onSelect={(mode) => onRawModeChange?.(mode)}
         screenWidth={screenWidth}
       />
-      {showSkillsDropdown ? (
-        <DropdownMenu
-          width={screenWidth}
-          title="Select Skills"
-          helpText="Space toggle · Enter toggle · Esc to close"
-          emptyText="No skills found"
-          items={skills.map((skill) => ({
-            key: skill.path || skill.name,
-            label: skill.name,
-            description: skill.path,
-            selected: isSkillSelected(selectedSkills, skill),
-            statusIndicator: skill.isLoaded ? { symbol: "✓", color: "green" } : undefined,
-          }))}
-          activeIndex={skillsDropdownIndex}
-          activeColor="#229ac3"
-          maxVisible={6}
-        />
-      ) : null}
-      {modelDropdownStep ? (
-        <DropdownMenu
-          width={screenWidth}
-          title={modelDropdownStep === "model" ? "Select Model" : "Select Thinking Mode"}
-          helpText={
-            modelDropdownStep === "model"
-              ? "Space/Enter select model · Esc to cancel"
-              : "Space/Enter apply · Esc to cancel"
-          }
-          items={modelDropdownItems.map((item) => ({
-            key: item.label,
-            label: item.label,
-            description: item.description,
-            selected: item.selected,
-          }))}
-          activeIndex={modelDropdownIndex}
-          activeColor="#229ac3"
-          maxVisible={6}
-        />
-      ) : null}
+      <SkillsDropdown
+        width={screenWidth}
+        open={showSkillsDropdown}
+        onClose={setShowSkillsDropdown}
+        skills={skills}
+        selectedSkills={selectedSkills}
+        onSelect={toggleSelectedSkill}
+      />
+      <ModelsDropdown
+        open={showModelDropdown}
+        modelConfig={modelConfig}
+        width={screenWidth}
+        onClose={() => setShowModelDropdown(false)}
+        onModelConfigChange={onModelConfigChange}
+        onStatusMessage={setStatusMessage}
+      />
       {showFileMentionMenu ? (
         <DropdownMenu
           width={screenWidth}
@@ -1042,18 +877,6 @@ export function buildInitPromptSubmission(selectedSkills: SkillInfo[]): PromptSu
     imageUrls: [],
     selectedSkills: selectedSkills.length > 0 ? selectedSkills : undefined,
   };
-}
-
-export function getThinkingOptionIndex(
-  config: Pick<ModelConfigSelection, "thinkingEnabled" | "reasoningEffort">
-): number {
-  const index = MODEL_COMMAND_THINKING_OPTIONS.findIndex((option) => {
-    if (!config.thinkingEnabled) {
-      return !option.thinkingEnabled;
-    }
-    return option.thinkingEnabled && option.reasoningEffort === config.reasoningEffort;
-  });
-  return index >= 0 ? index : 0;
 }
 
 export function removeCurrentSlashToken(state: PromptBufferState): PromptBufferState {

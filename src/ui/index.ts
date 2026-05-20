@@ -1,3 +1,9 @@
+import {
+  getThinkingOptionIndex,
+  MODEL_COMMAND_MODELS,
+  MODEL_COMMAND_THINKING_OPTIONS,
+} from "./components/ModelsDropdown";
+
 export {
   readSettings,
   readProjectSettings,
@@ -24,14 +30,12 @@ export {
   getPromptReturnKeyAction,
   renderBufferWithCursor,
   buildInitPromptSubmission,
-  getThinkingOptionIndex,
-  MODEL_COMMAND_MODELS,
-  MODEL_COMMAND_THINKING_OPTIONS,
   useTerminalInput,
   parseTerminalInput,
   type PromptSubmission,
   type InputKey,
 } from "./PromptInput";
+export { getThinkingOptionIndex, MODEL_COMMAND_MODELS, MODEL_COMMAND_THINKING_OPTIONS };
 export { disableTerminalExtendedKeys, enableTerminalExtendedKeys, getPromptCursorPlacement } from "./prompt/cursor";
 export { SessionList, formatSessionTitle } from "./SessionList";
 export { ThemedGradient } from "./ThemedGradient";
