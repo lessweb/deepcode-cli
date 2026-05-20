@@ -169,6 +169,37 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
   return { input, key };
 }
 
+export function dispatchTerminalInput(
+  data: Buffer | string,
+  inputHandler: (input: string, key: InputKey) => void
+): void {
+  const raw = String(data);
+
+  // Fix CJK composition bug on iOS terminals (Moshi, Blink, etc.).
+  // iOS keyboards can send composed characters as a single packet like:
+  //   "가\x7f나"  (character + backspace + replacement character)
+  // Do not split escape-prefixed sequences such as Alt+Backspace.
+  if (!raw.startsWith("\u001B") && raw.includes("\x7f") && raw.length > 1) {
+    const parts = raw.split("\x7f");
+    if (parts[0]) {
+      const { input, key } = parseTerminalInput(parts[0]);
+      inputHandler(input, key);
+    }
+    for (let i = 1; i < parts.length; i++) {
+      const bs = parseTerminalInput("\x7f");
+      inputHandler(bs.input, bs.key);
+      if (parts[i]) {
+        const { input, key } = parseTerminalInput(parts[i]);
+        inputHandler(input, key);
+      }
+    }
+    return;
+  }
+
+  const { input, key } = parseTerminalInput(data);
+  inputHandler(input, key);
+}
+
 export function useTerminalInput(
   inputHandler: (input: string, key: InputKey) => void,
   options: { isActive?: boolean } = {}
@@ -193,8 +224,7 @@ export function useTerminalInput(
       return;
     }
     const handleData = (data: Buffer | string) => {
-      const { input, key } = parseTerminalInput(data);
-      handlerRef.current(input, key);
+      dispatchTerminalInput(data, handlerRef.current);
     };
 
     stdin?.on("data", handleData);

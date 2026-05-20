@@ -40,6 +40,8 @@ export type ToolExecutionContext = {
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;
   onProcessTimeoutControl?: (processId: string | number, control: ProcessTimeoutControl | null) => void;
+  onBeforeFileMutation?: (filePath: string) => void;
+  onAfterFileMutation?: (filePath: string) => void;
   bashTimeoutMs?: number;
   bashMinTimeoutMs?: number;
 };
@@ -49,6 +51,8 @@ export type ToolExecutionHooks = {
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;
   onProcessTimeoutControl?: (processId: string | number, control: ProcessTimeoutControl | null) => void;
+  onBeforeFileMutation?: (filePath: string) => void;
+  onAfterFileMutation?: (filePath: string) => void;
   shouldStop?: () => boolean;
 };
 
@@ -217,6 +221,8 @@ export class ToolExecutor {
         onProcessExit: hooks?.onProcessExit,
         onProcessStdout: hooks?.onProcessStdout,
         onProcessTimeoutControl: hooks?.onProcessTimeoutControl,
+        onBeforeFileMutation: hooks?.onBeforeFileMutation,
+        onAfterFileMutation: hooks?.onAfterFileMutation,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

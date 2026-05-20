@@ -236,6 +236,7 @@ export class McpManager {
     this.tools = this.tools.filter((t) => t.serverName !== name);
     this.prompts = this.prompts.filter((p) => p.serverName !== name);
     this.resources = this.resources.filter((r) => r.serverName !== name);
+    this.onToolsListChanged?.();
     this.setStatus({
       name,
       status: "failed",

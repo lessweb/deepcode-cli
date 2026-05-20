@@ -321,7 +321,9 @@ export async function handleEditTool(
 
         const updated = applyReplacement(raw, replacementOldString, replacementNewString, matches, replaceAll);
         const diffPreview = buildDiffPreview(filePath, raw, updated);
+        context.onBeforeFileMutation?.(filePath);
         writeTextFile(filePath, updated, metadata.encoding, metadata.lineEndings);
+        context.onAfterFileMutation?.(filePath);
         const freshMetadata = readTextFileWithMetadata(filePath);
         recordFileState(
           context.sessionId,

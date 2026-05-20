@@ -1,5 +1,6 @@
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -481,6 +482,60 @@ rl.on("line", (line) => {
   assert.deepEqual(manager.getMcpStatus(), []);
 });
 
+test("SessionManager refreshes cached MCP tool definitions after server crash", async () => {
+  const workspace = createTempDir("deepcode-mcp-crash-cache-workspace-");
+  const serverPath = path.join(workspace, "mcp-server-crash.cjs");
+  fs.writeFileSync(
+    serverPath,
+    `
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+rl.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (!("id" in request)) {
+    return;
+  }
+  if (request.method === "initialize") {
+    send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} } } });
+    return;
+  }
+  if (request.method === "tools/list") {
+    send({ jsonrpc: "2.0", id: request.id, result: { tools: [
+      { name: "echo", inputSchema: { type: "object", properties: {} } }
+    ] } });
+    return;
+  }
+  if (request.method === "prompts/list") {
+    send({ jsonrpc: "2.0", id: request.id, result: { prompts: [] } });
+    return;
+  }
+  if (request.method === "resources/list") {
+    send({ jsonrpc: "2.0", id: request.id, result: { resources: [] } });
+    setTimeout(() => process.exit(9), 10);
+    return;
+  }
+  send({ jsonrpc: "2.0", id: request.id, result: { content: [] } });
+});
+`,
+    "utf8"
+  );
+
+  const manager = createSessionManager(workspace, "machine-id-mcp-crash-cache");
+  await manager.initMcpServers({ crashy: { command: process.execPath, args: [serverPath] } });
+
+  assert.equal(manager.getMcpStatus()[0]?.status, "ready");
+  assert.equal((manager as any).mcpToolDefinitions.length, 1);
+
+  await waitForMcpStatus(manager, "failed");
+
+  assert.equal((manager as any).mcpToolDefinitions.length, 0);
+
+  manager.dispose();
+});
+
 test("SessionManager reports configured MCP servers as starting before initialization", () => {
   const workspace = createTempDir("deepcode-mcp-configured-workspace-");
   const manager = new SessionManager({
@@ -885,6 +940,219 @@ test("replySession continues without appending /continue as a user message", asy
     false
   );
   assert.equal(fetchCalls.length, 0);
+});
+
+test("replySession records the current file-history branch head as checkpointHash", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-checkpoint-hash-workspace-");
+  const home = createTempDir("deepcode-checkpoint-hash-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-checkpoint-hash");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const checkpointHash = createFileHistoryCommit(home, workspace, sessionId, { "note.txt": "checkpoint\n" });
+
+  await manager.replySession(sessionId, { text: "second prompt" });
+
+  const userMessages = manager.listSessionMessages(sessionId).filter((message) => message.role === "user");
+  assert.equal(userMessages[userMessages.length - 1]?.checkpointHash, checkpointHash);
+});
+
+test("createSession initializes file-history repo and session branch", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-file-history-init-workspace-");
+  const home = createTempDir("deepcode-file-history-init-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-file-history-init");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  const gitDir = path.join(
+    home,
+    ".deepcode",
+    "projects",
+    workspace.replace(/[\\/]/g, "-").replace(/:/g, ""),
+    "file-history",
+    ".git"
+  );
+
+  assert.ok(fs.existsSync(gitDir));
+  assert.ok(userMessage?.checkpointHash);
+  assert.equal(
+    runFileHistoryGit(gitDir, workspace, ["rev-parse", "--verify", `refs/heads/${sessionId}^{commit}`]).trim(),
+    userMessage.checkpointHash
+  );
+});
+
+test("Write tool advances file-history while preserving the user prompt checkpoint", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-write-checkpoint-workspace-");
+  const home = createTempDir("deepcode-write-checkpoint-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "index.html");
+  const manager = createMockedClientSessionManager(workspace, [
+    {
+      choices: [
+        {
+          message: {
+            content: "",
+            tool_calls: [
+              {
+                id: "call-write-index",
+                type: "function",
+                function: {
+                  name: "write",
+                  arguments: JSON.stringify({ file_path: filePath, content: "<h1>Hello</h1>\n" }),
+                },
+              },
+            ],
+          },
+        },
+      ],
+    },
+    createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+  ]);
+
+  const sessionId = await manager.createSession({ text: "create an index page" });
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  assert.ok(userMessage?.checkpointHash);
+  assert.equal(fs.existsSync(filePath), true);
+
+  manager.restoreSessionCode(sessionId, userMessage.id);
+
+  assert.equal(fs.existsSync(filePath), false);
+});
+
+test("missing git executable does not block sessions or Write tool calls", async () => {
+  const workspace = createTempDir("deepcode-no-git-write-workspace-");
+  const home = createTempDir("deepcode-no-git-write-home-");
+  setHomeDir(home);
+
+  const originalPath = process.env.PATH;
+  process.env.PATH = "";
+  try {
+    const filePath = path.join(workspace, "index.html");
+    const manager = createMockedClientSessionManager(workspace, [
+      {
+        choices: [
+          {
+            message: {
+              content: "",
+              tool_calls: [
+                {
+                  id: "call-write-no-git",
+                  type: "function",
+                  function: {
+                    name: "write",
+                    arguments: JSON.stringify({ file_path: filePath, content: "<h1>No Git</h1>\n" }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+      createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+    ]);
+
+    const sessionId = await manager.createSession({ text: "create an index page" });
+    const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+
+    assert.equal(fs.readFileSync(filePath, "utf8"), "<h1>No Git</h1>\n");
+    assert.equal(userMessage?.checkpointHash, undefined);
+    assert.equal(manager.getSession(sessionId)?.status, "completed");
+  } finally {
+    if (originalPath === undefined) {
+      delete process.env.PATH;
+    } else {
+      process.env.PATH = originalPath;
+    }
+  }
+});
+
+test("restoreSessionConversation truncates messages before the selected user prompt", async () => {
+  const workspace = createTempDir("deepcode-undo-conversation-workspace-");
+  const home = createTempDir("deepcode-undo-conversation-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-undo-conversation");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const firstAssistant = (manager as any).buildAssistantMessage(
+    sessionId,
+    "first answer",
+    null,
+    null
+  ) as SessionMessage;
+  (manager as any).appendSessionMessage(sessionId, firstAssistant);
+  await manager.replySession(sessionId, { text: "second prompt" });
+  const secondUserMessage = manager
+    .listSessionMessages(sessionId)
+    .filter((message) => message.role === "user")
+    .at(-1);
+  assert.ok(secondUserMessage);
+  const secondAssistant = (manager as any).buildAssistantMessage(
+    sessionId,
+    "second answer",
+    null,
+    null
+  ) as SessionMessage;
+  (manager as any).appendSessionMessage(sessionId, secondAssistant);
+
+  manager.restoreSessionConversation(sessionId, secondUserMessage.id);
+
+  const contents = manager.listSessionMessages(sessionId).map((message) => message.content);
+  assert.ok(contents.includes("first prompt"));
+  assert.ok(contents.includes("first answer"));
+  assert.ok(!contents.includes("second prompt"));
+  assert.ok(!contents.includes("second answer"));
+  assert.equal(manager.getSession(sessionId)?.assistantReply, "first answer");
+});
+
+test("restoreSessionCode restores project files from the recorded Git checkpoint", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-undo-code-workspace-");
+  const home = createTempDir("deepcode-undo-code-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-undo-code");
+  const sessionId = "session-code-restore";
+  const checkpointHash = createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "before\n" });
+  createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "after\n", "new.txt": "remove me\n" });
+  fs.writeFileSync(path.join(workspace, "tracked.txt"), "after\n", "utf8");
+  fs.writeFileSync(path.join(workspace, "new.txt"), "remove me\n", "utf8");
+
+  (manager as any).appendSessionMessage(sessionId, {
+    ...buildTestMessage("user-with-checkpoint", sessionId, "user", "restore here"),
+    checkpointHash,
+  });
+
+  manager.restoreSessionCode(sessionId, "user-with-checkpoint");
+
+  assert.equal(fs.readFileSync(path.join(workspace, "tracked.txt"), "utf8"), "before\n");
+  assert.equal(fs.existsSync(path.join(workspace, "new.txt")), false);
 });
 
 test("replySession /continue runs trailing pending tool calls before requesting another response", async () => {
@@ -1760,6 +2028,9 @@ rl.on("line", (line) => {
 
 test("SessionManager adjusts the active Bash timeout control and session metadata", async () => {
   const workspace = createTempDir("deepcode-bash-timeout-session-");
+  const home = createTempDir("deepcode-bash-timeout-home-");
+  setHomeDir(home);
+
   const manager = createSessionManager(workspace, "");
   const sessionId = await manager.createSession({ text: "hello" });
 
@@ -1791,6 +2062,92 @@ test("SessionManager adjusts the active Bash timeout control and session metadat
   assert.equal(processInfo?.timeoutMs, 15 * 60 * 1000);
   assert.equal(processInfo?.deadlineAt, new Date(timeoutInfo.deadlineAtMs).toISOString());
 });
+
+function hasGit(): boolean {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function createFileHistoryCommit(
+  home: string,
+  workspace: string,
+  sessionId: string,
+  files: Record<string, string>
+): string {
+  const projectCode = workspace.replace(/[\\/]/g, "-").replace(/:/g, "");
+  const gitDir = path.join(home, ".deepcode", "projects", projectCode, "file-history", ".git");
+  const branchRef = `refs/heads/${sessionId}`;
+  fs.mkdirSync(path.dirname(gitDir), { recursive: true });
+  if (!fs.existsSync(gitDir)) {
+    runFileHistoryGit(gitDir, workspace, ["init"]);
+  }
+
+  let parentHash = "";
+  try {
+    parentHash = runFileHistoryGit(gitDir, workspace, ["rev-parse", "--verify", `${branchRef}^{commit}`]).trim();
+  } catch {
+    const emptyTree = runFileHistoryGit(gitDir, workspace, ["mktree"], "");
+    parentHash = runFileHistoryGit(
+      gitDir,
+      workspace,
+      ["commit-tree", emptyTree.trim(), "-m", "initial checkpoint"],
+      "",
+      fileHistoryCommitEnv()
+    ).trim();
+    runFileHistoryGit(gitDir, workspace, ["update-ref", branchRef, parentHash]);
+  }
+  runFileHistoryGit(gitDir, workspace, ["read-tree", "--reset", branchRef]);
+
+  for (const [relativePath, content] of Object.entries(files)) {
+    const filePath = path.join(workspace, relativePath);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, content, "utf8");
+  }
+  runFileHistoryGit(gitDir, workspace, ["add", "-f", "-A", "--", ...Object.keys(files)]);
+  const treeHash = runFileHistoryGit(gitDir, workspace, ["write-tree"]).trim();
+  const commitHash = runFileHistoryGit(
+    gitDir,
+    workspace,
+    ["commit-tree", treeHash, "-p", parentHash, "-m", "checkpoint"],
+    "",
+    fileHistoryCommitEnv()
+  ).trim();
+  runFileHistoryGit(gitDir, workspace, ["update-ref", branchRef, commitHash, parentHash]);
+  return commitHash;
+}
+
+function runFileHistoryGit(
+  gitDir: string,
+  workspace: string,
+  args: string[],
+  input = "",
+  env: NodeJS.ProcessEnv = process.env
+): string {
+  return execFileSync(
+    "git",
+    ["-c", "core.autocrlf=false", "-c", "core.eol=lf", `--git-dir=${gitDir}`, `--work-tree=${workspace}`, ...args],
+    {
+      encoding: "utf8",
+      input,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    }
+  );
+}
+
+function fileHistoryCommitEnv(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    GIT_AUTHOR_NAME: "DeepCode Test",
+    GIT_AUTHOR_EMAIL: "deepcode-test@example.com",
+    GIT_COMMITTER_NAME: "DeepCode Test",
+    GIT_COMMITTER_EMAIL: "deepcode-test@example.com",
+  };
+}
 
 function createSessionManager(projectRoot: string, machineId: string): SessionManager {
   return new SessionManager({
@@ -1971,6 +2328,16 @@ async function waitForNotifyRecords(
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   assert.fail(`expected ${expectedCount} notify records in ${outputPath}`);
+}
+
+async function waitForMcpStatus(manager: SessionManager, expectedStatus: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (manager.getMcpStatus()[0]?.status === expectedStatus) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  assert.fail(`expected MCP status ${expectedStatus}`);
 }
 
 function escapeRegExp(value: string): string {

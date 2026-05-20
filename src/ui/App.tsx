@@ -13,6 +13,7 @@ import {
   type SessionMessage,
   type SessionStatus,
   type SkillInfo,
+  type UndoTarget,
   type UserPromptContent,
 } from "../session";
 import { getExtensionRoot } from "../prompt";
@@ -23,9 +24,10 @@ import {
   type ResolvedDeepcodingSettings,
   resolveSettingsSources,
 } from "../settings";
-import { PromptInput, type PromptSubmission } from "./PromptInput";
-import { MessageView, RawModeExitPrompt } from "./compoments";
+import { PromptInput, type PromptDraft, type PromptSubmission } from "./PromptInput";
+import { MessageView, RawModeExitPrompt } from "./components";
 import { SessionList } from "./SessionList";
+import { UndoSelector, type UndoRestoreMode } from "./UndoSelector";
 import { buildLoadingText } from "./loadingText";
 import { findExpandedThinkingId } from "./thinkingState";
 import { WelcomeScreen } from "./WelcomeScreen";
@@ -39,12 +41,12 @@ import {
 } from "./askUserQuestion";
 import { buildExitSummaryText } from "./exitSummary";
 import { RawMode, useRawModeContext } from "./contexts";
-import { renderMessageToStdout } from "./compoments/MessageView/utils";
+import { renderMessageToStdout } from "./components/MessageView/utils";
 
 const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
 
-type View = "chat" | "session-list" | "mcp-status";
+type View = "chat" | "session-list" | "undo" | "mcp-status";
 
 type AppProps = {
   projectRoot: string;
@@ -68,6 +70,8 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
+  const [undoTargets, setUndoTargets] = useState<UndoTarget[]>([]);
+  const [promptDraft, setPromptDraft] = useState<PromptDraft | null>(null);
   const [statusLine, setStatusLine] = useState<string>("");
   const [errorLine, setErrorLine] = useState<string | null>(null);
   const [streamProgress, setStreamProgress] = useState<LlmStreamProgress | null>(null);
@@ -222,6 +226,17 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
         setShowWelcome(false);
         refreshSessionsList();
         setView("session-list");
+        return;
+      }
+      if (submission.command === "undo") {
+        const activeSessionId = sessionManager.getActiveSessionId();
+        if (!activeSessionId) {
+          setErrorLine("No active session to undo.");
+          return;
+        }
+        setShowWelcome(false);
+        setUndoTargets(sessionManager.listUndoTargets(activeSessionId));
+        setView("undo");
         return;
       }
       if (submission.command === "mcp") {
@@ -385,6 +400,20 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
     [handlePrompt]
   );
 
+  const reloadActiveSessionView = useCallback(
+    (sessionId: string): void => {
+      process.stdout.write("\u001B[2J\u001B[3J\u001B[H");
+      setMessages([]);
+      setShowWelcome(false);
+      setWelcomeNonce((n) => n + 1);
+      setTimeout(() => {
+        setMessages(loadVisibleMessages(sessionManager, sessionId));
+        setShowWelcome(true);
+      }, 0);
+    },
+    [sessionManager]
+  );
+
   useEffect(() => {
     if (initialPromptSubmittedRef.current || !initialPrompt || !initialPrompt.trim()) {
       return;
@@ -422,6 +451,45 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
       await refreshSkills(sessionId);
     },
     [sessionManager, refreshSkills]
+  );
+
+  const handleUndoRestore = useCallback(
+    async (target: UndoTarget, restoreMode: UndoRestoreMode): Promise<void> => {
+      const sessionId = sessionManager.getActiveSessionId();
+      if (!sessionId) {
+        setErrorLine("No active session to undo.");
+        setView("chat");
+        setShowWelcome(true);
+        return;
+      }
+
+      const errors: string[] = [];
+      if (restoreMode === "code-and-conversation") {
+        try {
+          sessionManager.restoreSessionCode(sessionId, target.message.id);
+        } catch (error) {
+          errors.push(`Code restore failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      let conversationRestored = false;
+      try {
+        sessionManager.restoreSessionConversation(sessionId, target.message.id);
+        conversationRestored = true;
+      } catch (error) {
+        errors.push(`Conversation restore failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+
+      refreshSessionsList();
+      await refreshSkills(sessionId);
+      setView("chat");
+      setErrorLine(errors.length > 0 ? errors.join(" ") : null);
+      if (conversationRestored) {
+        setPromptDraft(buildPromptDraftFromSessionMessage(target.message, Date.now()));
+      }
+      reloadActiveSessionView(sessionId);
+    },
+    [reloadActiveSessionView, refreshSessionsList, refreshSkills, sessionManager]
   );
 
   const handleRawModeChange = useCallback(
@@ -632,6 +700,15 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
           onSelect={(id) => void handleSelectSession(id)}
           onCancel={() => setView("chat")}
         />
+      ) : view === "undo" ? (
+        <UndoSelector
+          targets={undoTargets}
+          onSelect={(target, restoreMode) => void handleUndoRestore(target, restoreMode)}
+          onCancel={() => {
+            setView("chat");
+            setShowWelcome(true);
+          }}
+        />
       ) : view === "mcp-status" ? (
         <McpStatusList
           statuses={mcpStatuses}
@@ -657,6 +734,7 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
           busy={busy}
           loadingText={loadingText}
           runningProcesses={runningProcesses}
+          promptDraft={promptDraft}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
           onRawModeChange={handleRawModeChange}
@@ -699,6 +777,30 @@ function buildSyntheticUserMessage(content: string, imageCount: number): Session
     createTime: now,
     updateTime: now,
   };
+}
+
+export function buildPromptDraftFromSessionMessage(message: SessionMessage, nonce: number): PromptDraft {
+  return {
+    nonce,
+    text: typeof message.content === "string" ? message.content : "",
+    imageUrls: extractImageUrlsFromContentParams(message.contentParams),
+  };
+}
+
+function extractImageUrlsFromContentParams(contentParams: unknown): string[] {
+  const params = Array.isArray(contentParams) ? contentParams : contentParams ? [contentParams] : [];
+  const imageUrls: string[] = [];
+  for (const param of params) {
+    if (!param || typeof param !== "object") {
+      continue;
+    }
+    const record = param as { type?: unknown; image_url?: { url?: unknown } };
+    const url = record.image_url?.url;
+    if (record.type === "image_url" && typeof url === "string" && url) {
+      imageUrls.push(url);
+    }
+  }
+  return imageUrls;
 }
 
 function isCurrentSessionEmpty(sessionManager: SessionManager): boolean {

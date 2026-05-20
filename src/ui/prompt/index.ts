@@ -1,4 +1,4 @@
-export { useTerminalInput, parseTerminalInput } from "./useTerminalInput";
+export { useTerminalInput, parseTerminalInput, dispatchTerminalInput } from "./useTerminalInput";
 export type { InputKey } from "./useTerminalInput";
 
 export {

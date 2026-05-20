@@ -6,10 +6,10 @@ import {
   renderMessageToStdout,
   getUpdatePlanPreviewLines,
   parseToolPayload,
-} from "../ui/compoments/MessageView/utils";
+} from "../ui/components/MessageView/utils";
 import { RawMode } from "../ui/contexts";
 import type { SessionMessage } from "../session";
-import type { ToolSummary } from "../ui/compoments/MessageView/types";
+import type { ToolSummary } from "../ui/components/MessageView/types";
 
 test("parseDiffPreview removes headers and classifies lines", () => {
   const lines = parseDiffPreview(
