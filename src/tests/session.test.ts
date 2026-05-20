@@ -2018,12 +2018,16 @@ function runFileHistoryGit(
   input = "",
   env: NodeJS.ProcessEnv = process.env
 ): string {
-  return execFileSync("git", [`--git-dir=${gitDir}`, `--work-tree=${workspace}`, ...args], {
-    encoding: "utf8",
-    input,
-    env,
-    stdio: ["pipe", "pipe", "pipe"],
-  });
+  return execFileSync(
+    "git",
+    ["-c", "core.autocrlf=false", "-c", "core.eol=lf", `--git-dir=${gitDir}`, `--work-tree=${workspace}`, ...args],
+    {
+      encoding: "utf8",
+      input,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    }
+  );
 }
 
 function fileHistoryCommitEnv(): NodeJS.ProcessEnv {

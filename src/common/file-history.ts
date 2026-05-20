@@ -160,7 +160,7 @@ export class GitFileHistory {
     args: string[],
     options: { includeWorkTree: boolean; input?: string; env?: NodeJS.ProcessEnv }
   ): string {
-    const gitArgs = [`--git-dir=${this.gitDir}`];
+    const gitArgs = ["-c", "core.autocrlf=false", "-c", "core.eol=lf", `--git-dir=${this.gitDir}`];
     if (options.includeWorkTree) {
       gitArgs.push(`--work-tree=${this.projectRoot}`);
     }
