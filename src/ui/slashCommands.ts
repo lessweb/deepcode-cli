@@ -9,6 +9,7 @@ export type SlashCommandKind =
   | "resume"
   | "continue"
   | "mcp"
+  | "install"
   | "raw"
   | "exit";
 
@@ -63,6 +64,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "mcp",
     label: "/mcp",
     description: "Show MCP server status and available tools",
+  },
+  {
+    kind: "install",
+    name: "install",
+    label: "/install",
+    description: "Install missing Bash exploration tools: rg and jq",
   },
   {
     kind: "raw",
