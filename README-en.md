@@ -8,6 +8,9 @@
 </p>
 <h1>Deep Code CLI</h1>
 
+[![][npm-release-shield]][npm-release-link] [![][npm-downloads-shield]][npm-downloads-link] [![][github-contributors-shield]][github-contributors-link] [![][github-forks-shield]][github-forks-link] [![][github-stars-shield]][github-stars-link]
+[![][github-issues-shield]][github-issues-link] [![][github-issues-pr-shield]][github-issues-pr-link] [![][github-license-shield]][github-license-link]
+
 English · [中文](./README.md)
 
 <br/>
@@ -61,17 +64,19 @@ Deep Code CLI supports agent skills that allow you to extend the assistant's cap
 
 ## Slash Commands & Keyboard Shortcuts
 
-| Slash Command    | Action                                                   |
-|------------------|----------------------------------------------------------|
-| `/`              | Open the skills / commands menu                          |
-| `/new`           | Start a fresh conversation                               |
-| `/resume`        | Choose a previous conversation to continue               |
-| `/model`         | Switch model, thinking mode, and reasoning effort        |
-| `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)     |
-| `/init`          | Initialize an AGENTS.md file (LLM project instructions)  |
-| `/skills`        | List available skills                                    |
-| `/mcp`           | View MCP server status and available tools               |
-| `/exit`          | Quit (also `Ctrl+D` twice)                               |
+| Slash Command    | Action                                                  |
+|------------------|---------------------------------------------------------|
+| `/`              | Open the skills / commands menu                         |
+| `/new`           | Start a fresh conversation                              |
+| `/resume`        | Choose a previous conversation to continue              |
+| `/continue`      | Continue the active conversation or pick one to resume  |
+| `/model`         | Switch model, thinking mode, and reasoning effort       |
+| `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)    |
+| `/init`          | Initialize an AGENTS.md file (LLM project instructions) |
+| `/skills`        | List available skills                                   |
+| `/mcp`           | View MCP server status and available tools              |
+| `/undo`          | Restore code and/or conversation to a previous point    |
+| `/exit`          | Quit (also `Ctrl+D` twice)                              |
 
 | Key              | Action                                                   |
 |------------------|----------------------------------------------------------|
@@ -126,6 +131,12 @@ Deep Code supports MCP (Model Context Protocol) to connect external services suc
 
 For detailed setup instructions, see: [docs/mcp.md](docs/mcp.md)
 
+### How to configure Deep Code to send notifications after a task completes?
+
+When the AI assistant completes a task, Deep Code can automatically execute a notification script to send the task results to the specified channel (e.g., Slack, system notifications, etc.).
+
+For detailed configuration instructions, see: [docs/notify_en.md](docs/notify_en.md)
+
 ## Contributing
 
 Contributions are welcome! Here's how to get started:
@@ -166,3 +177,23 @@ If you find this tool helpful, please consider supporting us by:
 - Giving us a Star on GitHub (https://github.com/lessweb/deepcode-cli)
 - Submitting feedback and suggestions
 - Sharing with your friends and colleagues
+
+
+<!-- LINK GROUP -->
+
+[npm-release-link]: https://www.npmjs.com/package/@vegamo/deepcode-cli
+[npm-release-shield]: https://img.shields.io/npm/v/@vegamo/deepcode-cli?color=4d6BFE&labelColor=black&logo=npm&logoColor=white&style=flat-square
+[npm-downloads-link]: https://www.npmjs.com/package/@vegamo/deepcode-cli
+[npm-downloads-shield]: https://img.shields.io/npm/dt/@vegamo/deepcode-cli?labelColor=black&style=flat-square&color=4d6BFE
+[github-contributors-link]: https://github.com/lessweb/deepcode-cli/graphs/contributors
+[github-contributors-shield]: https://img.shields.io/github/contributors/lessweb/deepcode-cli?color=4d6BFE&labelColor=black&style=flat-square
+[github-forks-link]: https://github.com/lessweb/deepcode-cli/network/members
+[github-forks-shield]: https://img.shields.io/github/forks/lessweb/deepcode-cli?color=4d6BFE&labelColor=black&style=flat-square
+[github-stars-link]: https://github.com/lessweb/deepcode-cli/network/stargazers
+[github-stars-shield]: https://img.shields.io/github/stars/lessweb/deepcode-cli?color=4d6BFE&labelColor=black&style=flat-square
+[github-issues-link]: https://github.com/lessweb/deepcode-cli/issues
+[github-issues-shield]: https://img.shields.io/github/issues/lessweb/deepcode-cli?color=4d6BFE&labelColor=black&style=flat-square
+[github-issues-pr-link]: https://github.com/lessweb/deepcode-cli/pulls
+[github-issues-pr-shield]: https://img.shields.io/github/issues-pr/lessweb/deepcode-cli?color=4d6BFE&labelColor=black&style=flat-square
+[github-license-link]: https://github.com/lessweb/deepcode-cli/blob/master/LICENSE
+[github-license-shield]: https://img.shields.io/github/license/lessweb/deepcode-cli?color=4d6BFE&labelColor=black&style=flat-square
