@@ -760,11 +760,22 @@ function isCurrentSessionEmpty(sessionManager: SessionManager): boolean {
   return !activeSessionId || !sessionManager.getSession(activeSessionId);
 }
 
+function formatTokenCount(n: number): string {
+  if (n < 1000) return String(n);
+  if (n < 10000) return `${(n / 1000).toFixed(1)}k`;
+  return `${Math.round(n / 1000)}k`;
+}
+
 function buildStatusLine(entry: SessionEntry): string {
   const parts: string[] = [];
   parts.push(`status: ${entry.status}`);
-  if (typeof entry.activeTokens === "number" && entry.activeTokens > 0) {
-    parts.push(`tokens: ${entry.activeTokens}`);
+  const totalTokens = entry.usage?.total_tokens ?? 0;
+  const totalReqs =
+    entry.usagePerModel != null
+      ? Object.values(entry.usagePerModel).reduce((sum, m) => sum + (m.total_reqs ?? 0), 0)
+      : 0;
+  if (totalTokens > 0) {
+    parts.push(`tokens: ${formatTokenCount(totalTokens)}${totalReqs > 0 ? ` / ${totalReqs} reqs` : ""}`);
   }
   if (entry.failReason) {
     parts.push(`fail: ${entry.failReason}`);
