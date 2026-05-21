@@ -2,6 +2,7 @@ import { defaultsToThinkingMode } from "./common/model-capabilities";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import type { Locale } from "./common/i18n";
 
 export type DeepcodingEnv = Record<string, string | undefined> & {
   MODEL?: string;
@@ -51,6 +52,9 @@ export type DeepcodingSettings = {
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
+  locale?: string;
+  thinkingLocale?: string;
+  replyLocale?: string;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -64,7 +68,10 @@ export type ResolvedDeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
-  permissions: Required<PermissionSettings>;
+	  permissions: Required<PermissionSettings>;
+  locale: Locale;
+  thinkingLocale: Locale;
+  replyLocale: Locale;
 };
 
 export type ModelConfigSelection = {
@@ -321,6 +328,24 @@ export function resolveSettingsSources(
     trimString(userSettings?.webSearchTool) ||
     "";
 
+  const locale =
+    trimString(systemEnv.LOCALE) ||
+    trimString(projectSettings?.locale) ||
+    trimString(userSettings?.locale) ||
+    detectLocale();
+
+  const thinkingLocale =
+    trimString(systemEnv.THINKING_LOCALE) ||
+    trimString(projectSettings?.thinkingLocale) ||
+    trimString(userSettings?.thinkingLocale) ||
+    (locale as Locale);
+
+  const replyLocale =
+    trimString(systemEnv.REPLY_LOCALE) ||
+    trimString(projectSettings?.replyLocale) ||
+    trimString(userSettings?.replyLocale) ||
+    (locale as Locale);
+
   return {
     env,
     apiKey: trimString(env.API_KEY) || undefined,
@@ -332,8 +357,25 @@ export function resolveSettingsSources(
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
-    permissions: mergePermissions(userSettings, projectSettings),
+	    permissions: mergePermissions(userSettings, projectSettings),
+    locale: resolveLocale(locale),
+    thinkingLocale: resolveLocale(thinkingLocale),
+    replyLocale: resolveLocale(replyLocale),
   };
+}
+
+function resolveLocale(value: string): Locale {
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "zh-cn" || normalized === "zh_CN") return "zh-CN";
+  return "en";
+}
+
+function detectLocale(): string {
+  const lang = process.env.LANG ?? "";
+  if (lang.toLowerCase().includes("zh_CN") || lang.toLowerCase().includes("zh-cn")) {
+    return "zh-CN";
+  }
+  return "en";
 }
 
 export function resolveSettings(

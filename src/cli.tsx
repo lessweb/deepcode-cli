@@ -3,6 +3,8 @@ import { render } from "ink";
 import { setShellIfWindows } from "./common/shell-utils";
 import { checkForNpmUpdate, promptForPendingUpdate, type PackageInfo } from "./common/update-check";
 import { AppContainer } from "./ui";
+import { initI18n } from "./common/i18n";
+import { resolveCurrentSettings } from "./ui/App";
 
 const args = process.argv.slice(2);
 const packageInfo = readPackageInfo();
@@ -85,12 +87,23 @@ async function main(): Promise<void> {
     let restarting = false;
     const appInitialPrompt = initialPrompt;
     initialPrompt = undefined;
+
+    // Initialize i18n before rendering
+    const settings = resolveCurrentSettings(projectRoot);
+    initI18n(settings.locale, {
+      thinkingLocale: settings.thinkingLocale,
+      replyLocale: settings.replyLocale,
+    });
+
     const inkInstance = render(
       <AppContainer
         projectRoot={projectRoot}
         version={packageInfo.version}
         initialPrompt={appInitialPrompt}
         onRestart={() => restartRef.current?.()}
+        initialLocale={settings.locale}
+        initialThinkingLocale={settings.thinkingLocale}
+        initialReplyLocale={settings.replyLocale}
       />,
       { exitOnCtrlC: false }
     );

@@ -49,6 +49,16 @@ export default tseslint.config(
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // Scripts: Node.js environment
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        console: "readable",
+        process: "readable",
+      },
+    },
+  },
   // Prettier config: disable conflicting ESLint rules, MUST be last
-  prettierConfig,
+  prettierConfig
 );

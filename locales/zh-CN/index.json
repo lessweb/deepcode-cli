@@ -1,0 +1,169 @@
+{
+  "ui": {
+    "messageView": {
+      "thinking": "思考",
+      "reasoningFallback": "(推理中...)",
+      "noContent": "(无内容)",
+      "loadedSkill": "⚡ 已加载技能：{name}",
+      "conversationSummaryInserted": "(已插入对话摘要)",
+      "changes": "└ 变更",
+      "plan": "└ 计划",
+      "result": "└ 结果",
+      "toolName": "工具"
+    },
+    "promptInput": {
+      "interrupting": "正在中断…",
+      "imageAttached": "已从剪贴板粘贴图片",
+      "noImageFound": "剪贴板中没有图片",
+      "readingClipboard": "正在读取剪贴板...",
+      "failedClipboard": "读取剪贴板失败",
+      "clearedImages": "已清除粘贴的图片",
+      "waitForResponse": "请等待当前响应完成，或按 esc 中断",
+      "pressCtrlDExit": "按 ctrl+d 退出",
+      "pressCtrlDAgain": "再按一次 ctrl+d 退出",
+      "footer": "回车发送 · shift+回车换行 · @ 文件 · ctrl+v 图片 · / 命令 · ctrl+d 退出",
+      "footerBusy": "esc 中断 · ctrl+c 取消输入",
+      "ctrlOViewOutput": " · ctrl+o 查看输出",
+      "ctrlOExpand": " · ctrl+o 展开",
+      "ctrlOCollapse": " · ctrl+o 折叠",
+      "noPasteMarker": "光标位置没有粘贴标记",
+      "pasteNotFound": "找不到粘贴内容",
+      "imageCount": "📎 {count} 张图片已粘贴"
+    },
+    "loading": {
+      "thinking": "思考中...",
+      "thinkingElapsed": "思考中... ({elapsed}秒) · ↓ {tokens} tokens"
+    },
+    "app": {
+      "error": "错误：{message}",
+      "statusStatus": "状态：{status}",
+      "statusTokens": "token 数：{tokens}",
+      "statusFail": "失败原因：{reason}",
+      "interrupted": "已中断。",
+      "killedProcesses": "已终止进程：{pids}",
+      "failedKillProcesses": "终止进程失败：{pids}",
+      "modelUnchanged": "模型设置未变更",
+      "modelUpdated": "模型设置已更新：{before} → {after}",
+      "noActiveSession": "没有活跃会话可供撤销。",
+      "codeRestoreFailed": "代码恢复失败：{error}",
+      "conversationRestoreFailed": "对话恢复失败：{error}",
+      "sessionDefaultSummary": "[图片提示]",
+      "sessionAgentSteps": "AI 助手已执行多个步骤但未得出结论。是否继续？",
+      "apiKeyNotFound": "未找到 OpenAI API key。请配置 ~/.deepcode/settings.json 或 ./.deepcode/settings.json。",
+      "requestFailed": "请求失败：{error}"
+    },
+    "exitSummary": {
+      "goodbye": "再见！",
+      "modelUsage": "模型用量",
+      "reqs": "请求数",
+      "inputTokens": "输入 Tokens",
+      "outputTokens": "输出 Tokens",
+      "cachedTokens": "缓存 Tokens"
+    },
+    "config": {
+      "title": "设置",
+      "language": "语言",
+      "languageUpdated": "语言已切换为 {locale}",
+      "thinkingLanguageUpdated": "推理语言已切换为 {locale}",
+      "replyLanguageUpdated": "回复语言已切换为 {locale}"
+    },
+    "welcome": {
+      "sendPrompt": "发送提示",
+      "insertNewline": "插入新行",
+      "pasteImage": "从剪贴板粘贴图片",
+      "interrupt": "中断当前模型响应",
+      "openMenu": "打开技能和命令菜单",
+      "quit": "退出 Deep Code CLI",
+      "deepCodeTitle": "Deep Code"
+    },
+    "mcp": {
+      "serverList": "服务器列表",
+      "serverDetail": "服务器详情",
+      "statusReady": "就绪",
+      "statusFailed": "失败",
+      "statusConnecting": "连接中",
+      "statusReconnecting": "重连中",
+      "reconnect": "重连"
+    },
+    "slashCommands": {
+      "skillsDesc": "列出可用技能",
+      "modelDesc": "选择模型、思考模式和努力程度",
+      "newDesc": "开始新的对话",
+      "initDesc": "初始化 AGENTS.md 文件为 LLM 添加指令",
+      "resumeDesc": "选择之前的对话继续",
+      "continueDesc": "继续当前对话，或选择一个对话恢复",
+      "undoDesc": "恢复到之前的代码和/或对话",
+      "mcpDesc": "显示 MCP 服务器状态和可用工具",
+      "rawDesc": "切换显示模式以查看或折叠推理内容",
+      "exitDesc": "退出 Deep Code CLI",
+      "configDesc": "配置设置：语言、模型等",
+      "noDescription": "(无描述)"
+    },
+    "sessionList": {
+      "title": "会话",
+      "empty": "暂无会话"
+    },
+    "askUserQuestion": {
+      "submit": "提交",
+      "cancel": "忽略",
+      "selectOption": "选择一个选项"
+    },
+    "processStdout": {
+      "title": "进程输出",
+      "running": "运行中：{command}",
+      "adjustTimeout": "调整超时",
+      "noOutput": "暂无输出"
+    },
+    "updatePrompt": {
+      "planHeader": "计划"
+    }
+  },
+  "session": {
+    "compacting": "对话内容较长，正在压缩...",
+    "skillPromptHeader": "使用以下技能文档来协助用户：\n"
+  },
+  "prompt": {
+    "skillDocumentsHeader": "使用以下技能文档来协助用户：\n",
+    "dateAndModel": "今天是{date}。随着对话的进行，时间在流逝。\n当前 LLM 模型为{model}，可通过 /model 命令切换模型。",
+    "thinkingLanguageInstruction": "重要：你的推理和思考过程请使用中文。",
+    "replyLanguageInstruction": "重要：请始终使用中文回复用户。"
+  },
+  "cli": {
+    "help": {
+      "title": "deepcode - Deep Code CLI",
+      "usage": "用法：",
+      "launchTui": "  deepcode                              启动交互式 TUI",
+      "launchWithPrompt": "  deepcode -p <prompt>                  使用预设提示启动",
+      "launchWithPromptLong": "  deepcode --prompt <prompt>            同 -p",
+      "printVersion": "  deepcode --version                    打印版本号",
+      "printHelp": "  deepcode --help                       显示此帮助",
+      "configSection": "配置：",
+      "userSettings": "  ~/.deepcode/settings.json    用户级别 API key、模型、base URL",
+      "projectSettings": "  ./.deepcode/settings.json    项目级别设置",
+      "userSkills": "  ~/.agents/skills/*/SKILL.md  用户级别技能",
+      "projectSkills": "  ./.agents/skills/*/SKILL.md  项目级别技能",
+      "legacySkills": "  ./.deepcode/skills/*/SKILL.md 旧版项目级别技能",
+      "tuiSection": "TUI 内部操作：",
+      "enterSend": "  enter            发送提示",
+      "shiftEnterNewline": "  shift+enter      插入换行",
+      "homeEnd": "  home/end         在当前行内移动",
+      "altLeftRight": "  alt+left/right   按词移动",
+      "ctrlW": "  ctrl+w           删除前一个词",
+      "ctrlV": "  ctrl+v           从剪贴板粘贴图片",
+      "ctrlX": "  ctrl+x           清除已粘贴的图片",
+      "esc": "  esc              中断当前模型响应",
+      "slash": "  /                打开技能/命令菜单",
+      "slashSkills": "  /skills          列出可用技能",
+      "slashModel": "  /model           选择模型、思考模式",
+      "slashNew": "  /new             开始新对话",
+      "slashInit": "  /init            初始化 AGENTS.md 文件",
+      "slashResume": "  /resume          选择之前的对话继续",
+      "slashContinue": "  /continue        继续当前对话或恢复",
+      "slashUndo": "  /undo            恢复到之前的代码/对话",
+      "slashMcp": "  /mcp             显示 MCP 状态和工具",
+      "slashRaw": "  /raw             切换推理内容显示模式",
+      "slashExit": "  /exit            退出",
+      "ctrlD": "  ctrl+d 两次      退出"
+    }
+  }
+}
