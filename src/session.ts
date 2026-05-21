@@ -28,6 +28,7 @@ import type { McpServerConfig } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { killProcessTree } from "./common/process-tree";
+import { GitFileHistory } from "./common/file-history";
 
 const MAX_SESSION_ENTRIES = 50;
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
@@ -202,6 +203,13 @@ export type SessionMessage = {
   updateTime: string;
   meta?: MessageMeta;
   html?: string;
+  checkpointHash?: string;
+};
+
+export type UndoTarget = {
+  message: SessionMessage;
+  index: number;
+  canRestoreCode: boolean;
 };
 
 export type UserPromptContent = {
@@ -286,6 +294,11 @@ export class SessionManager {
 
   getMcpStatus() {
     return this.mcpManager.getStatus();
+  }
+
+  async reconnectMcpServer(name: string, config?: McpServerConfig): Promise<void> {
+    await this.mcpManager.reconnect(name, config);
+    this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
   }
 
   dispose(): void {
@@ -902,6 +915,7 @@ The candidate skills are as follows:\n\n`;
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
     this.throwIfAborted(signal);
     const sessionId = crypto.randomUUID();
+    this.ensureFileHistorySession(sessionId);
     const now = new Date().toISOString();
     const index = this.loadSessionsIndex();
     const entry: SessionEntry = {
@@ -1022,6 +1036,7 @@ ${skillMd}
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
 
+    this.ensureFileHistorySession(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
@@ -1480,6 +1495,61 @@ ${skillMd}
     return messages;
   }
 
+  listUndoTargets(sessionId: string): UndoTarget[] {
+    return this.listSessionMessages(sessionId)
+      .map((message, index) => ({ message, index }))
+      .filter(({ message }) => this.isUndoTargetMessage(message))
+      .map(({ message, index }) => ({
+        message,
+        index,
+        canRestoreCode: Boolean(
+          message.checkpointHash && this.canRestoreCheckpointHash(sessionId, message.checkpointHash)
+        ),
+      }));
+  }
+
+  restoreSessionConversation(sessionId: string, messageId: string): SessionMessage[] {
+    const messages = this.listSessionMessages(sessionId);
+    const targetIndex = messages.findIndex((message) => message.id === messageId);
+    if (targetIndex === -1) {
+      throw new Error("Selected message was not found in this session.");
+    }
+
+    const keptMessages = messages.slice(0, targetIndex);
+    this.saveSessionMessages(sessionId, keptMessages);
+    const now = new Date().toISOString();
+    const latestAssistant = [...keptMessages].reverse().find((message) => message.role === "assistant");
+    const latestAssistantParams = latestAssistant?.messageParams as
+      | { tool_calls?: unknown[]; reasoning_content?: string }
+      | null
+      | undefined;
+
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      assistantReply: latestAssistant?.content ?? null,
+      assistantThinking:
+        typeof latestAssistantParams?.reasoning_content === "string" ? latestAssistantParams.reasoning_content : null,
+      assistantRefusal: null,
+      toolCalls: null,
+      status: "completed",
+      failReason: null,
+      processes: null,
+      updateTime: now,
+    }));
+    return keptMessages;
+  }
+
+  restoreSessionCode(sessionId: string, messageId: string): void {
+    const message = this.listSessionMessages(sessionId).find((item) => item.id === messageId);
+    if (!message) {
+      throw new Error("Selected message was not found in this session.");
+    }
+    if (!message.checkpointHash) {
+      throw new Error("Selected message has no code checkpoint.");
+    }
+    this.restoreCheckpointHash(sessionId, message.checkpointHash);
+  }
+
   private normalizeSessionMessage(message: SessionMessage): SessionMessage {
     if (message.role !== "tool") {
       return message;
@@ -1516,6 +1586,74 @@ ${skillMd}
     const projectDir = path.join(os.homedir(), ".deepcode", "projects", projectCode);
     const sessionsIndexPath = path.join(projectDir, "sessions-index.json");
     return { projectCode, projectDir, sessionsIndexPath };
+  }
+
+  private getFileHistory(): GitFileHistory {
+    return new GitFileHistory(this.projectRoot, this.getFileHistoryGitDir());
+  }
+
+  private getFileHistoryGitDir(): string {
+    const { projectDir } = this.getProjectStorage();
+    return path.join(projectDir, "file-history", ".git");
+  }
+
+  private ensureFileHistorySession(sessionId: string): string | undefined {
+    return this.getFileHistory().ensureSession(sessionId);
+  }
+
+  private getCurrentCheckpointHash(sessionId: string): string | undefined {
+    return this.getFileHistory().getCurrentCheckpointHash(sessionId);
+  }
+
+  private prepareFileMutationCheckpoint(sessionId: string, filePath: string): void {
+    const fileHistory = this.getFileHistory();
+    const previousHash = fileHistory.ensureSession(sessionId);
+    if (!previousHash) {
+      return;
+    }
+    this.updateLatestUserCheckpointHash(sessionId, undefined, previousHash);
+    const nextHash = fileHistory.recordCheckpoint(sessionId, [filePath], "Pre-mutation checkpoint");
+    if (nextHash && nextHash !== previousHash) {
+      this.updateLatestUserCheckpointHash(sessionId, previousHash, nextHash);
+    }
+  }
+
+  private recordFileMutationCheckpoint(sessionId: string, filePath: string): void {
+    const fileHistory = this.getFileHistory();
+    fileHistory.ensureSession(sessionId);
+    fileHistory.recordCheckpoint(sessionId, [filePath], "File mutation checkpoint");
+  }
+
+  private updateLatestUserCheckpointHash(sessionId: string, previousHash: string | undefined, nextHash: string): void {
+    const messages = this.listSessionMessages(sessionId);
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (!message || !this.isUndoTargetMessage(message)) {
+        continue;
+      }
+      if (message.checkpointHash && message.checkpointHash !== previousHash) {
+        return;
+      }
+      messages[index] = {
+        ...message,
+        checkpointHash: nextHash,
+        updateTime: new Date().toISOString(),
+      };
+      this.saveSessionMessages(sessionId, messages);
+      return;
+    }
+  }
+
+  private canRestoreCheckpointHash(sessionId: string, checkpointHash: string): boolean {
+    return this.getFileHistory().canRestore(sessionId, checkpointHash);
+  }
+
+  private restoreCheckpointHash(sessionId: string, checkpointHash: string): void {
+    this.getFileHistory().restore(sessionId, checkpointHash);
+  }
+
+  private isUndoTargetMessage(message: SessionMessage): boolean {
+    return message.role === "user" && message.visible && !message.compacted;
   }
 
   private ensureProjectDir(): string {
@@ -1628,6 +1766,7 @@ ${skillMd}
       visible: true,
       createTime: now,
       updateTime: now,
+      checkpointHash: this.getCurrentCheckpointHash(sessionId),
     };
   }
 
@@ -1795,6 +1934,8 @@ ${skillMd}
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
+      onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
+      onAfterFileMutation: (filePath) => this.recordFileMutationCheckpoint(sessionId, filePath),
       shouldStop: () => this.isInterrupted(sessionId),
     });
     if (this.isInterrupted(sessionId)) {

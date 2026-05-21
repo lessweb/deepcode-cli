@@ -3,6 +3,7 @@ import type { SlashCommandItem } from "./slashCommands";
 import { ARGS_SEPARATOR } from "./constants";
 import React from "react";
 import { Box, Text } from "ink";
+import type { SkillInfo } from "../session";
 
 type SlashCommandMenuProps = {
   items: SlashCommandItem[];
@@ -10,7 +11,9 @@ type SlashCommandMenuProps = {
   width: number;
   maxVisible?: number;
 };
-
+export function isSkillSelected(skills: SkillInfo[], skill: SkillInfo): boolean {
+  return skills.some((item) => item.name === skill.name);
+}
 const SlashCommandMenu = React.memo(function SlashCommandMenu({
   items,
   activeIndex,

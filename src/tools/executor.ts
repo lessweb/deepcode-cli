@@ -40,6 +40,8 @@ export type ToolExecutionContext = {
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;
   onProcessTimeoutControl?: (processId: string | number, control: ProcessTimeoutControl | null) => void;
+  onBeforeFileMutation?: (filePath: string) => void;
+  onAfterFileMutation?: (filePath: string) => void;
   bashTimeoutMs?: number;
   bashMinTimeoutMs?: number;
 };
@@ -49,6 +51,8 @@ export type ToolExecutionHooks = {
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;
   onProcessTimeoutControl?: (processId: string | number, control: ProcessTimeoutControl | null) => void;
+  onBeforeFileMutation?: (filePath: string) => void;
+  onAfterFileMutation?: (filePath: string) => void;
   shouldStop?: () => boolean;
 };
 
@@ -84,6 +88,13 @@ export type ToolHandler = (
   args: Record<string, unknown>,
   context: ToolExecutionContext
 ) => Promise<ToolExecutionResult>;
+
+const BUILT_IN_TOOL_NAME_ALIASES = new Map<string, string>([
+  ["Bash", "bash"],
+  ["Read", "read"],
+  ["Write", "write"],
+  ["Edit", "edit"],
+]);
 
 export type ToolCallExecution = {
   toolCallId: string;
@@ -183,7 +194,8 @@ export class ToolExecutor {
     hooks?: ToolExecutionHooks
   ): Promise<ToolExecutionResult> {
     const toolName = toolCall.function.name;
-    const handler = this.toolHandlers.get(toolName);
+    const handlerName = BUILT_IN_TOOL_NAME_ALIASES.get(toolName) ?? toolName;
+    const handler = this.toolHandlers.get(handlerName);
     if (!handler) {
       // Try MCP tools
       if (this.mcpManager?.isMcpTool(toolName)) {
@@ -217,6 +229,8 @@ export class ToolExecutor {
         onProcessExit: hooks?.onProcessExit,
         onProcessStdout: hooks?.onProcessStdout,
         onProcessTimeoutControl: hooks?.onProcessTimeoutControl,
+        onBeforeFileMutation: hooks?.onBeforeFileMutation,
+        onAfterFileMutation: hooks?.onAfterFileMutation,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

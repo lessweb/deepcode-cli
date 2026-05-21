@@ -1,7 +1,9 @@
 import { McpClient, type McpToolDefinition, type McpPromptDefinition, type McpResourceDefinition } from "./mcp-client";
 import type { McpServerConfig } from "../settings";
 
-const MCP_STARTUP_TIMEOUT_MS = 30_000;
+const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
+  ? parseInt(process.env.DEEPCODE_MCP_TIMEOUT, 10)
+  : 30_000;
 const MCP_CALL_TOOL_TIMEOUT_MS = 60_000;
 
 type McpToolEntry = {
@@ -14,7 +16,7 @@ type McpToolEntry = {
 
 export type McpServerStatus = {
   name: string;
-  status: "starting" | "ready" | "failed";
+  status: "starting" | "ready" | "failed" | "reconnecting";
   connected: boolean;
   error?: string;
   toolCount: number;
@@ -46,12 +48,10 @@ export class McpManager {
   private serverStatuses: McpServerStatus[] = [];
   private onToolsListChanged: (() => void) | null = null;
   private onStatusChanged: (() => void) | null = null;
+  private serverConfigs: Record<string, McpServerConfig> = {};
 
   prepare(servers?: Record<string, McpServerConfig>): void {
     if (!servers || Object.keys(servers).length === 0) return;
-    // Clear the disposed flag — a re-prepare means we are live again.
-    // (disconnect() sets disposed=true to stop a stale initialize() loop,
-    // but prepare+initialize must be able to start a new one.)
     this.disposed = false;
 
     for (const name of Object.keys(servers)) {
@@ -81,114 +81,174 @@ export class McpManager {
 
     if (!servers || Object.keys(servers).length === 0) return;
 
-    const entries = Object.entries(servers);
+    this.serverConfigs = servers;
     this.prepare(servers);
 
-    for (const [name, config] of entries) {
+    for (const [name, config] of Object.entries(servers)) {
       if (this.disposed) break;
-      let client: McpClient | null = null;
-      try {
-        client = new McpClient(name, config.command, config.args ?? [], config.env, (method) => {
-          if (method === "notifications/tools/list_changed") {
-            this.refreshServerTools(name, client!).catch(() => {
-              // swallow refresh errors
-            });
-          }
-        });
-        await client.connect(MCP_STARTUP_TIMEOUT_MS);
-        if (this.disposed) {
-          client.disconnect();
-          break;
-        }
-        this.clients.push(client);
-
-        // Discover tools
-        const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
-        if (this.disposed) break;
-        const toolNamespacedNames: string[] = [];
-        for (const tool of serverTools) {
-          const namespacedName = `mcp__${name}__${tool.name}`;
-          this.tools.push({
-            serverName: name,
-            originalName: tool.name,
-            namespacedName,
-            definition: tool,
-            client,
-          });
-          toolNamespacedNames.push(namespacedName);
-        }
-
-        // Discover prompts
-        let serverPrompts: McpPromptDefinition[] = [];
-        try {
-          serverPrompts = await client.listPrompts(MCP_STARTUP_TIMEOUT_MS);
-        } catch {
-          // Server may not support prompts — safe to ignore
-        }
-        if (this.disposed) break;
-        const promptNamespacedNames: string[] = [];
-        for (const prompt of serverPrompts) {
-          const namespacedName = `mcp__${name}__${prompt.name}`;
-          this.prompts.push({
-            serverName: name,
-            namespacedName,
-            definition: prompt,
-            client,
-          });
-          promptNamespacedNames.push(namespacedName);
-        }
-
-        // Discover resources
-        let serverResources: McpResourceDefinition[] = [];
-        try {
-          serverResources = await client.listResources(MCP_STARTUP_TIMEOUT_MS);
-        } catch {
-          // Server may not support resources — safe to ignore
-        }
-        if (this.disposed) break;
-        const resourceNamespacedNames: string[] = [];
-        for (const resource of serverResources) {
-          const namespacedName = `mcp__${name}__${resource.name}`;
-          this.resources.push({
-            serverName: name,
-            namespacedName,
-            definition: resource,
-            client,
-          });
-          resourceNamespacedNames.push(namespacedName);
-        }
-
-        this.setStatus({
-          name,
-          status: "ready",
-          connected: true,
-          toolCount: serverTools.length,
-          tools: toolNamespacedNames,
-          promptCount: serverPrompts.length,
-          prompts: promptNamespacedNames,
-          resourceCount: serverResources.length,
-          resources: resourceNamespacedNames,
-        });
-      } catch (err) {
-        if (this.disposed) break;
-        client?.disconnect();
-        const message = err instanceof Error ? err.message : String(err);
-        // 不在控制台输出错误日志，避免暴露敏感信息
-        // process.stderr.write(`[deepcode] MCP server "${name}" failed to initialize: ${message}\n`);
-        this.setStatus({
-          name,
-          status: "failed",
-          connected: false,
-          error: message,
-          toolCount: 0,
-          tools: [],
-          promptCount: 0,
-          prompts: [],
-          resourceCount: 0,
-          resources: [],
-        });
-      }
+      await this.connectServer(name, config);
     }
+  }
+
+  async reconnect(name: string, config?: McpServerConfig): Promise<void> {
+    if (this.disposed) return;
+    const effectiveConfig = config ?? this.serverConfigs[name];
+    if (!effectiveConfig) return;
+    if (config) {
+      this.serverConfigs[name] = config;
+    }
+
+    this.setStatus({
+      name,
+      status: "reconnecting",
+      connected: false,
+      error: "Reconnecting...",
+      toolCount: 0,
+      tools: [],
+      promptCount: 0,
+      prompts: [],
+      resourceCount: 0,
+      resources: [],
+    });
+
+    await this.connectServer(name, effectiveConfig);
+  }
+
+  private async connectServer(name: string, config: McpServerConfig): Promise<void> {
+    if (this.disposed) return;
+
+    // Clean up stale entries from previous connection attempts
+    this.clients = this.clients.filter((c) => c.isConnected());
+    this.tools = this.tools.filter((t) => t.serverName !== name);
+    this.prompts = this.prompts.filter((p) => p.serverName !== name);
+    this.resources = this.resources.filter((r) => r.serverName !== name);
+
+    let client: McpClient | null = null;
+    try {
+      client = new McpClient(
+        name,
+        config.command,
+        config.args ?? [],
+        config.env,
+        (method) => {
+          if (method === "notifications/tools/list_changed") {
+            this.refreshServerTools(name, client!).catch(() => {});
+          }
+        },
+        (reason) => {
+          if (!this.disposed && this.serverConfigs[name]) {
+            this.onServerCrash(name, reason);
+          }
+        }
+      );
+      await client.connect(MCP_STARTUP_TIMEOUT_MS);
+      if (this.disposed) {
+        client.disconnect();
+        return;
+      }
+      this.clients.push(client);
+
+      const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
+      if (this.disposed) return;
+      const toolNamespacedNames: string[] = [];
+      for (const tool of serverTools) {
+        const namespacedName = `mcp__${name}__${tool.name}`;
+        this.tools.push({
+          serverName: name,
+          originalName: tool.name,
+          namespacedName,
+          definition: tool,
+          client,
+        });
+        toolNamespacedNames.push(namespacedName);
+      }
+
+      let serverPrompts: McpPromptDefinition[] = [];
+      try {
+        serverPrompts = await client.listPrompts(MCP_STARTUP_TIMEOUT_MS);
+      } catch {
+        // server may not support prompts
+      }
+      if (this.disposed) return;
+      const promptNamespacedNames: string[] = [];
+      for (const prompt of serverPrompts) {
+        const namespacedName = `mcp__${name}__${prompt.name}`;
+        this.prompts.push({
+          serverName: name,
+          namespacedName,
+          definition: prompt,
+          client,
+        });
+        promptNamespacedNames.push(namespacedName);
+      }
+
+      let serverResources: McpResourceDefinition[] = [];
+      try {
+        serverResources = await client.listResources(MCP_STARTUP_TIMEOUT_MS);
+      } catch {
+        // server may not support resources
+      }
+      if (this.disposed) return;
+      const resourceNamespacedNames: string[] = [];
+      for (const resource of serverResources) {
+        const namespacedName = `mcp__${name}__${resource.name}`;
+        this.resources.push({
+          serverName: name,
+          namespacedName,
+          definition: resource,
+          client,
+        });
+        resourceNamespacedNames.push(namespacedName);
+      }
+
+      this.setStatus({
+        name,
+        status: "ready",
+        connected: true,
+        toolCount: serverTools.length,
+        tools: toolNamespacedNames,
+        promptCount: serverPrompts.length,
+        prompts: promptNamespacedNames,
+        resourceCount: serverResources.length,
+        resources: resourceNamespacedNames,
+      });
+    } catch (err) {
+      client?.disconnect();
+      const message = err instanceof Error ? err.message : String(err);
+      this.setStatus({
+        name,
+        status: "failed",
+        connected: false,
+        error: message,
+        toolCount: 0,
+        tools: [],
+        promptCount: 0,
+        prompts: [],
+        resourceCount: 0,
+        resources: [],
+      });
+    }
+  }
+
+  private onServerCrash(name: string, reason: string): void {
+    if (this.disposed) return;
+    this.clients = this.clients.filter((c) => c.isConnected());
+    this.tools = this.tools.filter((t) => t.serverName !== name);
+    this.prompts = this.prompts.filter((p) => p.serverName !== name);
+    this.resources = this.resources.filter((r) => r.serverName !== name);
+    this.onToolsListChanged?.();
+    this.setStatus({
+      name,
+      status: "failed",
+      connected: false,
+      error: reason,
+      toolCount: 0,
+      tools: [],
+      promptCount: 0,
+      prompts: [],
+      resourceCount: 0,
+      resources: [],
+    });
   }
 
   getStatus(): McpServerStatus[] {
@@ -345,12 +405,12 @@ export class McpManager {
     this.resources = [];
     this.serverStatuses = [];
     this.configuredServerNames = [];
+    this.serverConfigs = {};
     this.initialized = false;
   }
 
   private async refreshServerTools(serverName: string, client: McpClient): Promise<void> {
     const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
-    // Remove old tool entries for this server
     this.tools = this.tools.filter((t) => t.serverName !== serverName);
     const toolNamespacedNames: string[] = [];
     for (const tool of serverTools) {
@@ -364,13 +424,11 @@ export class McpManager {
       });
       toolNamespacedNames.push(namespacedName);
     }
-    // Update status
     const existing = this.serverStatuses.find((s) => s.name === serverName);
     if (existing) {
       existing.toolCount = serverTools.length;
       existing.tools = toolNamespacedNames;
     }
-    // Notify listener
     this.onToolsListChanged?.();
   }
 
@@ -390,7 +448,6 @@ export class McpManager {
     } else {
       this.serverStatuses[index] = status;
     }
-    // 触发状态变更回调
     this.onStatusChanged?.();
   }
 }

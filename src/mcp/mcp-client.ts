@@ -107,19 +107,24 @@ export class McpClient {
   >();
   private stderrBuffer = "";
   private notificationHandler: McpNotificationHandler | null = null;
+  private disconnectHandler: ((reason: string) => void) | null = null;
+  private intentionallyDisconnected = false;
 
   constructor(
     private readonly serverName: string,
     private readonly command: string,
     private readonly args: string[] = [],
     private readonly env?: Record<string, string>,
-    onNotification?: McpNotificationHandler
+    onNotification?: McpNotificationHandler,
+    onDisconnect?: (reason: string) => void
   ) {
     this.notificationHandler = onNotification ?? null;
+    this.disconnectHandler = onDisconnect ?? null;
   }
 
   async connect(timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
+      this.intentionallyDisconnected = false;
       const childEnv = {
         ...process.env,
         ...this.env,
@@ -145,17 +150,35 @@ export class McpClient {
         });
       }
 
+      let resolved = false;
+      const safeReject = (err: Error) => {
+        if (!resolved) {
+          resolved = true;
+          reject(err);
+        }
+      };
+
       this.process.on("error", (err) => {
-        reject(this.withStderr(`Failed to start MCP server "${this.serverName}" (${this.command}): ${err.message}`));
+        safeReject(
+          this.withStderr(`Failed to start MCP server "${this.serverName}" (${this.command}): ${err.message}`)
+        );
       });
 
       this.process.on("close", (code) => {
-        const error = this.withStderr(`MCP server "${this.serverName}" exited with code ${code}`);
+        const reason = `MCP server "${this.serverName}" exited with code ${code}`;
+        const error = this.withStderr(reason);
         for (const [, pending] of this.pendingRequests) {
           clearTimeout(pending.timer);
           pending.reject(error);
         }
         this.pendingRequests.clear();
+        this.reader?.close();
+        this.reader = null;
+        this.process = null;
+        if (!this.intentionallyDisconnected && this.disconnectHandler) {
+          this.disconnectHandler(reason);
+        }
+        safeReject(error);
       });
 
       if (this.process.stderr) {
@@ -264,6 +287,7 @@ export class McpClient {
   }
 
   disconnect(): void {
+    this.intentionallyDisconnected = true;
     if (this.reader) {
       this.reader.close();
       this.reader = null;
@@ -276,6 +300,10 @@ export class McpClient {
       }
       this.process = null;
     }
+  }
+
+  isConnected(): boolean {
+    return this.process !== null && this.process.exitCode === null;
   }
 
   private sendRequest(method: string, params: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {

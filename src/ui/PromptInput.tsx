@@ -42,22 +42,27 @@ import { readClipboardImageAsync } from "./clipboard";
 import type { SessionEntry, SkillInfo } from "../session";
 
 // Re-exported from prompt modules for backward compatibility
-export { useTerminalInput, parseTerminalInput } from "./prompt";
+export { useTerminalInput, parseTerminalInput, dispatchTerminalInput } from "./prompt";
 export type { InputKey } from "./prompt";
 
 import { useTerminalInput } from "./prompt";
 import type { InputKey } from "./prompt";
 import { useHiddenTerminalCursor, useTerminalExtendedKeys, useTerminalFocusReporting } from "./prompt";
-import SlashCommandMenu from "./SlashCommandMenu";
-import type { ModelConfigSelection, ReasoningEffort } from "../settings";
-import DropdownMenu from "./DropdownMenu";
-import { RawModelDropdown } from "./components";
+import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
+import type { ModelConfigSelection } from "../settings";
+import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "./components";
 
 export type PromptSubmission = {
   text: string;
   imageUrls: string[];
   selectedSkills?: SkillInfo[];
-  command?: "new" | "resume" | "continue" | "mcp" | "install" | "exit";
+  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit";
+};
+
+export type PromptDraft = {
+  nonce: number;
+  text: string;
+  imageUrls: string[];
 };
 
 type Props = {
@@ -71,6 +76,7 @@ type Props = {
   disabled?: boolean;
   placeholder?: string;
   runningProcesses?: SessionEntry["processes"];
+  promptDraft?: PromptDraft | null;
   onSubmit: (submission: PromptSubmission) => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
   onRawModeChange?: (mode: string) => void;
@@ -79,21 +85,6 @@ type Props = {
 };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-export const MODEL_COMMAND_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"] as const;
-
-type ThinkingModeOption = {
-  label: string;
-  thinkingEnabled: boolean;
-  reasoningEffort?: ReasoningEffort;
-};
-
-export const MODEL_COMMAND_THINKING_OPTIONS: ThinkingModeOption[] = [
-  { label: "Thinking mode [max]", thinkingEnabled: true, reasoningEffort: "max" },
-  { label: "Thinking mode [high]", thinkingEnabled: true, reasoningEffort: "high" },
-  { label: "No thinking", thinkingEnabled: false },
-];
-
-type ModelDropdownStep = "model" | "thinking";
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: boolean }): React.ReactElement {
   const [spinnerIndex, setSpinnerIndex] = useState(0);
@@ -124,6 +115,7 @@ export const PromptInput = React.memo(function PromptInput({
   disabled,
   placeholder,
   runningProcesses,
+  promptDraft,
   onSubmit,
   onModelConfigChange,
   onInterrupt,
@@ -140,12 +132,8 @@ export const PromptInput = React.memo(function PromptInput({
   const [menuIndex, setMenuIndex] = useState(0);
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [openRawModelDropdown, setOpenRawModelDropdown] = useState(false);
-  const [skillsDropdownIndex, setSkillsDropdownIndex] = useState(0);
-  const [modelDropdownStep, setModelDropdownStep] = useState<ModelDropdownStep | null>(null);
-  const [modelDropdownIndex, setModelDropdownIndex] = useState(0);
-  const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
-  const [fileMentionIndex, setFileMentionIndex] = useState(0);
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
   const [historyCursor, setHistoryCursor] = useState(-1);
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string | null>(null);
@@ -154,6 +142,7 @@ export const PromptInput = React.memo(function PromptInput({
   const undoRedoRef = React.useRef(createPromptUndoRedoState());
   const wasBusyRef = React.useRef(busy);
   const hadFileMentionTokenRef = React.useRef(false);
+  const appliedDraftNonceRef = React.useRef<number | null>(null);
 
   const fileMentionToken = getCurrentFileMentionToken(buffer);
   const hasFileMentionToken = fileMentionToken !== null;
@@ -164,19 +153,19 @@ export const PromptInput = React.memo(function PromptInput({
   );
   const showFileMentionMenu =
     !showSkillsDropdown &&
-    !modelDropdownStep &&
+    !showModelDropdown &&
     fileMentionToken !== null &&
     fileMentionKey !== dismissedFileMentionKey;
   const slashItems = React.useMemo(() => buildSlashCommands(skills), [skills]);
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      showSkillsDropdown || modelDropdownStep || showFileMentionMenu
+      showSkillsDropdown || showModelDropdown || showFileMentionMenu
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
           : [],
-    [showSkillsDropdown, modelDropdownStep, showFileMentionMenu, slashToken, slashItems]
+    [showSkillsDropdown, showModelDropdown, showFileMentionMenu, slashToken, slashItems]
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
@@ -232,39 +221,27 @@ export const PromptInput = React.memo(function PromptInput({
   }, [fileMentionKey]);
 
   useEffect(() => {
-    if (!showFileMentionMenu) {
-      setFileMentionIndex(0);
-      return;
-    }
-    if (fileMentionIndex >= fileMentionMatches.length) {
-      setFileMentionIndex(Math.max(0, fileMentionMatches.length - 1));
-    }
-  }, [fileMentionMatches.length, fileMentionIndex, showFileMentionMenu]);
-
-  useEffect(() => {
-    if (skillsDropdownIndex >= skills.length) {
-      setSkillsDropdownIndex(Math.max(0, skills.length - 1));
-    }
-  }, [skills.length, skillsDropdownIndex]);
-
-  useEffect(() => {
-    if (!modelDropdownStep) {
-      return;
-    }
-    const optionCount =
-      modelDropdownStep === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
-    if (modelDropdownIndex >= optionCount) {
-      setModelDropdownIndex(Math.max(0, optionCount - 1));
-    }
-  }, [modelDropdownIndex, modelDropdownStep]);
-
-  useEffect(() => {
     if (!statusMessage) {
       return;
     }
     const timer = setTimeout(() => setStatusMessage(null), 2500);
     return () => clearTimeout(timer);
   }, [statusMessage]);
+
+  useEffect(() => {
+    if (!promptDraft || appliedDraftNonceRef.current === promptDraft.nonce) {
+      return;
+    }
+    appliedDraftNonceRef.current = promptDraft.nonce;
+    setBuffer({ text: promptDraft.text, cursor: promptDraft.text.length });
+    setImageUrls(promptDraft.imageUrls);
+    setSelectedSkills([]);
+    setShowSkillsDropdown(false);
+    setOpenRawModelDropdown(false);
+    setHistoryCursor(-1);
+    setDraftBeforeHistory(null);
+    clearPromptUndoRedoState(undoRedoRef.current);
+  }, [promptDraft]);
 
   useEffect(() => {
     setHistoryCursor(-1);
@@ -287,16 +264,7 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.escape) {
-        if (modelDropdownStep) {
-          closeModelDropdown();
-          return;
-        }
-        if (showSkillsDropdown) {
-          setShowSkillsDropdown(false);
-          return;
-        }
-        if (showFileMentionMenu && fileMentionKey) {
-          setDismissedFileMentionKey(fileMentionKey);
+        if (showFileMentionMenu) {
           return;
         }
         if (busy) {
@@ -348,59 +316,12 @@ export const PromptInput = React.memo(function PromptInput({
         setPendingExit(false);
       }
 
-      if (openRawModelDropdown) {
+      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
         return;
       }
 
       if (historyCursor !== -1 && !key.upArrow && !key.downArrow) {
         exitHistoryBrowsing();
-      }
-
-      if (showSkillsDropdown) {
-        if (skills.length === 0) {
-          setShowSkillsDropdown(false);
-        } else {
-          if (key.upArrow) {
-            setSkillsDropdownIndex((idx) => (idx - 1 + skills.length) % skills.length);
-            return;
-          }
-          if (key.downArrow) {
-            setSkillsDropdownIndex((idx) => (idx + 1) % skills.length);
-            return;
-          }
-          if ((input === " " && !key.ctrl && !key.meta) || (key.return && !key.shift && !key.meta)) {
-            const skill = skills[skillsDropdownIndex];
-            if (skill) {
-              toggleSelectedSkill(skill);
-            }
-            return;
-          }
-          if (key.tab) {
-            setShowSkillsDropdown(false);
-            return;
-          }
-        }
-      }
-
-      if (modelDropdownStep) {
-        const optionCount =
-          modelDropdownStep === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
-        if (key.upArrow) {
-          setModelDropdownIndex((idx) => (idx - 1 + optionCount) % optionCount);
-          return;
-        }
-        if (key.downArrow) {
-          setModelDropdownIndex((idx) => (idx + 1) % optionCount);
-          return;
-        }
-        if ((input === " " && !key.ctrl && !key.meta) || (key.return && !key.shift && !key.meta)) {
-          selectModelDropdownItem();
-          return;
-        }
-        if (key.tab) {
-          closeModelDropdown();
-          return;
-        }
       }
 
       if (key.ctrl && (input === "v" || input === "V")) {
@@ -435,31 +356,8 @@ export const PromptInput = React.memo(function PromptInput({
       const isPlainReturn = returnAction === "submit";
 
       if (showFileMentionMenu) {
-        if (key.upArrow) {
-          if (fileMentionMatches.length > 0) {
-            setFileMentionIndex((idx) => (idx - 1 + fileMentionMatches.length) % fileMentionMatches.length);
-          }
+        if (key.upArrow || key.downArrow || key.tab || returnAction === "submit") {
           return;
-        }
-        if (key.downArrow) {
-          if (fileMentionMatches.length > 0) {
-            setFileMentionIndex((idx) => (idx + 1) % fileMentionMatches.length);
-          }
-          return;
-        }
-        if (key.tab || returnAction === "submit") {
-          const selected = fileMentionMatches[fileMentionIndex];
-          if (selected && fileMentionToken) {
-            insertFileMentionSelection(selected);
-            return;
-          }
-          if (key.tab) {
-            setDismissedFileMentionKey(fileMentionKey);
-            return;
-          }
-          if (fileMentionKey) {
-            setDismissedFileMentionKey(fileMentionKey);
-          }
         }
       }
 
@@ -703,6 +601,14 @@ export const PromptInput = React.memo(function PromptInput({
     setDismissedFileMentionKey(null);
   }
 
+  function resetPromptInput(): void {
+    setBuffer(EMPTY_BUFFER);
+    clearUndoRedoStacks();
+    setImageUrls([]);
+    setSelectedSkills([]);
+    setShowSkillsDropdown(false);
+  }
+
   function handleSlashSelection(item: SlashCommandItem): void {
     if (busy && item.kind !== "exit") {
       setStatusMessage("wait for the current response or press esc to interrupt");
@@ -722,7 +628,8 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "model") {
       clearSlashToken();
-      openModelDropdown();
+      setShowSkillsDropdown(false);
+      setShowModelDropdown(true);
       return;
     }
     if (item.kind === "raw") {
@@ -732,47 +639,32 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "new") {
       onSubmit({ text: "", imageUrls: [], command: "new" });
-      setBuffer(EMPTY_BUFFER);
-      clearUndoRedoStacks();
-      setImageUrls([]);
-      setSelectedSkills([]);
-      setShowSkillsDropdown(false);
+      resetPromptInput();
       return;
     }
     if (item.kind === "init") {
       onSubmit(buildInitPromptSubmission(selectedSkills));
-      setBuffer(EMPTY_BUFFER);
-      clearUndoRedoStacks();
-      setImageUrls([]);
-      setSelectedSkills([]);
-      setShowSkillsDropdown(false);
+      resetPromptInput();
       return;
     }
     if (item.kind === "resume") {
       onSubmit({ text: "", imageUrls: [], command: "resume" });
-      setBuffer(EMPTY_BUFFER);
-      clearUndoRedoStacks();
-      setImageUrls([]);
-      setSelectedSkills([]);
-      setShowSkillsDropdown(false);
+      resetPromptInput();
       return;
     }
     if (item.kind === "continue") {
       onSubmit({ text: "/continue", imageUrls: [], command: "continue" });
-      setBuffer(EMPTY_BUFFER);
-      clearUndoRedoStacks();
-      setImageUrls([]);
-      setSelectedSkills([]);
-      setShowSkillsDropdown(false);
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "undo") {
+      onSubmit({ text: "/undo", imageUrls: [], command: "undo" });
+      resetPromptInput();
       return;
     }
     if (item.kind === "mcp") {
       onSubmit({ text: "/mcp", imageUrls: [], command: "mcp" });
-      setBuffer(EMPTY_BUFFER);
-      clearUndoRedoStacks();
-      setImageUrls([]);
-      setSelectedSkills([]);
-      setShowSkillsDropdown(false);
+      resetPromptInput();
       return;
     }
     if (item.kind === "install") {
@@ -816,11 +708,7 @@ export const PromptInput = React.memo(function PromptInput({
       imageUrls,
       selectedSkills,
     });
-    setBuffer(EMPTY_BUFFER);
-    clearUndoRedoStacks();
-    setImageUrls([]);
-    setSelectedSkills([]);
-    setShowSkillsDropdown(false);
+    resetPromptInput();
   }
 
   function addSelectedSkill(skill: SkillInfo): void {
@@ -837,63 +725,9 @@ export const PromptInput = React.memo(function PromptInput({
     clearUndoRedoStacks();
   }
 
-  function openModelDropdown(): void {
-    const currentModelIndex = MODEL_COMMAND_MODELS.findIndex((model) => model === modelConfig.model);
-    setPendingModel(null);
-    setModelDropdownStep("model");
-    setModelDropdownIndex(currentModelIndex >= 0 ? currentModelIndex : 0);
-    setShowSkillsDropdown(false);
-  }
-
-  function closeModelDropdown(): void {
-    setModelDropdownStep(null);
-    setPendingModel(null);
-  }
-
-  function selectModelDropdownItem(): void {
-    if (modelDropdownStep === "model") {
-      const model = MODEL_COMMAND_MODELS[modelDropdownIndex] ?? modelConfig.model;
-      setPendingModel(model);
-      setModelDropdownStep("thinking");
-      setModelDropdownIndex(getThinkingOptionIndex(modelConfig));
-      return;
-    }
-
-    const option = MODEL_COMMAND_THINKING_OPTIONS[modelDropdownIndex] ?? MODEL_COMMAND_THINKING_OPTIONS[0];
-    const selection: ModelConfigSelection = {
-      model: pendingModel ?? modelConfig.model,
-      thinkingEnabled: option.thinkingEnabled,
-      reasoningEffort: option.reasoningEffort ?? modelConfig.reasoningEffort,
-    };
-    closeModelDropdown();
-    Promise.resolve(onModelConfigChange(selection))
-      .then((message) => {
-        if (message) {
-          setStatusMessage(message);
-        }
-      })
-      .catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        setStatusMessage(`Failed to update model settings: ${message}`);
-      });
-  }
-
-  const modelDropdownItems =
-    modelDropdownStep === "model"
-      ? MODEL_COMMAND_MODELS.map((model) => ({
-          label: model,
-          selected: model === (pendingModel ?? modelConfig.model),
-          description: model === modelConfig.model ? "current model" : "",
-        }))
-      : MODEL_COMMAND_THINKING_OPTIONS.map((option) => ({
-          label: option.label,
-          selected: getThinkingOptionIndex(modelConfig) === MODEL_COMMAND_THINKING_OPTIONS.indexOf(option),
-          description: option.thinkingEnabled ? `reasoningEffort: ${option.reasoningEffort}` : "thinking disabled",
-        }));
-
   const showFooterText = useMemo(
-    () => showMenu || showSkillsDropdown || openRawModelDropdown || modelDropdownStep !== null || showFileMentionMenu,
-    [showMenu, showSkillsDropdown, modelDropdownStep, openRawModelDropdown, showFileMentionMenu]
+    () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
+    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
   );
 
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
@@ -934,75 +768,34 @@ export const PromptInput = React.memo(function PromptInput({
         onSelect={(mode) => onRawModeChange?.(mode)}
         screenWidth={screenWidth}
       />
-      {showSkillsDropdown ? (
-        <DropdownMenu
-          width={screenWidth}
-          title="Select Skills"
-          helpText="Space toggle · Enter toggle · Esc to close"
-          emptyText="No skills found"
-          items={skills.map((skill) => ({
-            key: skill.path || skill.name,
-            label: skill.name,
-            description: skill.path,
-            selected: isSkillSelected(selectedSkills, skill),
-            statusIndicator: skill.isLoaded ? { symbol: "✓", color: "green" } : undefined,
-          }))}
-          activeIndex={skillsDropdownIndex}
-          activeColor="#229ac3"
-          maxVisible={6}
-        />
-      ) : null}
-      {modelDropdownStep ? (
-        <DropdownMenu
-          width={screenWidth}
-          title={modelDropdownStep === "model" ? "Select Model" : "Select Thinking Mode"}
-          helpText={
-            modelDropdownStep === "model"
-              ? "Space/Enter select model · Esc to cancel"
-              : "Space/Enter apply · Esc to cancel"
+      <SkillsDropdown
+        width={screenWidth}
+        open={showSkillsDropdown}
+        onClose={setShowSkillsDropdown}
+        skills={skills}
+        selectedSkills={selectedSkills}
+        onSelect={toggleSelectedSkill}
+      />
+      <ModelsDropdown
+        open={showModelDropdown}
+        modelConfig={modelConfig}
+        width={screenWidth}
+        onClose={() => setShowModelDropdown(false)}
+        onModelConfigChange={onModelConfigChange}
+        onStatusMessage={setStatusMessage}
+      />
+      <FileMentionMenu
+        open={showFileMentionMenu}
+        width={screenWidth}
+        token={fileMentionToken}
+        items={fileMentionMatches}
+        onClose={() => {
+          if (fileMentionKey) {
+            setDismissedFileMentionKey(fileMentionKey);
           }
-          items={modelDropdownItems.map((item) => ({
-            key: item.label,
-            label: item.label,
-            description: item.description,
-            selected: item.selected,
-          }))}
-          activeIndex={modelDropdownIndex}
-          activeColor="#229ac3"
-          maxVisible={6}
-        />
-      ) : null}
-      {showFileMentionMenu ? (
-        <DropdownMenu
-          width={screenWidth}
-          title="Mention File"
-          helpText="Enter/Tab insert · Esc close"
-          emptyText={fileMentionToken?.query ? "No matching files" : "Type after @ to search files"}
-          items={fileMentionMatches.map((item) => ({
-            key: item.path,
-            label: item.path,
-            description: item.type === "directory" ? "directory" : "file",
-          }))}
-          activeIndex={fileMentionIndex}
-          activeColor="#229ac3"
-          maxVisible={8}
-          renderItem={(item, isActive) => (
-            <Box flexDirection="row" paddingX={1} gap={1}>
-              <Text color={isActive ? "#229ac3" : undefined}>{isActive ? "> " : "  "}</Text>
-              <Box flexGrow={1}>
-                <Text color={isActive ? "#229ac3" : undefined} wrap="truncate-end" bold={isActive}>
-                  {item.label}
-                </Text>
-              </Box>
-              {item.description ? (
-                <Box width={10} flexShrink={0}>
-                  <Text dimColor>{item.description}</Text>
-                </Box>
-              ) : null}
-            </Box>
-          )}
-        />
-      ) : null}
+        }}
+        onSelect={insertFileMentionSelection}
+      />
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showFooterText && (
         <Box>
@@ -1030,10 +823,6 @@ export function formatSelectedSkillsStatus(skills: SkillInfo[]): string {
   return `⚡ ${names.join(", ")}`;
 }
 
-export function isSkillSelected(skills: SkillInfo[], skill: SkillInfo): boolean {
-  return skills.some((item) => item.name === skill.name);
-}
-
 export function addUniqueSkill(skills: SkillInfo[], skill: SkillInfo): SkillInfo[] {
   if (isSkillSelected(skills, skill)) {
     return skills;
@@ -1051,18 +840,6 @@ export function buildInitPromptSubmission(selectedSkills: SkillInfo[]): PromptSu
     imageUrls: [],
     selectedSkills: selectedSkills.length > 0 ? selectedSkills : undefined,
   };
-}
-
-export function getThinkingOptionIndex(
-  config: Pick<ModelConfigSelection, "thinkingEnabled" | "reasoningEffort">
-): number {
-  const index = MODEL_COMMAND_THINKING_OPTIONS.findIndex((option) => {
-    if (!config.thinkingEnabled) {
-      return !option.thinkingEnabled;
-    }
-    return option.thinkingEnabled && option.reasoningEffort === config.reasoningEffort;
-  });
-  return index >= 0 ? index : 0;
 }
 
 export function removeCurrentSlashToken(state: PromptBufferState): PromptBufferState {

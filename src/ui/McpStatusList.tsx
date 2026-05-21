@@ -5,9 +5,10 @@ import type { McpServerStatus } from "../mcp/mcp-manager";
 type Props = {
   statuses: McpServerStatus[];
   onCancel: () => void;
+  onReconnect: (name: string) => void;
 };
 
-export function McpStatusList({ statuses, onCancel }: Props): React.ReactElement {
+export function McpStatusList({ statuses, onCancel, onReconnect }: Props): React.ReactElement {
   const { columns, rows } = useWindowSize();
 
   // 视图模式：server-list（服务器列表） 或 server-detail（服务器详情）
@@ -20,10 +21,10 @@ export function McpStatusList({ statuses, onCancel }: Props): React.ReactElement
     setViewMode("server-list");
   }, []);
 
-  // 进入服务器详情
+  // 进入服务器详情（允许 ready、failed、reconnecting 状态）
   const enterDetail = useCallback(() => {
     const server = statuses[selectedServerIndex];
-    if (server && server.status === "ready") {
+    if (server && (server.status === "ready" || server.status === "failed" || server.status === "reconnecting")) {
       setViewMode("server-detail");
     }
   }, [statuses, selectedServerIndex]);
@@ -59,6 +60,7 @@ export function McpStatusList({ statuses, onCancel }: Props): React.ReactElement
         server={statuses[selectedServerIndex]}
         onBack={goBack}
         onCancel={onCancel}
+        onReconnect={onReconnect}
         rows={rows}
         columns={columns}
       />
@@ -173,6 +175,7 @@ function ServerListView({
 
   const readyCount = statuses.filter((s) => s.status === "ready").length;
   const startingCount = statuses.filter((s) => s.status === "starting").length;
+  const reconnectingCount = statuses.filter((s) => s.status === "reconnecting").length;
   const failedCount = statuses.filter((s) => s.status === "failed").length;
 
   return (
@@ -198,6 +201,11 @@ function ServerListView({
             <Text color="yellow" bold>
               {startingCount} starting,
             </Text>
+            {reconnectingCount > 0 && (
+              <Text color="#ff9900" bold>
+                {reconnectingCount} reconnecting,
+              </Text>
+            )}
             <Text color="red" bold>
               {failedCount} failed
             </Text>
@@ -257,15 +265,23 @@ function ServerRow({
   selected: boolean;
   labelColumnWidth: number;
 }): React.ReactElement {
-  const icon = status.status === "ready" ? "✓" : status.status === "failed" ? "✗" : "●";
-  const color = status.status === "ready" ? "green" : status.status === "failed" ? "red" : "yellow";
+  const icon =
+    status.status === "ready" ? "✓" : status.status === "failed" ? "✗" : status.status === "reconnecting" ? "↻" : "●";
+  const color =
+    status.status === "ready"
+      ? "green"
+      : status.status === "failed"
+        ? "red"
+        : status.status === "reconnecting"
+          ? "#ff9900"
+          : "yellow";
 
   // 加载动画：循环显示 (空) → . → .. → ... → (空) → ...
   const [dots, setDots] = React.useState(0);
   React.useEffect(() => {
-    if (status.status !== "starting") return;
+    if (status.status !== "starting" && status.status !== "reconnecting") return;
     const interval = setInterval(() => {
-      setDots((d) => (d + 1) % 4); // 0 → 1 → 2 → 3 → 0 ...
+      setDots((d) => (d + 1) % 4);
     }, 500);
     return () => clearInterval(interval);
   }, [status.status]);
@@ -275,7 +291,9 @@ function ServerRow({
       ? `Ready (${status.toolCount} tools, ${status.promptCount} prompts, ${status.resourceCount} resources)`
       : status.status === "failed"
         ? `Failed`
-        : "Starting" + (dots > 0 ? ".".repeat(dots) : "   "); // 动态显示 (空) / . / .. / ...
+        : status.status === "reconnecting"
+          ? `Reconnecting${dots > 0 ? ".".repeat(dots) : "   "}`
+          : "Starting" + (dots > 0 ? ".".repeat(dots) : "   ");
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -293,8 +311,10 @@ function ServerRow({
         </Box>
       </Box>
 
-      {/* Error message for failed servers */}
-      {status.status === "failed" && status.error ? <ErrorRow error={status.error} /> : null}
+      {/* Error message for failed or reconnecting servers */}
+      {(status.status === "failed" || status.status === "reconnecting") && status.error ? (
+        <ErrorRow error={status.error} />
+      ) : null}
     </Box>
   );
 }
@@ -304,59 +324,54 @@ function ServerDetailView({
   server,
   onBack,
   onCancel,
+  onReconnect,
   rows,
   columns,
 }: {
   server: McpServerStatus;
   onBack: () => void;
   onCancel: () => void;
+  onReconnect: (name: string) => void;
   rows: number;
   columns: number;
 }): React.ReactElement {
-  const [activeIndex, setActiveIndex] = useState(0);
+  const [activeIndex, setActiveIndex] = React.useState(0);
+  const hasReconnect = server.status === "failed";
+  const canScroll = server.status === "ready";
 
-  // 合并所有 items（tools, prompts, resources）
+  // 合并所有 items（tools, prompts, resources）+ Reconnect 选项
   const allItems = useMemo(() => {
     const items: { type: string; name: string }[] = [];
+    if (hasReconnect) {
+      items.push({ type: "action", name: "Reconnect" });
+    }
     server.tools.forEach((tool) => items.push({ type: "tool", name: tool }));
     server.prompts.forEach((prompt) => items.push({ type: "prompt", name: prompt }));
     server.resources.forEach((resource) => items.push({ type: "resource", name: resource }));
     return items;
-  }, [server]);
+  }, [server, hasReconnect]);
 
   const totalItems = allItems.length;
 
   const maxVisible = useMemo(() => {
-    const reservedLines = 10; // header + title + stats + footer + borders
+    const reservedLines = 12; // header + title + stats + error + footer + borders
     const availableLines = Math.max(0, Math.min(rows, 30) - reservedLines);
     return Math.max(1, availableLines);
   }, [rows]);
 
-  // 使用 ref 跟踪 visibleStart，避免循环依赖
   const visibleStartRef = React.useRef(0);
 
-  // 计算可见窗口起始位置：当 activeIndex 超出可见区域时才滚动（类似终端光标行为）
   const visibleStart = useMemo(() => {
     if (totalItems === 0) return 0;
-
     const currentStart = visibleStartRef.current;
     let newStart = currentStart;
-
-    // 如果 activeIndex 在当前可见窗口之前，滚动到 activeIndex
     if (activeIndex < currentStart) {
       newStart = activeIndex;
-    }
-    // 如果 activeIndex 在当前可见窗口之后，滚动到 activeIndex
-    else if (activeIndex >= currentStart + maxVisible) {
+    } else if (activeIndex >= currentStart + maxVisible) {
       newStart = activeIndex - maxVisible + 1;
     }
-
-    // 限制在合法范围内
     newStart = Math.max(0, Math.min(newStart, Math.max(0, totalItems - maxVisible)));
-
-    // 更新 ref
     visibleStartRef.current = newStart;
-
     return newStart;
   }, [activeIndex, maxVisible, totalItems]);
 
@@ -371,11 +386,16 @@ function ServerDetailView({
       onBack();
       return;
     }
-    // Space 或 Enter 键返回一级菜单
-    if (input === " " || key.return) {
+    if (key.return || input === " ") {
+      if (activeIndex === 0 && hasReconnect) {
+        onReconnect(server.name);
+        onBack();
+        return;
+      }
       onBack();
       return;
     }
+    if (!canScroll && !hasReconnect) return;
     if (key.upArrow) {
       setActiveIndex((prev) => Math.max(0, prev - 1));
       return;
@@ -384,25 +404,33 @@ function ServerDetailView({
       setActiveIndex((prev) => Math.min(totalItems - 1, prev + 1));
       return;
     }
-    if (key.pageUp) {
+    if (key.pageUp && canScroll) {
       setActiveIndex((prev) => Math.max(0, prev - maxVisible));
       return;
     }
-    if (key.pageDown) {
+    if (key.pageDown && canScroll) {
       setActiveIndex((prev) => Math.min(totalItems - 1, prev + maxVisible));
       return;
     }
-    if (key.home) {
+    if (key.home && canScroll) {
       setActiveIndex(0);
       return;
     }
-    if (key.end) {
+    if (key.end && canScroll) {
       setActiveIndex(totalItems - 1);
     }
   });
 
-  const icon = "✓";
-  const color = "green";
+  const statusIcon =
+    server.status === "ready" ? "✓" : server.status === "failed" ? "✗" : server.status === "reconnecting" ? "↻" : "●";
+  const statusColor =
+    server.status === "ready"
+      ? "green"
+      : server.status === "failed"
+        ? "red"
+        : server.status === "reconnecting"
+          ? "#ff9900"
+          : "yellow";
 
   return (
     <Box
@@ -416,18 +444,26 @@ function ServerDetailView({
       <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} gap={1}>
-          <Text color={color}>{icon} </Text>
+          <Text color={statusColor}>{statusIcon} </Text>
           <Text bold color="#229ac3" wrap="truncate-end">
             {server.name}
           </Text>
-          <Text dimColor>— Details</Text>
+          <Text dimColor>— {server.status === "ready" ? "Details" : "Status"}</Text>
         </Box>
         {/* Server info */}
         <Box paddingX={1} marginLeft={3}>
           <Text wrap="truncate-end">
-            {server.toolCount} tools, {server.promptCount} prompts, {server.resourceCount} resources
+            {server.status === "ready"
+              ? `${server.toolCount} tools, ${server.promptCount} prompts, ${server.resourceCount} resources`
+              : `Status: ${server.status}`}
           </Text>
         </Box>
+        {/* Error for failed/reconnecting */}
+        {server.error && (server.status === "failed" || server.status === "reconnecting") ? (
+          <Box paddingX={1} marginLeft={3}>
+            <ErrorRow error={server.error} />
+          </Box>
+        ) : null}
         {/* Items list */}
         <Box
           borderTop={true}
@@ -473,7 +509,13 @@ function ServerDetailView({
         </Box>
         {/* Footer */}
         <Box paddingX={1}>
-          <Text dimColor>↑/↓ scroll · Space/Enter back · Esc back · Ctrl+C close</Text>
+          <Text dimColor>
+            {hasReconnect
+              ? "Enter to reconnect · Esc back · Ctrl+C close"
+              : canScroll
+                ? "↑/↓ scroll · Space/Enter back · Esc back · Ctrl+C close"
+                : "Space/Enter back · Esc back · Ctrl+C close"}
+          </Text>
         </Box>
       </Box>
     </Box>
@@ -481,13 +523,16 @@ function ServerDetailView({
 }
 
 function ItemRow({ item, selected }: { item: { type: string; name: string }; selected: boolean }): React.ReactElement {
-  const icon = item.type === "tool" ? "🔧" : item.type === "prompt" ? "📝" : "📦";
+  const isAction = item.type === "action";
+  const icon = isAction ? "↻" : item.type === "tool" ? "🔧" : item.type === "prompt" ? "📝" : "📦";
+  const color = isAction && selected ? "#ff9900" : selected ? "#229ac3" : undefined;
 
   return (
     <Box height={1} flexDirection="row">
+      <Text color={selected ? "#229ac3" : undefined}>{selected ? "> " : "  "}</Text>
       <Text dimColor>{icon} </Text>
-      <Text color={selected ? "#229ac3" : undefined} dimColor wrap="truncate-end">
-        {item.name}
+      <Text color={color} dimColor={!selected} bold={isAction} wrap="truncate-end">
+        {isAction ? `[${item.name}]` : item.name}
       </Text>
     </Box>
   );

@@ -28,6 +28,8 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
     "continue",
     "mcp",
     "install",
+    "undo",
+    "mcp",
     "raw",
     "exit",
   ]);
@@ -75,6 +77,13 @@ test("findExactSlashCommand returns built-in /continue", () => {
   const item = findExactSlashCommand(items, "/continue");
   assert.ok(item);
   assert.equal(item?.kind, "continue");
+});
+
+test("findExactSlashCommand returns built-in /undo", () => {
+  const items = buildSlashCommands(skills);
+  const item = findExactSlashCommand(items, "/undo");
+  assert.ok(item);
+  assert.equal(item?.kind, "undo");
 });
 
 test("findExactSlashCommand returns built-in /skills", () => {

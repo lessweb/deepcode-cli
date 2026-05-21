@@ -19,10 +19,23 @@ import {
   toggleSkillSelection,
   renderBufferWithCursor,
   buildInitPromptSubmission,
+  buildPromptDraftFromSessionMessage,
+  dispatchTerminalInput,
   disableTerminalExtendedKeys,
   enableTerminalExtendedKeys,
+  EMPTY_BUFFER,
+  insertText,
+  backspace,
 } from "../ui";
-import type { SkillInfo } from "../session";
+import type { SessionMessage, SkillInfo } from "../session";
+
+function collectDispatchedInput(data: string) {
+  const events: ReturnType<typeof parseTerminalInput>[] = [];
+  dispatchTerminalInput(data, (input, key) => {
+    events.push({ input, key });
+  });
+  return events;
+}
 
 test("parseTerminalInput treats DEL bytes as backspace", () => {
   const { input, key } = parseTerminalInput("\u007F");
@@ -71,6 +84,45 @@ test("parseTerminalInput keeps DEL payload for meta+backspace", () => {
   assert.equal(key.backspace, false);
 });
 
+test("dispatchTerminalInput splits iOS CJK composition packets", () => {
+  const events = collectDispatchedInput("가\u007F나");
+  assert.equal(events.length, 3);
+  assert.equal(events[0]?.input, "가");
+  assert.equal(events[1]?.input, "");
+  assert.equal(events[1]?.key.backspace, true);
+  assert.equal(events[2]?.input, "나");
+});
+
+test("dispatchTerminalInput applies multi-step CJK composition to the prompt buffer", () => {
+  let state = EMPTY_BUFFER;
+  dispatchTerminalInput("ㄱ\u007F가\u007F각", (input, key) => {
+    if (key.backspace) {
+      state = backspace(state);
+      return;
+    }
+    state = insertText(state, input);
+  });
+
+  assert.equal(state.text, "각");
+  assert.equal(state.cursor, 1);
+});
+
+test("dispatchTerminalInput preserves meta+backspace as one event", () => {
+  const events = collectDispatchedInput("\u001B\u007F");
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.input, "\u007F");
+  assert.equal(events[0]?.key.meta, true);
+  assert.equal(events[0]?.key.backspace, false);
+  assert.equal(events[0]?.key.escape, false);
+});
+
+test("dispatchTerminalInput emits consecutive backspaces from one packet", () => {
+  const events = collectDispatchedInput("\u007F\u007F");
+  assert.equal(events.length, 2);
+  assert.equal(events[0]?.key.backspace, true);
+  assert.equal(events[1]?.key.backspace, true);
+});
+
 test("parseTerminalInput keeps BS payload for meta+backspace", () => {
   const { input, key } = parseTerminalInput("\u001B\b");
   assert.equal(input, "\b");
@@ -110,6 +162,31 @@ test("parseTerminalInput recognizes alternate shifted return sequences", () => {
 test("terminal extended key helpers request and restore modifyOtherKeys mode", () => {
   assert.equal(enableTerminalExtendedKeys(), "\u001B[>4;1m");
   assert.equal(disableTerminalExtendedKeys(), "\u001B[>4;0m");
+});
+
+test("buildPromptDraftFromSessionMessage restores text and image urls", () => {
+  const message: SessionMessage = {
+    id: "user-with-images",
+    sessionId: "session-1",
+    role: "user",
+    content: "revise this prompt",
+    contentParams: [
+      { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+      { type: "text", text: "ignored" },
+      { type: "image_url", image_url: { url: "data:image/jpeg;base64,def" } },
+    ],
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: "2026-01-01T00:00:00.000Z",
+    updateTime: "2026-01-01T00:00:00.000Z",
+  };
+
+  assert.deepEqual(buildPromptDraftFromSessionMessage(message, 7), {
+    nonce: 7,
+    text: "revise this prompt",
+    imageUrls: ["data:image/png;base64,abc", "data:image/jpeg;base64,def"],
+  });
 });
 
 test("parseTerminalInput recognizes terminal focus events", () => {
