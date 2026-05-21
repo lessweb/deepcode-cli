@@ -48,6 +48,7 @@
     "ink-gradient": "^4.0.0",
     "openai": "^6.35.0",
     "react": "^19.2.5",
+    "undici": "^7.25.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

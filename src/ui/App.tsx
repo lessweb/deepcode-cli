@@ -4,7 +4,7 @@ import chalk from "chalk";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import OpenAI from "openai";
+import { createOpenAIClient } from "../common/openai-client";
 import {
   type LlmStreamProgress,
   type MessageMeta,
@@ -165,6 +165,13 @@ export function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.
     refreshSessionsList();
     void refreshSkills();
   }, [refreshSessionsList, refreshSkills]);
+
+  // Eagerly create the OpenAI client on mount so the TCP+TLS connection
+  // warmup (fire-and-forget inside createOpenAIClient) starts before the
+  // user sends their first prompt.
+  useEffect(() => {
+    createOpenAIClient(projectRoot);
+  }, [projectRoot]);
 
   useLayoutEffect(() => {
     const settings = resolveCurrentSettings(projectRoot);
@@ -838,69 +845,7 @@ export function resolveCurrentSettings(projectRoot: string = process.cwd()): Res
   );
 }
 
-export function createOpenAIClient(projectRoot: string = process.cwd()): {
-  client: OpenAI | null;
-  model: string;
-  baseURL: string;
-  thinkingEnabled: boolean;
-  reasoningEffort: "high" | "max";
-  debugLogEnabled: boolean;
-  notify?: string;
-  webSearchTool?: string;
-  env: Record<string, string>;
-  machineId?: string;
-} {
-  const settings = resolveCurrentSettings(projectRoot);
-  if (!settings.apiKey) {
-    return {
-      client: null,
-      model: settings.model,
-      baseURL: settings.baseURL,
-      thinkingEnabled: settings.thinkingEnabled,
-      reasoningEffort: settings.reasoningEffort,
-      debugLogEnabled: settings.debugLogEnabled,
-      notify: settings.notify,
-      webSearchTool: settings.webSearchTool,
-      env: settings.env,
-      machineId: getMachineId(),
-    };
-  }
-
-  const client = new OpenAI({
-    apiKey: settings.apiKey,
-    baseURL: settings.baseURL || undefined,
-  });
-  return {
-    client,
-    model: settings.model,
-    baseURL: settings.baseURL,
-    thinkingEnabled: settings.thinkingEnabled,
-    reasoningEffort: settings.reasoningEffort,
-    debugLogEnabled: settings.debugLogEnabled,
-    notify: settings.notify,
-    webSearchTool: settings.webSearchTool,
-    env: settings.env,
-    machineId: getMachineId(),
-  };
-}
-
-function getMachineId(): string | undefined {
-  try {
-    const idPath = path.join(os.homedir(), ".deepcode", "machine-id");
-    if (fs.existsSync(idPath)) {
-      const raw = fs.readFileSync(idPath, "utf8").trim();
-      if (raw) {
-        return raw;
-      }
-    }
-    const generated = `${os.hostname()}-${Math.random().toString(36).slice(2)}-${Date.now()}`;
-    fs.mkdirSync(path.dirname(idPath), { recursive: true });
-    fs.writeFileSync(idPath, generated, "utf8");
-    return generated;
-  } catch {
-    return undefined;
-  }
-}
+export { createOpenAIClient } from "../common/openai-client";
 
 function getUserSettingsPath(): string {
   return path.join(os.homedir(), ".deepcode", "settings.json");

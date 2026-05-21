@@ -11,9 +11,9 @@ export {
   writeProjectSettings,
   writeModelConfigSelection,
   resolveCurrentSettings,
-  createOpenAIClient,
   buildPromptDraftFromSessionMessage,
 } from "./App";
+export { createOpenAIClient } from "../common/openai-client";
 export { default as AppContainer } from "./AppContainer";
 export { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 export { MessageView } from "./components";
