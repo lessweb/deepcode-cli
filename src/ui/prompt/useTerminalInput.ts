@@ -20,6 +20,8 @@ export type InputKey = {
   meta: boolean;
   focusIn: boolean;
   focusOut: boolean;
+  /** True when the input came from a bracketed paste (ESC[200~ ... ESC[201~). */
+  paste: boolean;
 };
 
 const BACKSPACE_BYTES = new Set(["\u007F", "\b"]);
@@ -34,6 +36,13 @@ const META_LEFT_SEQUENCES = new Set(["\u001B[1;3D", "\u001B[3D", "\u001Bb"]);
 const META_RIGHT_SEQUENCES = new Set(["\u001B[1;3C", "\u001B[3C", "\u001Bf"]);
 const TERMINAL_FOCUS_IN = "\u001B[I";
 const TERMINAL_FOCUS_OUT = "\u001B[O";
+
+// Bracketed paste mode markers (xterm-style).
+// When the terminal supports bracketed paste, pasted text is wrapped with:
+//   ESC[200~  ...pasted content...  ESC[201~
+const PASTE_START = "\u001B[200~";
+const PASTE_END = "\u001B[201~";
+const PASTE_END_LENGTH = 6; // length of PASTE_END
 
 // Ctrl+- (minus) sequences in modifyOtherKeys mode.
 // \u001B[45;5u  — standard format: keycode=45 ('-'), modifier=5 (Ctrl)
@@ -73,6 +82,7 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
       meta: false,
       focusIn: false,
       focusOut: false,
+      paste: false,
     };
     return { input, key };
   }
@@ -100,6 +110,7 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
       meta: false,
       focusIn: false,
       focusOut: false,
+      paste: false,
     };
     return { input, key };
   }
@@ -123,6 +134,7 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
     meta: META_LEFT_SEQUENCES.has(raw) || META_RIGHT_SEQUENCES.has(raw) || META_RETURN_SEQUENCES.has(raw),
     focusIn: raw === TERMINAL_FOCUS_IN,
     focusOut: raw === TERMINAL_FOCUS_OUT,
+    paste: false,
   };
 
   if (input <= "\u001A" && !key.return) {
@@ -200,6 +212,29 @@ export function dispatchTerminalInput(
   inputHandler(input, key);
 }
 
+/** An InputKey with all fields false (including paste). Used when dispatching paste events. */
+const EMPTY_KEY: InputKey = {
+  upArrow: false,
+  downArrow: false,
+  leftArrow: false,
+  rightArrow: false,
+  home: false,
+  end: false,
+  pageDown: false,
+  pageUp: false,
+  return: false,
+  escape: false,
+  ctrl: false,
+  shift: false,
+  tab: false,
+  backspace: false,
+  delete: false,
+  meta: false,
+  focusIn: false,
+  focusOut: false,
+  paste: false,
+};
+
 export function useTerminalInput(
   inputHandler: (input: string, key: InputKey) => void,
   options: { isActive?: boolean } = {}
@@ -209,8 +244,15 @@ export function useTerminalInput(
   const handlerRef = useRef(inputHandler);
   handlerRef.current = inputHandler;
 
+  // Mutable paste-bracketing state shared across data events.
+  // Uses an array of chunks instead of string concatenation to avoid
+  // O(n²) copying when the terminal splits a large paste across many events.
+  const pasteRef = useRef({ active: false, chunks: [] as string[] });
+
   useEffect(() => {
     if (!isActive) {
+      pasteRef.current.active = false;
+      pasteRef.current.chunks = [];
       return;
     }
     setRawMode(true);
@@ -223,7 +265,75 @@ export function useTerminalInput(
     if (!isActive) {
       return;
     }
+
     const handleData = (data: Buffer | string) => {
+      const raw = String(data);
+
+      // ----- Bracketed paste handling -----
+      // Most terminals send the start/end markers in the same chunk as
+      // the content. We handle both inline and multi-chunk scenarios.
+
+      if (raw.includes(PASTE_START)) {
+        pasteRef.current.active = true;
+        pasteRef.current.chunks = [];
+
+        // Extract content after the start marker.
+        const startIdx = raw.indexOf(PASTE_START);
+        const afterStart = raw.slice(startIdx + PASTE_START.length);
+
+        // Check if the end marker is also in this same chunk.
+        const endIdx = afterStart.indexOf(PASTE_END);
+        if (endIdx !== -1) {
+          // Both markers in one chunk — process immediately.
+          const pasteContent = afterStart.slice(0, endIdx);
+          pasteRef.current.active = false;
+          const remaining = afterStart.slice(endIdx + PASTE_END_LENGTH);
+
+          if (pasteContent.length > 0) {
+            handlerRef.current(pasteContent, { ...EMPTY_KEY, paste: true });
+          }
+          if (remaining.length > 0) {
+            dispatchTerminalInput(remaining, handlerRef.current);
+          }
+          return;
+        }
+
+        // Only start marker — buffer as first chunk.
+        if (afterStart) {
+          pasteRef.current.chunks.push(afterStart);
+        }
+        return;
+      }
+
+      if (pasteRef.current.active) {
+        pasteRef.current.chunks.push(raw);
+        // Only join+search when this chunk might contain the end marker.
+        if (raw.includes("201~")) {
+          const combined = pasteRef.current.chunks.join("");
+          const endIdx = combined.indexOf(PASTE_END);
+          if (endIdx !== -1) {
+            const pasteContent = combined.slice(0, endIdx);
+            pasteRef.current.active = false;
+            const remaining = combined.slice(endIdx + PASTE_END_LENGTH);
+            pasteRef.current.chunks = [];
+
+            // Dispatch the pasted text as a single event.
+            if (pasteContent.length > 0) {
+              handlerRef.current(pasteContent, { ...EMPTY_KEY, paste: true });
+            }
+
+            // Handle any remaining input after the paste end marker.
+            if (remaining.length > 0) {
+              dispatchTerminalInput(remaining, handlerRef.current);
+            }
+            return;
+          }
+          return;
+        }
+        return;
+      }
+
+      // ----- Normal (non-paste) input -----
       dispatchTerminalInput(data, handlerRef.current);
     };
 

@@ -4,11 +4,18 @@ import chalk from "chalk";
 import { ARGS_SEPARATOR } from "./constants";
 import {
   EMPTY_BUFFER,
+  PASTE_MARKER_REGEX,
   backspace,
+  cleanPasteContent,
   deleteForward,
+  deletePasteMarkerBackward,
+  deletePasteMarkerForward,
   deleteWordBefore,
   deleteWordAfter,
+  expandPasteMarkers,
+  findPasteMarkerContaining,
   getCurrentSlashToken,
+  hasActivePasteMarkers,
   insertText,
   isEmpty,
   killLine,
@@ -47,7 +54,12 @@ export type { InputKey } from "./prompt";
 
 import { useTerminalInput } from "./prompt";
 import type { InputKey } from "./prompt";
-import { useHiddenTerminalCursor, useTerminalExtendedKeys, useTerminalFocusReporting } from "./prompt";
+import {
+  useHiddenTerminalCursor,
+  useTerminalExtendedKeys,
+  useBracketedPaste,
+  useTerminalFocusReporting,
+} from "./prompt";
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection } from "../settings";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "./components";
@@ -143,6 +155,12 @@ export const PromptInput = React.memo(function PromptInput({
   const wasBusyRef = React.useRef(busy);
   const hadFileMentionTokenRef = React.useRef(false);
   const appliedDraftNonceRef = React.useRef<number | null>(null);
+  const pastesRef = React.useRef<Map<number, string>>(new Map());
+  const pasteCounterRef = React.useRef<number>(0);
+  // Track expanded paste regions for toggle (Ctrl+O expand / collapse).
+  const expandedRegionsRef = React.useRef<Map<number, { start: number; end: number; content: string; marker: string }>>(
+    new Map()
+  );
 
   const fileMentionToken = getCurrentFileMentionToken(buffer);
   const hasFileMentionToken = fileMentionToken !== null;
@@ -170,16 +188,25 @@ export const PromptInput = React.memo(function PromptInput({
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
   const hasRunningProcess = runningProcesses && runningProcesses.size > 0;
-  const processHint = hasRunningProcess ? " · ctrl+o view output" : "";
+  const hasCollapsedMarkers = hasActivePasteMarkers(buffer.text, pastesRef.current);
+  const hasExpandedRegions = expandedRegionsRef.current.size > 0;
+  const processOrPasteHint = hasRunningProcess
+    ? " · ctrl+o view output"
+    : hasCollapsedMarkers
+      ? " · ctrl+o expand"
+      : hasExpandedRegions
+        ? " · ctrl+o collapse"
+        : "";
   const footerText = statusMessage
     ? statusMessage
     : busy
       ? loadingText && loadingText.trim()
-        ? `${loadingText}${processHint}`
-        : `esc to interrupt · ctrl+c to cancel input${processHint}`
-      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processHint}`;
+        ? `${loadingText}${processOrPasteHint}`
+        : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`
+      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
   useTerminalFocusReporting(stdout, !disabled);
   useTerminalExtendedKeys(stdout, !disabled);
+  useBracketedPaste(stdout, !disabled);
   useHiddenTerminalCursor(stdout, !disabled);
 
   const refreshFileMentionItems = React.useCallback(() => {
@@ -241,6 +268,8 @@ export const PromptInput = React.memo(function PromptInput({
     setHistoryCursor(-1);
     setDraftBeforeHistory(null);
     clearPromptUndoRedoState(undoRedoRef.current);
+    pastesRef.current.clear();
+    expandedRegionsRef.current.clear();
   }, [promptDraft]);
 
   useEffect(() => {
@@ -278,7 +307,7 @@ export const PromptInput = React.memo(function PromptInput({
         if (runningProcesses && runningProcesses.size > 0 && onToggleProcessStdout) {
           onToggleProcessStdout();
         } else {
-          setStatusMessage("No running process to inspect");
+          expandPasteMarkerAtCursor();
         }
         return;
       }
@@ -306,6 +335,8 @@ export const PromptInput = React.memo(function PromptInput({
         } else if (!isEmpty(buffer)) {
           setBuffer(EMPTY_BUFFER);
           clearUndoRedoStacks();
+          pastesRef.current.clear();
+          expandedRegionsRef.current.clear();
         } else {
           setStatusMessage("press ctrl+d to exit");
         }
@@ -322,6 +353,11 @@ export const PromptInput = React.memo(function PromptInput({
 
       if (historyCursor !== -1 && !key.upArrow && !key.downArrow) {
         exitHistoryBrowsing();
+      }
+
+      if (key.paste) {
+        handlePaste(input);
+        return;
       }
 
       if (key.ctrl && (input === "v" || input === "V")) {
@@ -395,12 +431,12 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.delete) {
-        updateBuffer((s) => deleteForward(s));
+        updateBuffer((s) => deletePasteMarkerForward(s, pastesRef.current) ?? deleteForward(s));
         return;
       }
 
       if (key.backspace) {
-        updateBuffer((s) => backspace(s));
+        updateBuffer((s) => deletePasteMarkerBackward(s, pastesRef.current) ?? backspace(s));
         return;
       }
 
@@ -490,6 +526,8 @@ export const PromptInput = React.memo(function PromptInput({
       }
       if (key.ctrl && (input === "u" || input === "U")) {
         updateBuffer(() => EMPTY_BUFFER);
+        pastesRef.current.clear();
+        expandedRegionsRef.current.clear();
         return;
       }
       if (key.ctrl && (input === "w" || input === "W")) {
@@ -567,6 +605,81 @@ export const PromptInput = React.memo(function PromptInput({
     });
   }
 
+  function handlePaste(pastedText: string): void {
+    const totalChars = pastedText.length;
+
+    if (totalChars <= 1000) {
+      const newlineCount = (pastedText.match(/\n/g) ?? []).length;
+      if (newlineCount <= 9) {
+        const clean = pastedText
+          .replace(/\r\n|\r/g, "\n")
+          .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, "")
+          .replace(/\t/g, "    ");
+        updateBuffer((s) => insertText(s, clean));
+        return;
+      }
+    }
+
+    // Large paste: store raw text, insert marker with line/char count.
+    const lineCount = (pastedText.match(/\n/g) ?? []).length + 1;
+    pasteCounterRef.current += 1;
+    const pasteId = pasteCounterRef.current;
+    pastesRef.current.set(pasteId, pastedText);
+
+    const marker =
+      lineCount > 10 ? `[paste #${pasteId} +${lineCount} lines]` : `[paste #${pasteId} ${totalChars} chars]`;
+
+    updateBuffer((s) => insertText(s, marker));
+  }
+
+  function expandPasteMarkerAtCursor(): void {
+    // First, try to collapse an already-expanded region at the cursor.
+    for (const [id, region] of expandedRegionsRef.current) {
+      if (buffer.cursor >= region.start && buffer.cursor <= region.end) {
+        // Collapse back to marker.
+        expandedRegionsRef.current.delete(id);
+        pastesRef.current.set(id, region.content);
+        setTimeout(() => {
+          updateBuffer((s) => {
+            const text = s.text.slice(0, region.start) + region.marker + s.text.slice(region.end);
+            return { text, cursor: region.start + region.marker.length };
+          });
+        }, 0);
+        return;
+      }
+    }
+
+    // No expanded region at cursor — try to expand a paste marker.
+    const marker = findPasteMarkerContaining(buffer);
+    if (!marker) {
+      setStatusMessage("No paste marker at cursor");
+      return;
+    }
+    const content = pastesRef.current.get(marker.id);
+    if (!content) {
+      setStatusMessage("Paste content not found");
+      return;
+    }
+
+    const pasteId = marker.id;
+    const originalMarker = buffer.text.slice(marker.start, marker.end);
+    pastesRef.current.delete(pasteId);
+
+    setTimeout(() => {
+      updateBuffer((s) => {
+        const text = s.text.slice(0, marker.start) + cleanPasteContent(content) + s.text.slice(marker.end);
+        const newEnd = marker.start + content.length;
+        expandedRegionsRef.current.set(pasteId, {
+          start: marker.start,
+          end: newEnd,
+          content,
+          marker: originalMarker,
+        });
+        return { text, cursor: marker.start };
+      });
+    }, 0);
+  }
+
   function navigateHistory(direction: -1 | 1): void {
     if (promptHistory.length === 0) {
       return;
@@ -607,6 +720,9 @@ export const PromptInput = React.memo(function PromptInput({
     setImageUrls([]);
     setSelectedSkills([]);
     setShowSkillsDropdown(false);
+    pastesRef.current.clear();
+    expandedRegionsRef.current.clear();
+    pasteCounterRef.current = 0;
   }
 
   function handleSlashSelection(item: SlashCommandItem): void {
@@ -695,7 +811,7 @@ export const PromptInput = React.memo(function PromptInput({
     }
 
     onSubmit({
-      text: buffer.text,
+      text: expandPasteMarkers(buffer.text, pastesRef.current),
       imageUrls,
       selectedSkills,
     });
@@ -750,7 +866,7 @@ export const PromptInput = React.memo(function PromptInput({
         borderDimColor
       >
         <PromptPrefixLine busy={busy} />
-        <Text>{renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder)}</Text>
+        <Text>{renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder, pastesRef.current)}</Text>
         {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
       </Box>
       <RawModelDropdown
@@ -864,12 +980,15 @@ export function getPromptReturnKeyAction(key: Pick<InputKey, "return" | "shift" 
   return "submit";
 }
 
-export function renderBufferWithCursor(state: PromptBufferState, isFocused: boolean, placeholder?: string): string {
+export function renderBufferWithCursor(
+  state: PromptBufferState,
+  isFocused: boolean,
+  placeholder?: string,
+  validPastes?: Map<number, string>
+): string {
   const text = state.text || "";
   const cursor = Math.max(0, Math.min(state.cursor, text.length));
-  const before = text.slice(0, cursor);
-  const at = text[cursor];
-  const after = text.slice(cursor + 1);
+  const validIds = validPastes ?? new Map<number, string>();
 
   if (text.length === 0 && placeholder) {
     if (!isFocused) {
@@ -878,15 +997,106 @@ export function renderBufferWithCursor(state: PromptBufferState, isFocused: bool
     return renderCursorCell(" ") + chalk.dim(` ${placeholder}`);
   }
 
-  if (!isFocused) {
-    return text.endsWith("\n") ? `${text} ` : text;
+  if (text.length === 0) {
+    return isFocused ? renderCursorCell(" ") : "";
   }
 
-  if (typeof at === "undefined") {
-    return before + renderCursorCell(" ");
+  if (!isFocused) {
+    return highlightPasteMarkersInText(text, validIds);
   }
+
+  return renderFocusedText(text, cursor, validIds);
+}
+
+function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): string {
+  if (!s.includes("[paste #")) return s;
+  PASTE_MARKER_REGEX.lastIndex = 0;
+  let result = "";
+  let pos = 0;
+  let match: RegExpExecArray | null;
+  while ((match = PASTE_MARKER_REGEX.exec(s)) !== null) {
+    result += s.slice(pos, match.index);
+    const id = Number.parseInt(match[1]!, 10);
+    result += validIds.has(id) ? chalk.yellow(match[0]) : match[0];
+    pos = match.index + match[0].length;
+  }
+  result += s.slice(pos);
+  return result.endsWith("\n") ? `${result} ` : result;
+}
+
+/**
+ * Render focused text with paste-marker highlighting and cursor insertion.
+ * Scans through the entire string in one pass, so the cursor can land
+ * anywhere (including inside or at the boundary of a paste marker) and the
+ * marker will still be highlighted correctly.
+ */
+function renderFocusedText(text: string, cursor: number, validIds: Map<number, string>): string {
+  let result = "";
+  let pos = 0;
+  PASTE_MARKER_REGEX.lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = PASTE_MARKER_REGEX.exec(text)) !== null) {
+    const markerStart = match.index;
+    const markerEnd = match.index + match[0].length;
+    const id = Number.parseInt(match[1]!, 10);
+    const isReal = validIds.has(id);
+
+    // 1. Non-marker segment before this marker.
+    result += renderTextSegmentWithCursor(text, pos, markerStart, cursor, false);
+    pos = markerStart;
+
+    // 2. Marker segment — highlighted only if it corresponds to a real paste.
+    result += renderTextSegmentWithCursor(text, pos, markerEnd, cursor, isReal);
+    pos = markerEnd;
+  }
+
+  // 3. Remainder after the last marker.
+  result += renderTextSegmentWithCursor(text, pos, text.length, cursor, false);
+
+  return result;
+}
+
+/**
+ * Render a segment of `text` from `start` to `end`.
+ * The cursor (if it falls inside this segment) is rendered as an inverse-video cell.
+ */
+function renderTextSegmentWithCursor(
+  text: string,
+  start: number,
+  end: number,
+  cursor: number,
+  highlighted: boolean
+): string {
+  if (start >= end) return "";
+
+  const segText = text.slice(start, end);
+  const cursorRel = cursor - start; // relative cursor position inside this segment
+
+  // Cursor not in this segment – just return the text.
+  if (cursorRel < 0 || cursorRel > segText.length) {
+    return highlighted ? chalk.yellow(segText) : segText;
+  }
+
+  // Cursor is exactly at `end` (which equals `segText.length`).
+  if (cursorRel === segText.length) {
+    return highlighted ? chalk.yellow(segText) + renderCursorCell(" ") : segText + renderCursorCell(" ");
+  }
+
+  // Cursor is somewhere inside the segment.
+  const at = segText[cursorRel];
+
   if (at === "\n") {
+    // Render newline as a space in the cursor cell, then output the actual newline.
+    const before = segText.slice(0, cursorRel);
+    const after = segText.slice(cursorRel + 1);
     return before + renderCursorCell(" ") + "\n" + after;
+  }
+
+  const before = segText.slice(0, cursorRel);
+  const after = segText.slice(cursorRel + 1);
+  if (highlighted) {
+    return chalk.yellow(before) + renderCursorCell(at) + chalk.yellow(after);
   }
   return before + renderCursorCell(at) + after;
 }
