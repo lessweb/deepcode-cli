@@ -667,6 +667,15 @@ export const PromptInput = React.memo(function PromptInput({
       resetPromptInput();
       return;
     }
+    if (item.kind === "install") {
+      onSubmit({ text: "/install", imageUrls: [], command: "install" });
+      setBuffer(EMPTY_BUFFER);
+      clearUndoRedoStacks();
+      setImageUrls([]);
+      setSelectedSkills([]);
+      setShowSkillsDropdown(false);
+      return;
+    }
     if (item.kind === "exit") {
       onSubmit({ text: "/exit", imageUrls: [], command: "exit" });
       setBuffer(EMPTY_BUFFER);

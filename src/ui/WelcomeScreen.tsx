@@ -8,18 +8,22 @@ import { buildSlashCommands, BUILTIN_SLASH_COMMANDS, formatSlashCommandDescripti
 import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../AsciiArt";
 import { useAppContext } from "./contexts";
+import type { BashToolingStatus } from "../common/bash-tooling";
+import { formatBashToolingStatus } from "../common/bash-tooling";
 
 type WelcomeScreenProps = {
   projectRoot: string;
   settings: ResolvedDeepcodingSettings;
   skills: SkillInfo[];
+  bashToolingStatus: BashToolingStatus;
   width: number;
 };
 
 const TITLE_PANEL_WIDTH = 70;
-const PANEL_CONTENT_HEIGHT = 8;
+const PANEL_CONTENT_HEIGHT = 9;
 
 const SHORTCUT_TIPS = [
+  { label: "rg + jq", description: "Install ripgrep and jq to make Bash project exploration faster and denser" },
   { label: "Enter", description: "Send the prompt" },
   { label: "Shift+Enter", description: "Insert a newline" },
   { label: "Ctrl+V", description: "Paste an image from the clipboard" },
@@ -28,7 +32,13 @@ const SHORTCUT_TIPS = [
   { label: "Ctrl+D twice", description: "Quit Deep Code CLI" },
 ];
 
-export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeScreenProps): React.ReactElement {
+export function WelcomeScreen({
+  projectRoot,
+  settings,
+  skills,
+  bashToolingStatus,
+  width,
+}: WelcomeScreenProps): React.ReactElement {
   const { version } = useAppContext();
   const tips = useMemo(() => buildWelcomeTips(skills), [skills]);
   const [tipIndex] = useState(() => randomTipIndex(tips.length));
@@ -64,6 +74,7 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
             <SettingRow label="Model" value={settings.model} />
             <SettingRow label="Thinking Enabled" value={String(settings.thinkingEnabled)} />
             <SettingRow label="Reasoning Effort" value={settings.thinkingEnabled ? settings.reasoningEffort : "-"} />
+            <SettingRow label="Bash Tools" value={formatBashToolingStatus(bashToolingStatus)} />
             <SettingRow label="CWD" value={cwd} />
           </Box>
         </Box>
