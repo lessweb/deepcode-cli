@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
+import { fileURLToPath } from "url";
+import { t } from "./common/i18n";
 import matter from "gray-matter";
 import ejs from "ejs";
 import type { ChatCompletionMessageParam, ChatCompletionContentPart } from "openai/resources/chat/completions";
@@ -1220,11 +1222,7 @@ ${skillMd}
 
         const compactPromptTokenThreshold = getCompactPromptTokenThreshold(model);
         if (session.activeTokens > compactPromptTokenThreshold) {
-          const message = this.buildAssistantMessage(
-            sessionId,
-            "The conversation is getting long, compacting...",
-            null
-          );
+          const message = this.buildAssistantMessage(sessionId, t("session.compacting"), null);
           message.meta = { asThinking: true };
           this.onAssistantMessage(message, false);
           await this.compactSession(sessionId, sessionController.signal);
@@ -1528,12 +1526,12 @@ ${skillMd}
       updateTime: now,
     }));
 
-    const contentParts = ["Interrupted."];
+    const contentParts = [t("ui.app.interrupted")];
     if (killedPids.length > 0) {
-      contentParts.push(`Killed processes: ${killedPids.join(", ")}.`);
+      contentParts.push(`${t("ui.app.killedProcesses", { pids: killedPids.join(", ") })}.`);
     }
     if (failedPids.length > 0) {
-      contentParts.push(`Failed to kill processes: ${failedPids.join(", ")}.`);
+      contentParts.push(`${t("ui.app.failedKillProcesses", { pids: failedPids.join(", ") })}.`);
     }
 
     this.onAssistantMessage(this.buildUserMessage(sessionId, { text: contentParts.join(" ") }), false);

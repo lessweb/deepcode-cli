@@ -4,7 +4,9 @@ import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import { getDefaultSkillPrompt, getRuntimeContext, getSystemPrompt, getTools } from "../prompt";
+import { initI18n, t } from "../common/i18n";
 
+initI18n("en");
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
 test("getTools always includes WebSearch", () => {
@@ -63,17 +65,19 @@ test("getDefaultSkillPrompt loads default skill templates in order", () => {
 
 test("getSystemPrompt does not include current date guidance", () => {
   const now = new Date();
-  const expected = `今天是${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日。随着对话的进行，时间在流逝。`;
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const expected = t("prompt.dateAndModel", { date: dateStr, model: "deepseek-v4-pro" });
   const prompt = getSystemPrompt("/tmp/project");
   assert.equal(prompt.includes(expected), false);
 });
 
 test("getRuntimeContext includes current date and model guidance", () => {
   const now = new Date();
-  const expectedDate = `今天是${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日。随着对话的进行，时间在流逝。`;
+  const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const expectedDate = t("prompt.dateAndModel", { date: dateStr, model: "deepseek-v4-pro" });
   const prompt = getRuntimeContext("/tmp/project", "deepseek-v4-pro");
   assert.equal(prompt.includes(expectedDate), true);
-  assert.equal(prompt.includes("当前LLM模型为deepseek-v4-pro，对话中可通过/model命令切换模型。"), true);
+  assert.equal(prompt.includes("Current LLM model is deepseek-v4-pro"), true);
   assert.equal(prompt.includes("# Local Workspace Environment"), true);
   assert.equal(prompt.includes('"root path": "/tmp/project"'), true);
 });
