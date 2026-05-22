@@ -66,6 +66,11 @@
     "config": {
       "title": "设置",
       "language": "语言",
+      "thinkingLanguage": "推理语言",
+      "replyLanguage": "回复语言",
+      "selectLanguage": "选择语言",
+      "selectCategoryHelp": "空格/回车选择 · Esc 取消",
+      "selectLanguageHelp": "空格/回车确认 · Esc 返回",
       "languageUpdated": "语言已切换为 {locale}",
       "thinkingLanguageUpdated": "推理语言已切换为 {locale}",
       "replyLanguageUpdated": "回复语言已切换为 {locale}"
@@ -166,6 +171,7 @@
       "slashMcp": "  /mcp             显示 MCP 状态和工具",
       "slashRaw": "  /raw             切换推理内容显示模式",
       "slashExit": "  /exit            退出",
+      "slashConfig": "  /config          配置语言设置",
       "ctrlD": "  ctrl+d 两次      退出"
     }
   }

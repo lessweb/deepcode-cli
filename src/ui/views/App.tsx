@@ -62,6 +62,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
   const { mode, setMode } = useRawModeContext();
+  const { locale, setLocale, thinkingLocale, replyLocale, setThinkingLocale, setReplyLocale } = useI18n();
   const initialPromptSubmittedRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
   const rawModeRef = useRef<RawMode>(mode);
@@ -377,6 +378,33 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const handleAdjustBashTimeout = useCallback(
     (deltaMs: number) => sessionManager.adjustActiveBashTimeout(deltaMs),
     [sessionManager]
+  );
+
+  const handleLocaleChange = useCallback(
+    (newLocale: Locale): void => {
+      setLocale(newLocale);
+      const rawSettings = readSettings();
+      writeSettings({ ...(rawSettings ?? {}), locale: newLocale });
+    },
+    [setLocale]
+  );
+
+  const handleThinkingLocaleChange = useCallback(
+    (newLocale: Locale): void => {
+      setThinkingLocale(newLocale);
+      const rawSettings = readSettings();
+      writeSettings({ ...(rawSettings ?? {}), thinkingLocale: newLocale });
+    },
+    [setThinkingLocale]
+  );
+
+  const handleReplyLocaleChange = useCallback(
+    (newLocale: Locale): void => {
+      setReplyLocale(newLocale);
+      const rawSettings = readSettings();
+      writeSettings({ ...(rawSettings ?? {}), replyLocale: newLocale });
+    },
+    [setReplyLocale]
   );
 
   const handleModelConfigChange = useCallback(
@@ -799,7 +827,6 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           onRawModeChange={handleRawModeChange}
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}
-          placeholder="Type your message..."
           placeholder={t("ui.promptInput.placeholder")}
           currentLocale={locale}
           currentThinkingLocale={thinkingLocale}

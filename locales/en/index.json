@@ -66,6 +66,11 @@
     "config": {
       "title": "Configuration",
       "language": "Language",
+      "thinkingLanguage": "Thinking Language",
+      "replyLanguage": "Reply Language",
+      "selectLanguage": "Select Language",
+      "selectCategoryHelp": "Space/Enter select · Esc to cancel",
+      "selectLanguageHelp": "Space/Enter apply · Esc back",
       "languageUpdated": "Language updated to {locale}",
       "thinkingLanguageUpdated": "Thinking language updated to {locale}",
       "replyLanguageUpdated": "Reply language updated to {locale}"
@@ -166,6 +171,7 @@
       "slashMcp": "  /mcp             Show MCP server status and available tools",
       "slashRaw": "  /raw             Toggle display mode for viewing or collapsing reasoning content",
       "slashExit": "  /exit            Quit",
+      "slashConfig": "  /config          Configure language settings",
       "ctrlD": "  ctrl+d twice     Quit"
     }
   }

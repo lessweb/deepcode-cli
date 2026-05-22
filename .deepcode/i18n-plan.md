@@ -967,9 +967,9 @@ App.tsx       — 三个回调处理 locale 变更
 | `ui-process-stdout.json` | 🔴 | 🔴 | Phase 2 | ProcessStdoutView.tsx |
 | `ui-update-prompt.json` | 🔴 | 🔴 | Phase 2 | UpdatePrompt.tsx |
 | `cli-help.json` | 🔴 | 🔴 | Phase 2 | cli.tsx |
-| `ui-config.json` | 🔴 | 🔴 | Phase 4 | ConfigDropdown.tsx |
-| `session.json` | 🔴 | 🔴 | Phase 3 | session.ts |
-| `prompt.json` | 🔴 | 🔴 | Phase 3 | prompt.ts |
+| `ui-config.json` | 🟢 | 🟢 | Phase 4 | ConfigDropdown.tsx | ✅ |
+| `session.json` | 🟢 | 🟢 | Phase 3 | session.ts | ✅ |
+| `prompt.json` | 🟢 | 🟢 | Phase 3 | prompt.ts | ✅ |
 
 ### 进度更新方式
 
@@ -978,6 +978,8 @@ App.tsx       — 三个回调处理 locale 变更
 2. 在 `.deepcode/i18n-todo.md` 中勾选对应任务
 3. 更新本进度表的状态标记
 4. 运行 `npm run check:i18n` 验证 key 一致性
+
+> **当前状态**：全部 4 个 Phase 已完成，所有 16 个模块的翻译 🟢 完成（140 keys）
 
 ## 13. 性能影响分析
 

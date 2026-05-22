@@ -11,6 +11,7 @@ export type SlashCommandKind =
   | "continue"
   | "undo"
   | "mcp"
+  | "config"
   | "raw"
   | "exit";
 
@@ -84,6 +85,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "exit",
     label: "/exit",
     description: t("ui.slashCommands.exitDesc"),
+  },
+  {
+    kind: "config",
+    name: "config",
+    label: "/config",
+    description: t("ui.slashCommands.configDesc"),
   },
 ];
 

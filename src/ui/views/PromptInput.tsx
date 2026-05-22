@@ -91,6 +91,12 @@ type Props = {
   onRawModeChange?: (mode: string) => void;
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
+  onLocaleChange?: (locale: Locale) => void;
+  onThinkingLocaleChange?: (locale: Locale) => void;
+  onReplyLocaleChange?: (locale: Locale) => void;
+  currentLocale?: Locale;
+  currentThinkingLocale?: Locale;
+  currentReplyLocale?: Locale;
 };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -130,6 +136,12 @@ export const PromptInput = React.memo(function PromptInput({
   onInterrupt,
   onToggleProcessStdout,
   onRawModeChange,
+  onLocaleChange,
+  onThinkingLocaleChange,
+  onReplyLocaleChange,
+  currentLocale,
+  currentThinkingLocale,
+  currentReplyLocale,
 }: Props): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -142,6 +154,7 @@ export const PromptInput = React.memo(function PromptInput({
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [openRawModelDropdown, setOpenRawModelDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [showConfigDropdown, setShowConfigDropdown] = useState(false);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
   const [hasTerminalFocus, setHasTerminalFocus] = useState(true);
@@ -737,6 +750,11 @@ export const PromptInput = React.memo(function PromptInput({
       setOpenRawModelDropdown(true);
       return;
     }
+    if (item.kind === "config") {
+      clearSlashToken();
+      setShowConfigDropdown(true);
+      return;
+    }
     if (item.kind === "new") {
       onSubmit({ text: "", imageUrls: [], command: "new" });
       resetPromptInput();
@@ -886,6 +904,17 @@ export const PromptInput = React.memo(function PromptInput({
           }
         }}
         onSelect={insertFileMentionSelection}
+      />
+      <ConfigDropdown
+        open={showConfigDropdown}
+        currentLocale={currentLocale ?? "en"}
+        currentThinkingLocale={currentThinkingLocale ?? "en"}
+        currentReplyLocale={currentReplyLocale ?? "en"}
+        width={screenWidth}
+        onClose={() => setShowConfigDropdown(false)}
+        onLocaleChange={(locale) => onLocaleChange?.(locale)}
+        onThinkingLocaleChange={(locale) => onThinkingLocaleChange?.(locale)}
+        onReplyLocaleChange={(locale) => onReplyLocaleChange?.(locale)}
       />
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showFooterText && (
