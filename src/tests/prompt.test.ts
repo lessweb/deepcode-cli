@@ -55,10 +55,10 @@ test("getSystemPrompt does not include current date guidance", () => {
   assert.equal(prompt.includes(expected), false);
 });
 
-test("getRuntimeContext includes current date and model guidance", () => {
+test("getRuntimeContext includes current date and model guidance", async () => {
   const now = new Date();
   const expectedDate = `今天是${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日。随着对话的进行，时间在流逝。`;
-  const prompt = getRuntimeContext("/tmp/project", "deepseek-v4-pro");
+  const prompt = await getRuntimeContext("/tmp/project", "deepseek-v4-pro");
   assert.equal(prompt.includes(expectedDate), true);
   assert.equal(prompt.includes("当前LLM模型为deepseek-v4-pro，对话中可通过/model命令切换模型。"), true);
   assert.equal(prompt.includes("# Local Workspace Environment"), true);

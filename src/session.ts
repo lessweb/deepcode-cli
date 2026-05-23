@@ -15,6 +15,7 @@ import {
   getRuntimeContext,
   getSystemPrompt,
   getTools,
+  prewarmRuntimeContext,
   type ToolDefinition,
 } from "./prompt";
 import {
@@ -278,6 +279,8 @@ export class SessionManager {
     this.onProcessStdout = options.onProcessStdout;
     this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
     this.mcpManager.prepare(this.getResolvedSettings().mcpServers);
+    // Kick off async runtime context pre-computation while user is typing.
+    prewarmRuntimeContext(this.projectRoot);
   }
 
   async initMcpServers(servers?: Record<string, McpServerConfig>): Promise<void> {
@@ -964,7 +967,7 @@ The candidate skills are as follows:\n\n`;
 
     const runtimeContextMessage = this.buildSystemMessage(
       sessionId,
-      getRuntimeContext(this.projectRoot, promptToolOptions.model)
+      await getRuntimeContext(this.projectRoot, promptToolOptions.model)
     );
     this.appendSessionMessage(sessionId, runtimeContextMessage);
 
