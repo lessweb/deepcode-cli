@@ -7,7 +7,11 @@
       "replyLanguage": "Reply Language",
       "selectLanguage": "Select Language",
       "selectCategoryHelp": "Space/Enter select · Esc to cancel",
-      "selectLanguageHelp": "Space/Enter apply · Esc back"
+      "selectLanguageHelp": "Space/Enter apply · Esc back",
+      "currentLabel": "current",
+      "localeEn": "English",
+      "localeZhCN": "\u4e2d\u6587",
+      "categoryWithValue": "{label} ({value})"
     }
   }
 }

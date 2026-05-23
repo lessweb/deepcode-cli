@@ -7,7 +7,11 @@
       "replyLanguage": "回复语言",
       "selectLanguage": "选择语言",
       "selectCategoryHelp": "空格/回车选择 · Esc 取消",
-      "selectLanguageHelp": "空格/回车确认 · Esc 返回"
+      "selectLanguageHelp": "空格/回车确认 · Esc 返回",
+      "currentLabel": "当前",
+      "localeEn": "English",
+      "localeZhCN": "中文",
+      "categoryWithValue": "{label}（{value}）"
     }
   }
 }

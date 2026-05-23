@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useInput } from "ink";
 import DropdownMenu from "../../DropdownMenu";
 import { t, type Locale } from "../../../common/i18n";
@@ -8,20 +8,38 @@ type ConfigStep = "category" | "language";
 type CategoryOption = {
   key: "locale" | "thinkingLocale" | "replyLocale";
   label: string;
+  description: string;
 };
 
-function getCategoryOptions(): CategoryOption[] {
+function getLocaleDisplayName(locale: Locale): string {
+  return locale === "en" ? t("ui.config.localeEn") : t("ui.config.localeZhCN");
+}
+
+function getCategoryOptions(
+  currentLocale: Locale,
+  currentThinkingLocale: Locale,
+  currentReplyLocale: Locale
+): CategoryOption[] {
   return [
-    { key: "locale", label: t("ui.config.language") },
-    { key: "thinkingLocale", label: t("ui.config.thinkingLanguage") },
-    { key: "replyLocale", label: t("ui.config.replyLanguage") },
+    {
+      key: "locale",
+      label: t("ui.config.language"),
+      description: getLocaleDisplayName(currentLocale),
+    },
+    {
+      key: "thinkingLocale",
+      label: t("ui.config.thinkingLanguage"),
+      description: getLocaleDisplayName(currentThinkingLocale),
+    },
+    {
+      key: "replyLocale",
+      label: t("ui.config.replyLanguage"),
+      description: getLocaleDisplayName(currentReplyLocale),
+    },
   ];
 }
 
-const LOCALE_OPTIONS: { key: Locale; label: string }[] = [
-  { key: "en", label: "English" },
-  { key: "zh-CN", label: "中文" },
-];
+const LOCALE_OPTIONS: { key: Locale }[] = [{ key: "en" }, { key: "zh-CN" }];
 
 type Props = {
   open: boolean;
@@ -73,7 +91,7 @@ const ConfigDropdown: React.FC<Props> = ({
 
   function handleSelect(): void {
     if (step === "category") {
-      const category = getCategoryOptions()[activeIndex];
+      const category = getCategoryOptions(currentLocale, currentThinkingLocale, currentReplyLocale)[activeIndex];
       if (!category) {
         return;
       }
@@ -110,7 +128,10 @@ const ConfigDropdown: React.FC<Props> = ({
         return;
       }
 
-      const optionCount = step === "category" ? getCategoryOptions().length : LOCALE_OPTIONS.length;
+      const optionCount =
+        step === "category"
+          ? getCategoryOptions(currentLocale, currentThinkingLocale, currentReplyLocale).length
+          : LOCALE_OPTIONS.length;
 
       if (key.upArrow) {
         setActiveIndex((idx) => (idx - 1 + optionCount) % optionCount);
@@ -143,15 +164,16 @@ const ConfigDropdown: React.FC<Props> = ({
 
   const items =
     step === "category"
-      ? getCategoryOptions().map((option) => ({
+      ? getCategoryOptions(currentLocale, currentThinkingLocale, currentReplyLocale).map((option) => ({
           key: option.key,
           label: option.label,
+          description: option.description,
           selected: false,
         }))
       : LOCALE_OPTIONS.map((option) => ({
           key: option.key,
-          label: option.label,
-          description: option.key === getCurrentLocaleForCategory(selectedCategory!) ? "current" : "",
+          label: getLocaleDisplayName(option.key),
+          description: option.key === getCurrentLocaleForCategory(selectedCategory!) ? t("ui.config.currentLabel") : "",
           selected: option.key === getCurrentLocaleForCategory(selectedCategory!),
         }));
 
