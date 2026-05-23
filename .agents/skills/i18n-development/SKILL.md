@@ -187,7 +187,17 @@ All i18n changes have negligible performance impact:
 const OPTIONS = [{ label: t("ui.config.language") }]; // → "ui.config.language"
 ```
 
-**Fix**: Move `t()` into functions called at render time:
+**Real-world case** (`WelcomeScreen.tsx`):
+```typescript
+// ❌ BUG: SHORTCUT_TIPS defined at module scope — t() returns key strings
+const SHORTCUT_TIPS = [
+  { label: "Ctrl+V", description: t("ui.welcome.pasteImage") }, // "ui.welcome.pasteImage"
+];
+```
+
+Users saw `"Tips: Ctrl+V - ui.welcome.pasteImage"` instead of `"Tips: Ctrl+V - Paste an image from the clipboard"`.
+
+**Fix**: Move `t()` into functions called at render time (or into the component body):
 
 ```typescript
 // ✅ CORRECT — lazy evaluation after initI18n()
@@ -200,7 +210,33 @@ export function buildCommands() {
 }
 ```
 
-**Audit**: `rg -n '^\w.*t\("' src/ --include='*.ts' --include='*.tsx' | grep -v test` — no matches expected.
+For React components returning static arrays, wrap in a function:
+
+```typescript
+function getShortcutTips(): Array<{ label: string; description: string }> {
+  return [
+    { label: "Ctrl+V", description: t("ui.welcome.pasteImage") }, // ✅ "Paste an image from the clipboard"
+  ];
+}
+```
+
+If the array is consumed inside a `useMemo(...)`, the `get*()` function is still safe because `useMemo` also runs at render time.
+
+**Audit commands**:
+
+1. Check for module-level `t()` calls (should be zero in source files):
+   ```bash
+   rg -n '^\w.*t\("' src/ --include='*.ts' --include='*.tsx' | grep -v test
+   ```
+   Expected output: no matches.
+
+2. Verify `initI18n()` is called before any module that uses `t()`:
+   ```bash
+   # Check CLI entry point calls initI18n before importing UI components
+   rg -n 'initI18n' src/cli.tsx
+   ```
+
+3. When in doubt, add a runtime guard at the start of `t()` to detect pre-init calls (development only).
 
 ### 2. 🚫 Missing `t` Import
 
@@ -239,6 +275,17 @@ if (openRawModelDropdown || showSkillsDropdown || showModelDropdown || showConfi
 ### 5. 🚫 Test Fixtures Without `initI18n`
 
 Tests calling functions using `t()` must call `initI18n("en")` first, otherwise `t()` returns key strings.
+
+**⚠️ Subtle trap**: Tests may pass even when `t()` returns key strings, if the test only checks non-translated fields (e.g., `tip.label` but not `tip.description`). The bug only manifests in the UI.
+
+```typescript
+// ❌ Test passes despite t() returning key strings — description is never checked
+const tips = buildWelcomeTips(skills);
+assert.ok(tips[0].label.includes("/new")); // passes
+// tips[0].description === "ui.welcome.sendPrompt" — but nobody checks it!
+```
+
+**Fix**: Always call `initI18n("en")` in `describe` or test setup when testing any function that uses `t()`. If the test doesn't care about translated output, at minimum assert that `t()` returns something other than the key itself.
 
 ### 6. 🚫 Translation Key Naming Mismatch
 

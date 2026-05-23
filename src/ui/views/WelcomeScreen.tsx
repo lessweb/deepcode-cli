@@ -20,14 +20,16 @@ type WelcomeScreenProps = {
 const TITLE_PANEL_WIDTH = 70;
 const PANEL_CONTENT_HEIGHT = 8;
 
-const SHORTCUT_TIPS = [
-  { label: "Enter", description: t("ui.welcome.sendPrompt") },
-  { label: "Shift+Enter", description: t("ui.welcome.insertNewline") },
-  { label: "Ctrl+V", description: t("ui.welcome.pasteImage") },
-  { label: "Esc", description: t("ui.welcome.interrupt") },
-  { label: "/", description: t("ui.welcome.openMenu") },
-  { label: "Ctrl+D twice", description: t("ui.welcome.quit") },
-];
+function getShortcutTips(): Array<{ label: string; description: string }> {
+  return [
+    { label: "Enter", description: t("ui.welcome.sendPrompt") },
+    { label: "Shift+Enter", description: t("ui.welcome.insertNewline") },
+    { label: "Ctrl+V", description: t("ui.welcome.pasteImage") },
+    { label: "Esc", description: t("ui.welcome.interrupt") },
+    { label: "/", description: t("ui.welcome.openMenu") },
+    { label: "Ctrl+D twice", description: t("ui.welcome.quit") },
+  ];
+}
 
 export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeScreenProps): React.ReactElement {
   const { version } = useAppContext();
@@ -123,7 +125,7 @@ export function buildWelcomeTips(skills: SkillInfo[]): Array<{ label: string; de
 
   return [
     ...slashTips,
-    ...SHORTCUT_TIPS.filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
+    ...getShortcutTips().filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
   ];
 }
 
