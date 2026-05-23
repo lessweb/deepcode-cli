@@ -81,7 +81,7 @@ const projectRoot = process.cwd();
 configureWindowsShell();
 
 if (!process.stdin.isTTY) {
-  process.stderr.write("deepcode requires an interactive terminal (TTY). " + "Re-run from a real terminal session.\n");
+  process.stderr.write(t("cli.help.ttyRequired") + "\n");
   process.exit(1);
 }
 

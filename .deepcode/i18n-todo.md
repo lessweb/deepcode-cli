@@ -249,10 +249,262 @@
 
 ---
 
+## 代码审查发现的问题（2026-05-22）
+
+### 🔴 Bug
+- `src/common/i18n.ts:getExtensionRoot()` 第 38 行存在不可达代码（死代码），应删除
+
+### 🟡 需要修复
+1. **McpStatusList 视图比较**（`McpStatusList.tsx:16,58`）：`viewMode === t("ui.mcp.serverDetail")` 使用翻译字符串做状态比较，切换 locale 后会失效。应使用固定字符串 `"server-detail"`。
+2. **遗漏的 t() 调用（session.ts）**：
+   - `activateSession()` 中第 1083, 1089, 1240, 1256 行的硬编码英文应改用 `t()`
+3. **遗漏的 t() 调用（App.tsx）**：
+   - `handleModelConfigChange()` 中第 243, 349, 380 行的硬编码应改用 `t()`
+   - `handleUndoRestore()` 中第 460, 469 行的硬编码应改用 `t()`
+   - `buildStatusLine()` 中第 808-813 行的硬编码应改用 `t()`
+4. **遗漏的 t() 调用（cli.tsx）**：第 84 行非 TTY 错误消息未翻译
+5. **session.skillPromptHeader 未使用**：`session.ts` 第 987 行硬编码 "Use the skill document below..."，应改用 `t("session.skillPromptHeader")`
+6. **ui.slashCommands.continueDesc 未使用**：`slashCommands.ts` 第 62 行硬编码，应改用 `t("ui.slashCommands.continueDesc")`
+
+### 🟢 无问题
+- 所有 `t()` 调用均指向有效的 key（代码中无悬挂引用）
+- `cli.help.*`（35个 key）、`ui.messageView.*`（10个）、`ui.exitSummary.*`（6个）、`ui.loading.*`（2个）、`prompt.*`（4个）使用率均为 100%
+- `npm run check` 全部通过
+- `npm run check:i18n` 全部 140 个 key 匹配
+
+---
+
 ## 已知限制
 
 - Ink `<Static>` 不会重渲染已挂载消息，语言切换后历史消息保持旧语言
 - 中间会话切换 locale 只影响新 UI/新提示词，已有历史不回溯翻译
 - LLM 的输出语言控制是"软约束"——LLM 可能不完全遵守语言指令，但实践中大多数模型会遵循
-- `exitSummary.ts` 的 `visibleLength()` 未处理 CJK 双倍宽度字符（现有 bug）
+## 二阶段发现的遗漏项（2026-05-23）
+
+> 以下是代码审查中发现的**仍在硬编码的字符串**，涉及 10+ 个组件文件。
+> 这些字符串需要新增 translation key 到 `locales/{lang}/index.json`，然后在源码中替换为 `t()` 调用。
+
+### 1. ModelsDropdown (`/model` 命令二级页面) — 完全未翻译
+
+**文件**: `src/ui/components/ModelsDropdown/index.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 17 | `"Thinking mode [max]"` | `ui.modelsDropdown.thinkingMax` |
+| 18 | `"Thinking mode [high]"` | `ui.modelsDropdown.thinkingHigh` |
+| 19 | `"No thinking"` | `ui.modelsDropdown.noThinking` |
+| 141 | `"current model"` | `ui.modelsDropdown.currentModel` |
+| 147 | `` reasoningEffort: ${option.reasoningEffort} `` | `ui.modelsDropdown.reasoningEffort` |
+| 147 | `"thinking disabled"` | `ui.modelsDropdown.thinkingDisabled` |
+| 154 | `"Select Model"` | `ui.modelsDropdown.selectModel` |
+| 154 | `"Select Thinking Mode"` | `ui.modelsDropdown.selectThinkingMode` |
+| 155 | `"Space/Enter select model · Esc to cancel"` | `ui.modelsDropdown.selectModelHelp` |
+| 155 | `"Space/Enter apply · Esc to cancel"` | `ui.modelsDropdown.applyHelp` |
+
+### 2. RawModelDropdown (`/raw` 命令二级页面) — 完全未翻译
+
+**文件**: `src/ui/components/RawModelDropdown/index.tsx` + `src/ui/contexts/RawModeContext.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 43 | `"Select mode"` | `ui.rawModelDropdown.title` |
+| 45 | `"Space/Enter select mode · Esc to close"` | `ui.rawModelDropdown.helpText` |
+| RawModeContext:11 | `"Lite mode"` (label) | `ui.rawModelDropdown.liteMode` |
+| RawModeContext:12 | `"Lite mode"` (RawMode.Lite enum) | 枚举值用作标识符，不可翻译 |
+| RawModeContext:13 | `"Collapse chain-of-thought reasoning."` (description) | `ui.rawModelDropdown.liteDesc` |
+| RawModeContext:16 | `"Normal mode"` (label) | `ui.rawModelDropdown.normalMode` |
+| RawModeContext:18 | `"Show full chain-of-thought reasoning."` (description) | `ui.rawModelDropdown.normalDesc` |
+| RawModeContext:21 | `"Raw scrollback mode"` (label) | `ui.rawModelDropdown.rawScrollbackMode` |
+| RawModeContext:23 | `"Show scrollback mode for copy-friendly terminal selection."` (description) | `ui.rawModelDropdown.rawDesc` |
+
+### 3. SkillsDropdown (`/skills` 命令二级页面) — 完全未翻译
+
+**文件**: `src/ui/components/SkillsDropdown/index.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 57 | `"Select Skills"` | `ui.skillsDropdown.title` |
+| 58 | `"Space toggle · Enter toggle · Esc to close"` | `ui.skillsDropdown.helpText` |
+| 59 | `"No skills found"` | `ui.skillsDropdown.emptyText` |
+
+### 4. FileMentionMenu (`@` 文件菜单) — 完全未翻译
+
+**文件**: `src/ui/components/FileMentionMenu/index.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 87 | `"Mention File"` | `ui.fileMentionMenu.title` |
+| 88 | `"Enter/Tab insert · Esc close"` | `ui.fileMentionMenu.helpText` |
+| 89 | `"No matching files"` | `ui.fileMentionMenu.noMatching` |
+| 89 | `"Type after @ to search files"` | `ui.fileMentionMenu.typeHint` |
+| 93 | `"directory"` | `ui.fileMentionMenu.directory` |
+| 93 | `"file"` | `ui.fileMentionMenu.file` |
+
+### 5. DropdownMenu（通用组件）— 部分未翻译
+
+**文件**: `src/ui/DropdownMenu.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 71 | `"No items found"` | `ui.dropdownMenu.emptyText` |
+| 138 | `"above"`（参数化：`… {n} above`） | `ui.dropdownMenu.above` |
+| 174 | `"more"`（参数化：`… {n} more`） | `ui.dropdownMenu.more` |
+
+### 6. SlashCommandMenu — 剩余未翻译
+
+**文件**: `src/ui/SlashCommandMenu.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 77 | `"({current}/{total}) ↑↓ to navigate · Enter to select"` | `ui.slashCommandMenu.footerHelp` |
+
+### 7. McpStatusList (`/mcp` 命令二级页面) — 遗漏翻译
+
+**文件**: `src/ui/McpStatusList.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 45, 195 | `"Manage MCP servers"` | `ui.mcp.manageTitle` |
+| 47 | `"0 servers"` | `ui.mcp.zeroServers` |
+| 50 | `"No MCP servers configured."` | `ui.mcp.noServersConfigured` |
+| 51 | `"Add MCP servers to your settings to get started."` | `ui.mcp.addServersHint` |
+| 53 | `"Esc to close"` | `ui.mcp.escToClose` |
+| 244 | `"servers above."`（参数化） | `ui.mcp.serversAbove` |
+| 246 | `"servers below."`（参数化） | `ui.mcp.serversBelow` |
+| 292 | `"tools, prompts, resources"` 计数标签 | 转为 ${t("...")} 调用 |
+| 458 | `` ${server.toolCount} tools, ${server.promptCount} prompts, ${server.resourceCount} resources `` | `ui.mcp.itemCounts` |
+| 459 | `` `Status: ${server.status}` `` | `ui.mcp.statusPrefix` |
+
+### 8. SessionList (`/resume`/`/continue` 命令二级页面) — 遗漏翻译
+
+**文件**: `src/ui/SessionList.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 162 | `"Press Esc to go back."` | `ui.sessionList.escBack` |
+| 185 | `"total"` | `ui.sessionList.total` |
+| 186 | `", {n} matched"`（参数化） | `ui.sessionList.matched` |
+| 213 | `'No sessions match "{query}".'`（参数化） | `ui.sessionList.noMatch` |
+| 229 | `"Untitled"` | `ui.sessionList.untitled` |
+| 243 | `"sessions above."`（参数化） | `ui.sessionList.above` |
+| 245 | `"sessions below."`（参数化） | `ui.sessionList.below` |
+| 253-259 | Footer 帮助文本 | `ui.sessionList.footerHelp` |
+| 284-301 | `formatSessionStatus()` 状态值 | `ui.sessionList.statusDone`/`Running`/`Pending`/`Waiting`/`Failed`/`Stopped` |
+
+### 9. UndoSelector (`/undo` 命令二级页面) — 几乎完全未翻译
+
+**文件**: `src/ui/UndoSelector.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 86 | `"Nothing to undo yet."` | `ui.undoSelector.nothingYet` |
+| 87 | `"Press Esc to go back."` | `ui.undoSelector.escBack` |
+| 104 | `"Undo"` | `ui.undoSelector.title` |
+| 106 | `"restore to the point before a prompt"` | `ui.undoSelector.subtitle` |
+| 133 | `"code checkpoint available"` | `ui.undoSelector.checkpointAvailable` |
+| 133 | `"conversation only"` | `ui.undoSelector.conversationOnly` |
+| 153 | `"Selected prompt:"` | `ui.undoSelector.selectedPrompt` |
+| 157 | `"Restore code and conversation"` | `ui.undoSelector.restoreCodeAndConversation` |
+| 164 | `"Restore conversation"` | `ui.undoSelector.restoreConversation` |
+| 166 | `"Fork the conversation without changing files."` | `ui.undoSelector.forkConversation` |
+| 173-174 | Footer 帮助文本（两种 phase） | `ui.undoSelector.footerMessage` + `ui.undoSelector.footerMode` |
+| 183 | `"(empty message)"` | `ui.undoSelector.emptyMessage` |
+
+### 10. ProcessStdoutView (Ctrl+O 全屏) — 遗漏翻译
+
+**文件**: `src/ui/ProcessStdoutView.tsx`
+
+| 行号 | 硬编码文本 | 建议 key |
+|------|-----------|---------|
+| 56 | `"(no running processes)"` | `ui.processStdout.noRunning` |
+| 85 | `"lines above/scroll/total"` 滚动提示 | `ui.processStdout.scrollHint` |
+| 137 | `"📟 Process Output"` | `ui.processStdout.title` |
+| 138-140 | Footer 操作提示 | `ui.processStdout.footerHelp` |
+| 174 | `"timeout unavailable"` | `ui.processStdout.timeoutUnavailable` |
+| 176 | `"timeout {duration}"` | `ui.processStdout.timeoutHint` |
+| 183 | `"Timeout set to {duration}"` | `ui.processStdout.timeoutSet` |
+
+---
+
+## 已解决的已知问题
+
+- `exitSummary.ts` 的 `visibleLength()` 未处理 CJK 双倍宽度字符（现有 bug）→ **已缓解**：新增 `display-width.ts`，但 `exitSummary.ts` 尚未改用（仅视觉偏移，不影响功能）
+- **CJK 视觉宽度导致的布局截断** → **已修复**：`DropdownMenu.tsx` 和 `SlashCommandMenu.tsx` 改用 `displayWidth()` 替代 `String.length` 计算列宽
 - Tool 文档（`templates/tools/`）保持英文，不翻译（发给 LLM 使用）
+
+---
+
+## Key 使用审计（2026-05-22）
+
+> 通过对照 `en/index.json` 定义的所有 key 与源代码中 `t()` 调用进行扫描比对。
+
+### 总览
+
+| 类别 | 数量 | 占比 |
+|------|------|------|
+| 已定义且使用的 key | 105 | 75% |
+| 已定义但未使用的 key | 35 | 25% |
+| 代码调用但未定义的 key | 0 | 0% |
+
+### 各模块使用率
+
+| 模块 | 定义数 | 使用数 | 使用率 | 状态 |
+|------|--------|--------|--------|------|
+| `cli.help.*` | 35 | 35 | 100% | ✅ |
+| `ui.messageView.*` | 10 | 10 | 100% | ✅ |
+| `ui.exitSummary.*` | 6 | 6 | 100% | ✅ |
+| `ui.loading.*` | 2 | 2 | 100% | ✅ |
+| `prompt.*` | 4 | 4 | 100% | ✅ |
+| `session.compacting` | 1 | 1 | 100% | ✅ |
+| `ui.config.*` | 10 | 7 | 70% | ⚠️ |
+| `ui.slashCommands.*` | 12 | 11 | 92% | ⚠️ |
+| `ui.welcome.*` | 7 | 6 | 86% | ⚠️ |
+| `ui.mcp.*` | 7 | 5 | 71% | ⚠️ |
+| `ui.promptInput.*` | 19 | 14 | 74% | ⚠️ |
+| `ui.app.*` | 16 | 3 | 19% | 🔴 |
+| `ui.askUserQuestion.*` | 3 | 0 | 0% | 🔴 |
+| `ui.processStdout.*` | 4 | 0 | 0% | 🔴 |
+| `ui.sessionList.*` | 2 | 0 | 0% | 🔴 |
+| `ui.updatePrompt.*` | 1 | 0 | 0% | 🔴 |
+| `session.skillPromptHeader` | 1 | 0 | 0% | 🔴 |
+
+### 未使用的 Key 及原因
+
+| Key | 原因 |
+|-----|------|
+| `ui.app.error` | App.tsx 第 674 行硬编码 `"Error: "` 前缀 |
+| `ui.app.statusStatus` | App.tsx 第 808 行硬编码 `` `status: ${entry.status}` `` |
+| `ui.app.statusTokens` | App.tsx 第 810 行硬编码 `` `tokens: ${entry.activeTokens}` `` |
+| `ui.app.statusFail` | App.tsx 第 813 行硬编码 `` `fail: ${entry.failReason}` `` |
+| `ui.app.modelUnchanged` | App.tsx 第 349 行硬编码 |
+| `ui.app.modelUpdated` | App.tsx 第 380 行硬编码 |
+| `ui.app.noActiveSession` | App.tsx 第 243, 449 行硬编码 |
+| `ui.app.codeRestoreFailed` | App.tsx 第 460 行硬编码 |
+| `ui.app.conversationRestoreFailed` | App.tsx 第 469 行硬编码 |
+| `ui.app.sessionDefaultSummary` | session.ts 第 925 行硬编码 |
+| `ui.app.sessionAgentSteps` | session.ts 第 1240 行硬编码 |
+| `ui.app.apiKeyNotFound` | session.ts 第 1089 行硬编码 |
+| `ui.app.requestFailed` | session.ts 第 1256 行硬编码 |
+| `ui.config.languageUpdated` | 未在任何 t() 中调用 |
+| `ui.config.thinkingLanguageUpdated` | 未在任何 t() 中调用 |
+| `ui.config.replyLanguageUpdated` | 未在任何 t() 中调用 |
+| `ui.welcome.deepCodeTitle` | 可能未在 WelcomScreen 中使用 |
+| `ui.mcp.serverList` | McpStatusList 使用字面量 `"server-list"` |
+| `ui.mcp.statusConnecting` | McpStatusList 字面量 |
+| `ui.slashCommands.continueDesc` | slashCommands.ts 第 62 行硬编码英文 |
+| `ui.sessionList.title` | SessionList 硬编码 |
+| `ui.sessionList.empty` | SessionList 硬编码 |
+| `ui.askUserQuestion.submit` | AskUserQuestionPrompt 硬编码 |
+| `ui.askUserQuestion.cancel` | AskUserQuestionPrompt 硬编码 |
+| `ui.askUserQuestion.selectOption` | AskUserQuestionPrompt 硬编码 |
+| `ui.processStdout.title` | ProcessStdoutView 硬编码 |
+| `ui.processStdout.running` | ProcessStdoutView 硬编码 |
+| `ui.processStdout.adjustTimeout` | ProcessStdoutView 硬编码 |
+| `ui.processStdout.noOutput` | ProcessStdoutView 硬编码 |
+| `ui.updatePrompt.planHeader` | UpdatePrompt 硬编码 |
+| `session.skillPromptHeader` | session.ts 第 987 行硬编码 |
+| `ui.promptInput.footerBusy` | PromptInput 动态拼接 |
+| `ui.promptInput.ctrlOViewOutput` | PromptInput 动态拼接 |
+| `ui.promptInput.ctrlOExpand` | PromptInput 动态拼接 |
+| `ui.promptInput.ctrlOCollapse` | PromptInput 动态拼接 |
+| `ui.promptInput.imageCount` | PromptInput 动态拼接 |

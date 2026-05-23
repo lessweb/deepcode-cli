@@ -24,75 +24,60 @@ export type SlashCommandItem = {
   args?: string[];
 };
 
-export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
-  {
-    kind: "skills",
-    name: "skills",
-    label: "/skills",
-    description: t("ui.slashCommands.skillsDesc"),
-  },
-  {
-    kind: "model",
-    name: "model",
-    label: "/model",
-    description: t("ui.slashCommands.modelDesc"),
-  },
-  {
-    kind: "new",
-    name: "new",
-    label: "/new",
-    description: t("ui.slashCommands.newDesc"),
-  },
-  {
-    kind: "init",
-    name: "init",
-    label: "/init",
-    description: t("ui.slashCommands.initDesc"),
-  },
-  {
-    kind: "resume",
-    name: "resume",
-    label: "/resume",
-    description: t("ui.slashCommands.resumeDesc"),
-  },
-  {
-    kind: "continue",
-    name: "continue",
-    label: "/continue",
-    description: "Continue the active conversation or pick one to resume",
-  },
-  {
-    kind: "undo",
-    name: "undo",
-    label: "/undo",
-    description: t("ui.slashCommands.undoDesc"),
-  },
-  {
-    kind: "mcp",
-    name: "mcp",
-    label: "/mcp",
-    description: t("ui.slashCommands.mcpDesc"),
-  },
-  {
-    kind: "raw",
-    name: "raw",
-    label: "/raw",
-    args: ["lite", "normal", "raw-scrollback"],
-    description: t("ui.slashCommands.rawDesc"),
-  },
-  {
-    kind: "exit",
-    name: "exit",
-    label: "/exit",
-    description: t("ui.slashCommands.exitDesc"),
-  },
-  {
-    kind: "config",
-    name: "config",
-    label: "/config",
-    description: t("ui.slashCommands.configDesc"),
-  },
+const BUILTIN_SLASH_COMMAND_DEFS: Omit<SlashCommandItem, "description">[] = [
+  { kind: "skills", name: "skills", label: "/skills" },
+  { kind: "model", name: "model", label: "/model" },
+  { kind: "new", name: "new", label: "/new" },
+  { kind: "init", name: "init", label: "/init" },
+  { kind: "resume", name: "resume", label: "/resume" },
+  { kind: "continue", name: "continue", label: "/continue" },
+  { kind: "undo", name: "undo", label: "/undo" },
+  { kind: "mcp", name: "mcp", label: "/mcp" },
+  { kind: "raw", name: "raw", label: "/raw", args: ["lite", "normal", "raw-scrollback"] },
+  { kind: "exit", name: "exit", label: "/exit" },
+  { kind: "config", name: "config", label: "/config" },
 ];
+
+function getBuiltinDescription(kind: SlashCommandKind): string {
+  switch (kind) {
+    case "skills":
+      return t("ui.slashCommands.skillsDesc");
+    case "model":
+      return t("ui.slashCommands.modelDesc");
+    case "new":
+      return t("ui.slashCommands.newDesc");
+    case "init":
+      return t("ui.slashCommands.initDesc");
+    case "resume":
+      return t("ui.slashCommands.resumeDesc");
+    case "continue":
+      return t("ui.slashCommands.continueDesc");
+    case "undo":
+      return t("ui.slashCommands.undoDesc");
+    case "mcp":
+      return t("ui.slashCommands.mcpDesc");
+    case "raw":
+      return t("ui.slashCommands.rawDesc");
+    case "exit":
+      return t("ui.slashCommands.exitDesc");
+    case "config":
+      return t("ui.slashCommands.configDesc");
+    default:
+      return t("ui.slashCommands.noDescription");
+  }
+}
+
+export function getBuiltinSlashCommands(): SlashCommandItem[] {
+  return BUILTIN_SLASH_COMMAND_DEFS.map((def) => ({
+    ...def,
+    description: getBuiltinDescription(def.kind),
+  }));
+}
+
+/** Builtin slash command definitions (structural only, no translated descriptions).
+ *  Use buildSlashCommands() for fully populated items with translated descriptions. */
+export const BUILTIN_SLASH_COMMANDS: Pick<SlashCommandItem, "kind" | "name" | "label" | "args">[] =
+  BUILTIN_SLASH_COMMAND_DEFS;
 
 export function buildSlashCommands(skills: SkillInfo[]): SlashCommandItem[] {
   const skillItems: SlashCommandItem[] = skills.map((skill) => ({
@@ -102,7 +87,11 @@ export function buildSlashCommands(skills: SkillInfo[]): SlashCommandItem[] {
     description: skill.description || t("ui.slashCommands.noDescription"),
     skill,
   }));
-  return [...skillItems, ...BUILTIN_SLASH_COMMANDS];
+  const builtinItems: SlashCommandItem[] = BUILTIN_SLASH_COMMAND_DEFS.map((def) => ({
+    ...def,
+    description: getBuiltinDescription(def.kind),
+  }));
+  return [...skillItems, ...builtinItems];
 }
 
 export function filterSlashCommands(items: SlashCommandItem[], token: string): SlashCommandItem[] {

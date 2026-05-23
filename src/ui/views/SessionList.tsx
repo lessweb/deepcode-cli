@@ -2,6 +2,8 @@ import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { SessionEntry, SessionStatus } from "../../session";
 import { truncate } from "../components/MessageView/utils";
+import { t } from "../../common/i18n";
+import { truncateDisplay } from "../../common/display-width";
 
 type Props = {
   sessions: SessionEntry[];
@@ -180,8 +182,8 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
   if (sessions.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text color="yellow">No previous sessions found.</Text>
-        <Text dimColor>Press Esc to go back.</Text>
+        <Text color="yellow">{t("ui.sessionList.empty")}</Text>
+        <Text dimColor>{t("ui.sessionList.escBack")}</Text>
       </Box>
     );
   }
@@ -200,17 +202,19 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
         <Box paddingX={1} flexDirection="column">
           <Box>
             <Text bold color="cyanBright">
-              Resume a session
+              {t("ui.sessionList.title")}
             </Text>
             <Text bold color="#229ac3">
               {" "}
-              ({sessions.length} total
-              {hasActiveSearch ? `, ${filteredSessions.length} matched` : ""})
+              ({sessions.length} {t("ui.sessionList.total")}
+              {hasActiveSearch ? t("ui.sessionList.matched", { n: filteredSessions.length }) : ""})
             </Text>
           </Box>
           {/* Search bar */}
           <Box marginTop={hasActiveSearch || searchQuery ? 0 : 0}>
-            <Text dimColor>{searchQuery ? `Search: ${searchQuery}` : "Type to search\u2026"}</Text>
+            <Text dimColor>
+              {searchQuery ? t("ui.sessionList.searchQuery", { query: searchQuery }) : t("ui.sessionList.searchHint")}
+            </Text>
             {searchQuery ? <Text bold>|</Text> : null}
           </Box>
         </Box>
@@ -230,7 +234,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
         >
           {filteredSessions.length === 0 ? (
             <Box paddingY={1}>
-              <Text color="yellow">No sessions match "{searchQuery}".</Text>
+              <Text color="yellow">{t("ui.sessionList.noMatch", { query: searchQuery })}</Text>
             </Box>
           ) : (
             visibleSessions.map((session, i) => {
@@ -244,8 +248,8 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
                     <Box width={"100%"}>
-                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? "#229ac3" : undefined}>
-                        {formatSessionTitle(session.summary || "Untitled")}
+	                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? "#229ac3" : undefined}>
+                        {formatSessionTitle(session.summary || t("ui.sessionList.untitled"))}
                       </Text>
                       {isConfirming ? (
                         <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
@@ -263,9 +267,11 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
           )}
           {scrollOffset > 0 || scrollOffset + maxVisibleSessions < filteredSessions.length ? (
             <Box marginTop={1}>
-              {scrollOffset > 0 ? <Text dimColor>… {scrollOffset} sessions above. </Text> : null}
+              {scrollOffset > 0 ? <Text dimColor>{t("ui.sessionList.above", { n: scrollOffset })} </Text> : null}
               {scrollOffset + maxVisibleSessions < filteredSessions.length ? (
-                <Text dimColor>… {filteredSessions.length - scrollOffset - maxVisibleSessions} sessions below.</Text>
+                <Text dimColor>
+                  {t("ui.sessionList.below", { n: filteredSessions.length - scrollOffset - maxVisibleSessions })}
+                </Text>
               ) : null}
             </Box>
           ) : null}
@@ -286,14 +292,11 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
             </Box>
           ) : hasActiveSearch ? (
             <Box>
-              <Text dimColor>Esc clear search · </Text>
-              <Text dimColor>↑/↓ navigate · Enter select · Esc again to cancel</Text>
+              <Text dimColor>{t("ui.sessionList.footerSearch")}</Text>
             </Box>
           ) : (
             <Box>
-              <Text dimColor>
-                Type to search · ↑/↓ navigate · PgUp/PgDn page · Enter select · Esc cancel · Del delete
-              </Text>
+	              <Text dimColor>{t("ui.sessionList.footerHelp")}</Text>
             </Box>
           )}
         </Box>
@@ -315,23 +318,23 @@ function formatTimestamp(value: string): string {
 }
 
 export function formatSessionTitle(value: string, max = 70): string {
-  return truncate(value.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim(), max);
+  return truncateDisplay(value.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim(), max);
 }
 
 export function formatSessionStatus(status: SessionStatus): string {
   switch (status) {
     case "completed":
-      return "done";
+      return t("ui.sessionList.statusDone");
     case "processing":
-      return "running";
+      return t("ui.sessionList.statusRunning");
     case "pending":
-      return "pending";
+      return t("ui.sessionList.statusPending");
     case "waiting_for_user":
-      return "waiting";
+      return t("ui.sessionList.statusWaiting");
     case "failed":
-      return "failed";
+      return t("ui.sessionList.statusFailed");
     case "interrupted":
-      return "stopped";
+      return t("ui.sessionList.statusStopped");
     case "ask_permission":
       return "waiting";
     case "permission_denied":

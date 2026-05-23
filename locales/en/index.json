@@ -31,7 +31,7 @@
       "ctrlOCollapse": " · ctrl+o collapse",
       "noPasteMarker": "No paste marker at cursor",
       "pasteNotFound": "Paste content not found",
-      "imageCount": "📎 {count} image{count,plural,=1{} other{s}} attached"
+      "imageCount": "📎 {count} image(s) attached"
     },
     "loading": {
       "thinking": "Thinking...",
@@ -50,10 +50,11 @@
       "noActiveSession": "No active session to undo.",
       "codeRestoreFailed": "Code restore failed: {error}",
       "conversationRestoreFailed": "Conversation restore failed: {error}",
-      "sessionDefaultSummary": "[Image Prompt]",
       "sessionAgentSteps": "The AI agent has taken several steps but hasn't reached a conclusion yet. Do you want to continue?",
       "apiKeyNotFound": "OpenAI API key not found. Please configure ~/.deepcode/settings.json or ./.deepcode/settings.json.",
-      "requestFailed": "Request failed: {error}"
+      "requestFailed": "Request failed: {error}",
+      "pressEscExitRaw": "Press ESC to exit raw mode",
+      "noMessagesInSession": "(No messages in this session yet. Start chatting to see them here.)"
     },
     "exitSummary": {
       "goodbye": "Goodbye!",
@@ -70,10 +71,7 @@
       "replyLanguage": "Reply Language",
       "selectLanguage": "Select Language",
       "selectCategoryHelp": "Space/Enter select · Esc to cancel",
-      "selectLanguageHelp": "Space/Enter apply · Esc back",
-      "languageUpdated": "Language updated to {locale}",
-      "thinkingLanguageUpdated": "Thinking language updated to {locale}",
-      "replyLanguageUpdated": "Reply language updated to {locale}"
+      "selectLanguageHelp": "Space/Enter apply · Esc back"
     },
     "welcome": {
       "sendPrompt": "Send the prompt",
@@ -82,16 +80,37 @@
       "interrupt": "Interrupt the current model turn",
       "openMenu": "Open the skills and commands menu",
       "quit": "Quit Deep Code CLI",
-      "deepCodeTitle": "Deep Code"
+      "thinkingEnabled": "Thinking Enabled",
+      "reasoningEffort": "Reasoning Effort",
+      "model": "Model",
+      "cwd": "CWD"
     },
     "mcp": {
-      "serverList": "server-list",
-      "serverDetail": "server-detail",
       "statusReady": "ready",
       "statusFailed": "failed",
-      "statusConnecting": "connecting",
       "statusReconnecting": "reconnecting",
-      "reconnect": "Reconnect"
+      "reconnect": "Reconnect",
+      "starting": "Starting",
+      "details": "Details",
+      "status": "Status",
+      "enterReconnect": "Enter to reconnect · Esc back · Ctrl+C close",
+      "scrollBack": "↑/↓ scroll · Space/Enter back · Esc back · Ctrl+C close",
+      "spaceBack": "Space/Enter back · Esc back · Ctrl+C close",
+      "noItems": "No items available",
+      "footerHelp": "↑/↓ navigate · Enter view details · Esc close",
+      "countReady": "{count} ready,",
+      "countStarting": "{count} starting,",
+      "countReconnecting": "{count} reconnecting,",
+      "countFailed": "{count} failed",
+      "manageTitle": "Manage MCP servers",
+      "zeroServers": "0 servers",
+      "noServersConfigured": "No MCP servers configured.",
+      "addServersHint": "Add MCP servers to your settings to get started.",
+      "escToClose": "Esc to close",
+      "serversAbove": "{n} servers above.",
+      "serversBelow": "{n} servers below.",
+      "itemCounts": "{tools} tools, {prompts} prompts, {resources} resources",
+      "statusPrefix": "Status: {status}"
     },
     "slashCommands": {
       "skillsDesc": "List available skills",
@@ -109,21 +128,113 @@
     },
     "sessionList": {
       "title": "Sessions",
-      "empty": "No sessions yet"
-    },
-    "askUserQuestion": {
-      "submit": "Submit",
-      "cancel": "Dismiss",
-      "selectOption": "Select an option"
-    },
-    "processStdout": {
-      "title": "Process Output",
-      "running": "Running: {command}",
-      "adjustTimeout": "Adjust timeout",
-      "noOutput": "No output yet"
+      "empty": "No sessions yet",
+      "searchHint": "Type to search\u2026",
+      "searchQuery": "Search: {query}",
+      "escBack": "Press Esc to go back.",
+      "total": "total",
+      "matched": ", {n} matched",
+      "noMatch": "No sessions match \"{query}\".",
+      "untitled": "Untitled",
+      "above": "{n} sessions above.",
+      "below": "{n} sessions below.",
+      "footerHelp": "Type to search \u00b7 \u2191/\u2193 navigate \u00b7 PgUp/PgDn page \u00b7 Enter select \u00b7 Esc cancel",
+      "footerSearch": "Esc clear search \u00b7 \u2191/\u2193 navigate \u00b7 Enter select \u00b7 Esc again to cancel",
+      "statusDone": "done",
+      "statusRunning": "running",
+      "statusPending": "pending",
+      "statusWaiting": "waiting",
+      "statusFailed": "failed",
+      "statusStopped": "stopped"
     },
     "updatePrompt": {
-      "planHeader": "Plan"
+      "title": "Deep Code latest version has been released: {currentVersion} -> {latestVersion}",
+      "installLabel": "Install the latest version with `{installCommand}`",
+      "ignoreOnce": "Ignore once",
+      "ignoreVersion": "Ignore this version ({latestVersion})",
+      "footerHelp": "Use Up/Down to choose, Enter to confirm, Esc to ignore once."
+    },
+    "processStdout": {
+      "noAdjustableTimeout": "No adjustable Bash timeout",
+      "processLabel": "\u2500\u2500 Process {pid} [{command}] \u2500\u2500",
+      "noOutputYet": "(no output yet)",
+      "noRunning": "(no running processes)",
+      "scrollHint": "... ({start} lines above \u00b7 \u2191/\u2193 to scroll \u00b7 {total} total lines) ...",
+      "title": "\uD83D\uDCDF Process Output",
+      "footerHelp": "({timeoutHint} \u00b7 +/- adjust \u00b7 Ctrl+O or Esc to close \u00b7 \u2191\u2193 PageUp/PageDown to scroll)",
+      "timeoutUnavailable": "timeout unavailable",
+      "timeoutHint": "timeout {duration}",
+      "timeoutSet": "Timeout set to {duration}"
+    },
+    "undo": {
+      "restoreFiles": "Restore files from the recorded Git checkpoint, then fork the conversation.",
+      "noCheckpoint": "No code checkpoint is recorded for this prompt."
+    },
+    "askUserQuestion": {
+      "selectOptionHelp": "Select an option, or type an Other answer.",
+      "selectMultiHelp": "Select at least one option with Space, or type an Other answer.",
+      "typeAnswerHelp": "Type your answer · Backspace edit · Enter submit/next · ↑ choose presets · Esc type manually",
+      "otherLabel": "Other",
+      "selectMultiMove": "↑/↓ move · Space toggle · Enter submit/next · Esc type manually",
+      "selectSingleMove": "↑/↓ move · Enter select/next · Esc type manually"
+    },
+    "dropdownMenu": {
+      "emptyText": "No items found",
+      "above": "{n} above",
+      "more": "{n} more"
+    },
+    "fileMentionMenu": {
+      "title": "Mention File",
+      "helpText": "Enter/Tab insert · Esc close",
+      "noMatching": "No matching files",
+      "typeHint": "Type after @ to search files",
+      "directory": "directory",
+      "file": "file"
+    },
+    "modelsDropdown": {
+      "thinkingMax": "Thinking mode [max]",
+      "thinkingHigh": "Thinking mode [high]",
+      "noThinking": "No thinking",
+      "currentModel": "current model",
+      "reasoningEffort": "reasoningEffort: {value}",
+      "thinkingDisabled": "thinking disabled",
+      "selectModel": "Select Model",
+      "selectThinkingMode": "Select Thinking Mode",
+      "selectModelHelp": "Space/Enter select model · Esc to cancel",
+      "applyHelp": "Space/Enter apply · Esc to cancel"
+    },
+    "rawModelDropdown": {
+      "title": "Select mode",
+      "helpText": "Space/Enter select mode · Esc to close",
+      "liteMode": "Lite mode",
+      "normalMode": "Normal mode",
+      "rawScrollbackMode": "Raw scrollback mode",
+      "liteDesc": "Collapse chain-of-thought reasoning.",
+      "normalDesc": "Show full chain-of-thought reasoning.",
+      "rawDesc": "Show scrollback mode for copy-friendly terminal selection."
+    },
+    "skillsDropdown": {
+      "title": "Select Skills",
+      "helpText": "Space toggle · Enter toggle · Esc to close",
+      "emptyText": "No skills found"
+    },
+    "slashCommandMenu": {
+      "footerHelp": "({current}/{total}) \u2191\u2193 to navigate \u00b7 Enter to select"
+    },
+    "undoSelector": {
+      "nothingYet": "Nothing to undo yet.",
+      "escBack": "Press Esc to go back.",
+      "title": "Undo",
+      "subtitle": "restore to the point before a prompt",
+      "checkpointAvailable": "code checkpoint available",
+      "conversationOnly": "conversation only",
+      "selectedPrompt": "Selected prompt:",
+      "restoreCodeAndConversation": "Restore code and conversation",
+      "restoreConversation": "Restore conversation",
+      "forkConversation": "Fork the conversation without changing files.",
+      "footerMessage": "\u2191/\u2193 navigate \u00b7 Enter choose \u00b7 Esc cancel",
+      "footerMode": "\u2191/\u2193 choose restore mode \u00b7 Enter restore \u00b7 Esc back",
+      "emptyMessage": "(empty message)"
     }
   },
   "session": {
@@ -172,7 +283,8 @@
       "slashRaw": "  /raw             Toggle display mode for viewing or collapsing reasoning content",
       "slashExit": "  /exit            Quit",
       "slashConfig": "  /config          Configure language settings",
-      "ctrlD": "  ctrl+d twice     Quit"
+      "ctrlD": "  ctrl+d twice     Quit",
+      "ttyRequired": "deepcode requires an interactive terminal (TTY). Re-run from a real terminal session."
     }
   }
 }

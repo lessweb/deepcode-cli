@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useInput } from "ink";
 import DropdownMenu from "../../DropdownMenu";
 import { t, type Locale } from "../../../common/i18n";
@@ -10,11 +10,13 @@ type CategoryOption = {
   label: string;
 };
 
-const CATEGORY_OPTIONS: CategoryOption[] = [
-  { key: "locale", label: t("ui.config.language") },
-  { key: "thinkingLocale", label: t("ui.config.thinkingLanguage") },
-  { key: "replyLocale", label: t("ui.config.replyLanguage") },
-];
+function getCategoryOptions(): CategoryOption[] {
+  return [
+    { key: "locale", label: t("ui.config.language") },
+    { key: "thinkingLocale", label: t("ui.config.thinkingLanguage") },
+    { key: "replyLocale", label: t("ui.config.replyLanguage") },
+  ];
+}
 
 const LOCALE_OPTIONS: { key: Locale; label: string }[] = [
   { key: "en", label: "English" },
@@ -71,7 +73,7 @@ const ConfigDropdown: React.FC<Props> = ({
 
   function handleSelect(): void {
     if (step === "category") {
-      const category = CATEGORY_OPTIONS[activeIndex];
+      const category = getCategoryOptions()[activeIndex];
       if (!category) {
         return;
       }
@@ -108,7 +110,7 @@ const ConfigDropdown: React.FC<Props> = ({
         return;
       }
 
-      const optionCount = step === "category" ? CATEGORY_OPTIONS.length : LOCALE_OPTIONS.length;
+      const optionCount = step === "category" ? getCategoryOptions().length : LOCALE_OPTIONS.length;
 
       if (key.upArrow) {
         setActiveIndex((idx) => (idx - 1 + optionCount) % optionCount);
@@ -141,7 +143,7 @@ const ConfigDropdown: React.FC<Props> = ({
 
   const items =
     step === "category"
-      ? CATEGORY_OPTIONS.map((option) => ({
+      ? getCategoryOptions().map((option) => ({
           key: option.key,
           label: option.label,
           selected: false,

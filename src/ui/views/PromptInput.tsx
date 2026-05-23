@@ -189,29 +189,29 @@ export const PromptInput = React.memo(function PromptInput({
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      showSkillsDropdown || showModelDropdown || showFileMentionMenu
+      showSkillsDropdown || showModelDropdown || showConfigDropdown || showFileMentionMenu
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
           : [],
-    [showSkillsDropdown, showModelDropdown, showFileMentionMenu, slashToken, slashItems]
+    [showSkillsDropdown, showModelDropdown, showConfigDropdown, showFileMentionMenu, slashToken, slashItems]
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
   const hasRunningProcess = runningProcesses && runningProcesses.size > 0;
   const processOrPasteHint = hasRunningProcess
-    ? " · ctrl+o view output"
+    ? t("ui.promptInput.ctrlOViewOutput")
     : hasCollapsedMarkers
-      ? " · ctrl+o expand"
+      ? t("ui.promptInput.ctrlOExpand")
       : hasExpandedRegions
-        ? " · ctrl+o collapse"
+        ? t("ui.promptInput.ctrlOCollapse")
         : "";
   const footerText = statusMessage
     ? statusMessage
     : busy
       ? loadingText && loadingText.trim()
         ? `${loadingText}${processOrPasteHint}`
-        : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`
+        : `${t("ui.promptInput.footerBusy")}${processOrPasteHint}`
       : t("ui.promptInput.footer") + processOrPasteHint;
   useTerminalFocusReporting(stdout, !disabled);
   useTerminalExtendedKeys(stdout, !disabled);
@@ -352,7 +352,7 @@ export const PromptInput = React.memo(function PromptInput({
         setPendingExit(false);
       }
 
-      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
+      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown || showConfigDropdown) {
         return;
       }
 
@@ -835,8 +835,14 @@ export const PromptInput = React.memo(function PromptInput({
   }
 
   const showFooterText = useMemo(
-    () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
-    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
+    () =>
+      showMenu ||
+      showSkillsDropdown ||
+      openRawModelDropdown ||
+      showModelDropdown ||
+      showConfigDropdown ||
+      showFileMentionMenu,
+    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showConfigDropdown, showFileMentionMenu]
   );
 
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
@@ -932,7 +938,7 @@ export function formatImageAttachmentStatus(count: number): string {
   if (count <= 0) {
     return "";
   }
-  return `📎 ${count} image${count === 1 ? "" : "s"} attached`;
+  return t("ui.promptInput.imageCount", { count });
 }
 
 export function formatSelectedSkillsStatus(skills: SkillInfo[]): string {

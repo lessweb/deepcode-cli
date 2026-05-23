@@ -50,10 +50,11 @@
       "noActiveSession": "没有活跃会话可供撤销。",
       "codeRestoreFailed": "代码恢复失败：{error}",
       "conversationRestoreFailed": "对话恢复失败：{error}",
-      "sessionDefaultSummary": "[图片提示]",
       "sessionAgentSteps": "AI 助手已执行多个步骤但未得出结论。是否继续？",
       "apiKeyNotFound": "未找到 OpenAI API key。请配置 ~/.deepcode/settings.json 或 ./.deepcode/settings.json。",
-      "requestFailed": "请求失败：{error}"
+      "requestFailed": "请求失败：{error}",
+      "pressEscExitRaw": "按 ESC 退出原始模式",
+      "noMessagesInSession": "（此会话暂无消息，开始聊天即可看到）"
     },
     "exitSummary": {
       "goodbye": "再见！",
@@ -70,10 +71,7 @@
       "replyLanguage": "回复语言",
       "selectLanguage": "选择语言",
       "selectCategoryHelp": "空格/回车选择 · Esc 取消",
-      "selectLanguageHelp": "空格/回车确认 · Esc 返回",
-      "languageUpdated": "语言已切换为 {locale}",
-      "thinkingLanguageUpdated": "推理语言已切换为 {locale}",
-      "replyLanguageUpdated": "回复语言已切换为 {locale}"
+      "selectLanguageHelp": "空格/回车确认 · Esc 返回"
     },
     "welcome": {
       "sendPrompt": "发送提示",
@@ -82,16 +80,37 @@
       "interrupt": "中断当前模型响应",
       "openMenu": "打开技能和命令菜单",
       "quit": "退出 Deep Code CLI",
-      "deepCodeTitle": "Deep Code"
+      "thinkingEnabled": "思考模式",
+      "reasoningEffort": "思考努力程度",
+      "model": "模型",
+      "cwd": "当前目录"
     },
     "mcp": {
-      "serverList": "服务器列表",
-      "serverDetail": "服务器详情",
       "statusReady": "就绪",
       "statusFailed": "失败",
-      "statusConnecting": "连接中",
       "statusReconnecting": "重连中",
-      "reconnect": "重连"
+      "reconnect": "重连",
+      "starting": "启动中",
+      "details": "详情",
+      "status": "状态",
+      "enterReconnect": "回车重连 · Esc 返回 · Ctrl+C 关闭",
+      "scrollBack": "↑/↓ 滚动 · 空格/回车返回 · Esc 返回 · Ctrl+C 关闭",
+      "spaceBack": "空格/回车返回 · Esc 返回 · Ctrl+C 关闭",
+      "noItems": "无可用项目",
+      "footerHelp": "↑/↓ 导航 · 回车查看详情 · Esc 关闭",
+      "countReady": "{count} 就绪，",
+      "countStarting": "{count} 启动中，",
+      "countReconnecting": "{count} 重连中，",
+      "countFailed": "{count} 失败",
+      "manageTitle": "管理 MCP 服务器",
+      "zeroServers": "0 个服务器",
+      "noServersConfigured": "未配置 MCP 服务器。",
+      "addServersHint": "将 MCP 服务器添加到设置中以开始使用。",
+      "escToClose": "Esc 关闭",
+      "serversAbove": "上方 {n} 个服务器。",
+      "serversBelow": "下方 {n} 个服务器。",
+      "itemCounts": "{tools} 个工具，{prompts} 个提示，{resources} 个资源",
+      "statusPrefix": "状态：{status}"
     },
     "slashCommands": {
       "skillsDesc": "列出可用技能",
@@ -109,21 +128,113 @@
     },
     "sessionList": {
       "title": "会话",
-      "empty": "暂无会话"
-    },
-    "askUserQuestion": {
-      "submit": "提交",
-      "cancel": "忽略",
-      "selectOption": "选择一个选项"
-    },
-    "processStdout": {
-      "title": "进程输出",
-      "running": "运行中：{command}",
-      "adjustTimeout": "调整超时",
-      "noOutput": "暂无输出"
+      "empty": "暂无会话",
+      "searchHint": "输入搜索\u2026",
+      "searchQuery": "搜索：{query}",
+      "escBack": "按 Esc 返回。",
+      "total": "共",
+      "matched": "，匹配 {n} 个",
+      "noMatch": "没有匹配 \"{query}\" 的会话。",
+      "untitled": "无标题",
+      "above": "上方 {n} 个会话。",
+      "below": "下方 {n} 个会话。",
+      "footerHelp": "输入搜索 \u00b7 \u2191/\u2193 导航 \u00b7 PgUp/PgDn 翻页 \u00b7 回车选择 \u00b7 Esc 取消",
+      "footerSearch": "Esc 清除搜索 \u00b7 \u2191/\u2193 导航 \u00b7 回车选择 \u00b7 Esc 再次取消",
+      "statusDone": "已完成",
+      "statusRunning": "运行中",
+      "statusPending": "待处理",
+      "statusWaiting": "等待中",
+      "statusFailed": "失败",
+      "statusStopped": "已停止"
     },
     "updatePrompt": {
-      "planHeader": "计划"
+      "title": "Deep Code 新版本已发布：{currentVersion} -> {latestVersion}",
+      "installLabel": "使用 `{installCommand}` 安装最新版本",
+      "ignoreOnce": "忽略一次",
+      "ignoreVersion": "忽略此版本（{latestVersion}）",
+      "footerHelp": "↑/↓ 选择 · 回车确认 · Esc 忽略一次"
+    },
+    "processStdout": {
+      "noAdjustableTimeout": "无可用 Bash 超时调整",
+      "processLabel": "\u2500\u2500 进程 {pid} [{command}] \u2500\u2500",
+      "noOutputYet": "（暂无输出）",
+      "noRunning": "（无运行中的进程）",
+      "scrollHint": "...（上方 {start} 行 \u00b7 \u2191/\u2193 滚动 \u00b7 共 {total} 行）...",
+      "title": "\uD83D\uDCDF 进程输出",
+      "footerHelp": "（{timeoutHint} \u00b7 +/- 调整 \u00b7 Ctrl+O 或 Esc 关闭 \u00b7 \u2191\u2193 PageUp/PageDown 滚动）",
+      "timeoutUnavailable": "超时不可用",
+      "timeoutHint": "超时 {duration}",
+      "timeoutSet": "超时已设为 {duration}"
+    },
+    "undo": {
+      "restoreFiles": "从记录的 Git 检查点恢复文件，然后分支对话。",
+      "noCheckpoint": "此提示没有记录的代码检查点。"
+    },
+    "askUserQuestion": {
+      "selectOptionHelp": "选择一个选项，或输入其他答案。",
+      "selectMultiHelp": "请使用空格选择至少一个选项，或输入其他答案。",
+      "typeAnswerHelp": "输入答案 · 退格编辑 · 回车提交/下一步 · ↑ 选择预设 · Esc 手动输入",
+      "otherLabel": "其他",
+      "selectMultiMove": "↑/↓ 移动 · 空格切换 · 回车提交/下一步 · Esc 手动输入",
+      "selectSingleMove": "↑/↓ 移动 · 回车选择/下一步 · Esc 手动输入"
+    },
+    "dropdownMenu": {
+      "emptyText": "无可用项目",
+      "above": "上方 {n} 项",
+      "more": "下方 {n} 项"
+    },
+    "fileMentionMenu": {
+      "title": "引用文件",
+      "helpText": "回车/Tab 插入 · Esc 关闭",
+      "noMatching": "无匹配文件",
+      "typeHint": "在 @ 后输入搜索文件",
+      "directory": "目录",
+      "file": "文件"
+    },
+    "modelsDropdown": {
+      "thinkingMax": "思考模式 [最大]",
+      "thinkingHigh": "思考模式 [高]",
+      "noThinking": "不思考",
+      "currentModel": "当前模型",
+      "reasoningEffort": "努力程度：{value}",
+      "thinkingDisabled": "思考已禁用",
+      "selectModel": "选择模型",
+      "selectThinkingMode": "选择思考模式",
+      "selectModelHelp": "空格/回车选择模型 · Esc 取消",
+      "applyHelp": "空格/回车确认 · Esc 取消"
+    },
+    "rawModelDropdown": {
+      "title": "选择模式",
+      "helpText": "空格/回车选择模式 · Esc 关闭",
+      "liteMode": "精简模式",
+      "normalMode": "标准模式",
+      "rawScrollbackMode": "原始回滚模式",
+      "liteDesc": "折叠思维链推理内容。",
+      "normalDesc": "显示完整的思维链推理内容。",
+      "rawDesc": "显示回滚模式，便于终端复制。"
+    },
+    "skillsDropdown": {
+      "title": "选择技能",
+      "helpText": "空格切换 · 回车切换 · Esc 关闭",
+      "emptyText": "未找到技能"
+    },
+    "slashCommandMenu": {
+      "footerHelp": "({current}/{total}) ↑↓ 导航 · 回车选择"
+    },
+    "undoSelector": {
+      "nothingYet": "暂无内容可撤销。",
+      "escBack": "按 Esc 返回。",
+      "title": "撤销",
+      "subtitle": "恢复到某个提示之前的节点",
+      "checkpointAvailable": "代码检查点可用",
+      "conversationOnly": "仅对话",
+      "selectedPrompt": "已选提示：",
+      "restoreCodeAndConversation": "恢复代码和对话",
+      "restoreConversation": "恢复对话",
+      "forkConversation": "分支对话而不更改文件。",
+      "footerMessage": "↑/↓ 导航 · 回车选择 · Esc 取消",
+      "footerMode": "↑/↓ 选择恢复模式 · 回车恢复 · Esc 返回",
+      "emptyMessage": "(空消息)"
     }
   },
   "session": {
@@ -172,7 +283,8 @@
       "slashRaw": "  /raw             切换推理内容显示模式",
       "slashExit": "  /exit            退出",
       "slashConfig": "  /config          配置语言设置",
-      "ctrlD": "  ctrl+d 两次      退出"
+      "ctrlD": "  ctrl+d 两次      退出",
+      "ttyRequired": "deepcode 需要一个交互式终端（TTY）。请从真实终端会话重新运行。"
     }
   }
 }

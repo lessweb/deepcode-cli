@@ -5,6 +5,7 @@ import type { PromptDraft } from "../views/PromptInput";
 import type { ModelConfigSelection } from "../../settings";
 import type { SessionEntry, SessionMessage } from "../../session";
 import type { SessionManager } from "../../session";
+import { t } from "../../common/i18n";
 
 /**
  * Render all messages directly to stdout for Raw mode display.
@@ -17,12 +18,12 @@ export function renderRawModeMessages(allMessages: SessionMessage[], mode: strin
   }
   if (allMessages.length > 0) {
     process.stdout.write("\n\n");
-    process.stdout.write(chalk.dim("Press ESC to exit raw mode"));
+    process.stdout.write(chalk.dim(t("ui.app.pressEscExitRaw")));
   } else {
     process.stdout.write("\n");
-    process.stdout.write(chalk.dim("(No messages in this session yet. Start chatting to see them here.)"));
+    process.stdout.write(chalk.dim(t("ui.app.noMessagesInSession")));
     process.stdout.write("\n\n");
-    process.stdout.write(chalk.dim("Press ESC to exit raw mode"));
+    process.stdout.write(chalk.dim(t("ui.app.pressEscExitRaw")));
   }
 }
 

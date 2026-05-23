@@ -62,10 +62,13 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
               <Text color="gray"> (v{version || "unknown"})</Text>
             </Box>
             {!compact ? <Text> </Text> : null}
-            <SettingRow label="Model" value={settings.model} />
-            <SettingRow label="Thinking Enabled" value={String(settings.thinkingEnabled)} />
-            <SettingRow label="Reasoning Effort" value={settings.thinkingEnabled ? settings.reasoningEffort : "-"} />
-            <SettingRow label="CWD" value={cwd} />
+            <SettingRow label={t("ui.welcome.model")} value={settings.model} />
+            <SettingRow label={t("ui.welcome.thinkingEnabled")} value={String(settings.thinkingEnabled)} />
+            <SettingRow
+              label={t("ui.welcome.reasoningEffort")}
+              value={settings.thinkingEnabled ? settings.reasoningEffort : "-"}
+            />
+            <SettingRow label={t("ui.welcome.cwd")} value={cwd} />
           </Box>
         </Box>
       </Box>

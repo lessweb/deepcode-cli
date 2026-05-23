@@ -1040,7 +1040,7 @@ The candidate skills are as follows:\n\n`;
           continue;
         }
         const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
+        const skillPrompt = `${t("session.skillPromptHeader")}
 <${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
 ${skillMd}
 </${skill.name}-skill>`;
@@ -1114,7 +1114,7 @@ ${skillMd}
           continue;
         }
         const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
+        const skillPrompt = `${t("session.skillPromptHeader")}
 <${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
 ${skillMd}
 </${skill.name}-skill>`;
@@ -1150,17 +1150,10 @@ ${skillMd}
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
         status: "failed",
-        failReason: "OpenAI API key not found",
+        failReason: t("ui.app.apiKeyNotFound"),
         updateTime: now,
       }));
-      this.onAssistantMessage(
-        this.buildAssistantMessage(
-          sessionId,
-          "OpenAI API key not found. Please configure ~/.deepcode/settings.json or ./.deepcode/settings.json.",
-          null
-        ),
-        false
-      );
+      this.onAssistantMessage(this.buildAssistantMessage(sessionId, t("ui.app.apiKeyNotFound"), null), false);
       this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
       return;
     }
@@ -1343,14 +1336,7 @@ ${skillMd}
         status: "completed",
         updateTime: new Date().toISOString(),
       }));
-      this.onAssistantMessage(
-        this.buildAssistantMessage(
-          sessionId,
-          "The AI agent has taken several steps but hasn't reached a conclusion yet. Do you want to continue?",
-          null
-        ),
-        false
-      );
+      this.onAssistantMessage(this.buildAssistantMessage(sessionId, t("ui.app.sessionAgentSteps"), null), false);
     } catch (error) {
       const errMessage = error instanceof Error ? error.message : String(error);
       const aborted = this.isAbortLikeError(error) || sessionController.signal.aborted;
@@ -1362,7 +1348,10 @@ ${skillMd}
       }));
 
       if (!aborted) {
-        this.onAssistantMessage(this.buildAssistantMessage(sessionId, `Request failed: ${errMessage}`, null), false);
+        this.onAssistantMessage(
+          this.buildAssistantMessage(sessionId, t("ui.app.requestFailed", { error: errMessage }), null),
+          false
+        );
       }
     } finally {
       if (this.sessionControllers.get(sessionId) === sessionController) {

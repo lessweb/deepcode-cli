@@ -3,6 +3,7 @@ import type { SessionMessage } from "../../../session";
 import { RawMode } from "../../contexts";
 import chalk from "chalk";
 import { t } from "../../../common/i18n";
+import { truncateDisplay } from "../../../common/display-width";
 
 /** Type guard that checks whether a value is a plain object (not null, not an array). */
 export function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -40,7 +41,7 @@ export function firstNonEmptyLine(value: string): string {
 export function buildThinkingSummary(content: string, messageParams: unknown | null, mode?: RawMode): string {
   if (content) {
     const normalized = content.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
-    let result = truncate(normalized, 100);
+    let result = truncateDisplay(normalized, 100);
     if (result.endsWith(":") || result.endsWith("：")) {
       result = result.slice(0, -1);
     }
@@ -58,7 +59,7 @@ export function buildThinkingSummary(content: string, messageParams: unknown | n
 /** Formats a tool's parameters for status display, preserving full bash commands but truncating others. */
 export function formatToolStatusParams(summary: ToolSummary): string {
   const params = firstNonEmptyLine(summary.params);
-  return summary.name.toLowerCase() === "bash" ? params : truncate(params, 120);
+  return summary.name.toLowerCase() === "bash" ? params : truncateDisplay(params, 120);
 }
 
 /** Builds a structured summary (name, params, ok, metadata) from a tool session message. */
@@ -234,7 +235,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
         : null;
     const name = payload.name || metaFunctionName || "tool";
     const metaParams = typeof message.meta?.paramsMd === "string" ? message.meta.paramsMd.trim() : "";
-    const params = name.toLowerCase() === "bash" ? metaParams : truncate(metaParams, 120);
+    const params = name.toLowerCase() === "bash" ? metaParams : truncateDisplay(metaParams, 120);
     const statusLine = `${chalk("✧")} ${chalk(formatStatusName(name))}${params ? ` ${chalk(params)}` : ""}`;
 
     const metaResultMd = typeof message.meta?.resultMd === "string" ? message.meta.resultMd.trim() : "";

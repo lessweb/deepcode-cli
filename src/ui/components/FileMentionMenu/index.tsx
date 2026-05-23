@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Box, Text } from "ink";
-import { useInput } from "ink";
+import { Box, Text, useInput } from "ink";
 import DropdownMenu from "../DropdownMenu";
 import type { FileMentionItem, FileMentionToken } from "../../core/file-mentions";
+import { t } from "../../../common/i18n";
 
 type Props = {
   open: boolean;
@@ -84,13 +84,13 @@ const FileMentionMenu: React.FC<Props> = ({ open, width, token, items, onClose, 
   return (
     <DropdownMenu
       width={width}
-      title="Mention File"
-      helpText="Enter/Tab insert · Esc close"
-      emptyText={token?.query ? "No matching files" : "Type after @ to search files"}
+      title={t("ui.fileMentionMenu.title")}
+      helpText={t("ui.fileMentionMenu.helpText")}
+      emptyText={token?.query ? t("ui.fileMentionMenu.noMatching") : t("ui.fileMentionMenu.typeHint")}
       items={items.map((item) => ({
         key: item.path,
         label: item.path,
-        description: item.type === "directory" ? "directory" : "file",
+        description: item.type === "directory" ? t("ui.fileMentionMenu.directory") : t("ui.fileMentionMenu.file"),
       }))}
       activeIndex={activeIndex}
       activeColor="#229ac3"

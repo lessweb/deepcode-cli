@@ -175,3 +175,102 @@ All i18n changes have negligible performance impact:
 3. **LLM output is a soft constraint**: Language instructions guide the LLM but cannot guarantee compliance. Most models follow reliably.
 4. **`TranslationKey` type**: Must match keys in all `en/*.json` files. Auto-derived via `import type` + `keyof typeof`.
 5. **Tool docs**: `templates/tools/*.md` stay in English (sent to LLM, not user-facing).
+
+## Common Pitfalls
+
+### 1. 🚫 Module-Level `t()` Calls (i18n Not Yet Initialized)
+
+**Problem**: `t()` called at module scope evaluates BEFORE `initI18n()` runs (ESM import resolution order). The translation cache is empty, so `t()` returns the key string itself.
+
+```typescript
+// ❌ WRONG — evaluates at module load time
+const OPTIONS = [{ label: t("ui.config.language") }]; // → "ui.config.language"
+```
+
+**Fix**: Move `t()` into functions called at render time:
+
+```typescript
+// ✅ CORRECT — lazy evaluation after initI18n()
+function getOptions() {
+  return [{ label: t("ui.config.language") }];
+}
+// Or use map inside a render-time function:
+export function buildCommands() {
+  return DEFS.map(d => ({ ...d, desc: t(d.key) }));
+}
+```
+
+**Audit**: `rg -n '^\w.*t\("' src/ --include='*.ts' --include='*.tsx' | grep -v test` — no matches expected.
+
+### 2. 🚫 Missing `t` Import
+
+**Problem**: File uses `t("...")` without importing it.
+
+```typescript
+// ❌ WRONG — missing import
+export function buildExitSummaryText() { return t("ui.exitSummary.goodbye"); }
+```
+
+**Fix**: Always add `import { t } from "../common/i18n"` at the top.
+
+**Audit**: `rg -l 't\("' src/ --include='*.ts' --include='*.tsx' | xargs grep -L 'import.*i18n' | grep -v tests/`
+
+### 3. 🚫 Duplicate `t` Import
+
+**Rule**: React components → `const { t } = useI18n()`. Non-React modules → `import { t } from "../common/i18n"`. Never both in the same file.
+
+### 4. 🚫 Ink `useInput` Event Propagation Without Guards
+
+**Problem**: Ink delivers keyboard events to ALL active `useInput` hooks. When a dropdown is open, Enter triggers both the dropdown's action AND the parent's submit.
+
+```typescript
+// ❌ WRONG — showConfigDropdown missing
+if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) { return; }
+submitCurrentBuffer(); // fires while ConfigDropdown is open!
+```
+
+**Fix**: Include ALL dropdown states in the guard:
+
+```typescript
+// ✅ CORRECT
+if (openRawModelDropdown || showSkillsDropdown || showModelDropdown || showConfigDropdown) { return; }
+```
+
+### 5. 🚫 Test Fixtures Without `initI18n`
+
+Tests calling functions using `t()` must call `initI18n("en")` first, otherwise `t()` returns key strings.
+
+### 6. 🚫 Translation Key Naming Mismatch
+
+Run `npm run check:i18n` before PR. Also audit key usage:
+```bash
+node -e "see i18n-todo.md for full audit script"
+```
+
+### 7. 🚫 CJK 字符视觉宽度被 `String.length` 低估
+
+**Problem**: CJK 字符（中文、日文、韩文）每个占 2 列视觉宽度，但 `String.length` 计为 1。使用 `.length` 计算 UI 列宽/截断位置会导致：
+- 列宽低估 → Dropdown 选项被 `wrap="truncate-end"` 截断（如 "推理语言" → "推…"）
+- 表格 padding 不足 → 内容偏移
+
+```typescript
+// ❌ WRONG — "推理语言".length = 4, 但视觉宽 = 8
+width += item.label.length;
+```
+
+**Fix**: 使用 `displayWidth()` 替代 `String.length`（`src/common/display-width.ts`）：
+
+```typescript
+import { displayWidth } from "../common/display-width";
+width += displayWidth(item.label); // "推理语言" → 8 ✅
+```
+
+`displayWidth()` 对 CJK/全角/emoji 计 2 列，ASCII 计 1 列。
+
+**受影响的组件及状态**：
+
+| 文件 | 原始代码 | 修复方式 | 状态 |
+|------|---------|---------|------|
+| `DropdownMenu.tsx:89` | `item.label.length` | `displayWidth(item.label)` | ✅ 已修复 |
+| `SlashCommandMenu.tsx:29` | `s.label.length` | `displayWidth(s.label)` | ✅ 已修复 |
+| `exitSummary.ts:13` | `visibleLength()` 仅去 ANSI | `displayWidth()` | 📌 待定（仅视觉偏移） |

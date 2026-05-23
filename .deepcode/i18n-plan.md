@@ -1,5 +1,40 @@
-# i18n 支持方案 v7（经过第6轮 Review — 最终版）
+# i18n 支持方案 v7（经过第8轮 Review — 最终版）
 
+> **Review 8 发现与修正（CJK 视觉宽度与布局偏移 — 2026-05-23）**:
+> 1. **🟡 DropdownMenu 列宽低估 CJK 字符**：`item.label.length` 将中文 "推理语言" 计为 4 列，但视觉占 8 列，导致 `labelColumnWidth` 低估 → `wrap="truncate-end"` 截断为 "推…"
+> 2. **🟡 SlashCommandMenu 同样问题**：`s.label.length` 低估中文技能名的视觉宽度，同上
+> 3. **🟡 exitSummary 表格偏移**：`visibleLength()` 仅去 ANSI 码未处理 CJK 宽度，zh-CN 下表头/数据右偏数列（不影响功能）
+> 4. **🟢 新增解决方案**：创建 `src/common/display-width.ts` — `displayWidth()` 函数，CJK/全角/emoji 计 2 列，ASCII 计 1 列
+> 5. **🟢 修复 DropdownMenu**：`item.label.length` → `displayWidth(item.label)`
+> 6. **🟢 修复 SlashCommandMenu**：`s.label.length` → `displayWidth(s.label)`
+> 7. **📌 待定**：`exitSummary.ts:visibleLength()` 可选改为 `displayWidth()` 修复表格对齐
+>
+> **Review 7 发现与修正（代码审查 + Key 使用审计 — 2026-05-22）**:
+> 1. **🟡 死代码**：`i18n.ts:getExtensionRoot()` 第 38 行不可达（多余的 `return` 语句），应删除
+> 2. **🟡 McpStatusList 视图比较**：`viewMode === t("ui.mcp.serverDetail")` 用翻译字符串做状态比较，locale 切换时会失效；应使用固定字符串
+> 3. **🟡 遗漏 `t()` 调用**：`session.ts:activateSession()` 中 4 处运行时消息仍为硬编码英文（failReason "OpenAI API key not found"、apiKeyNotFound 消息、sessionAgentSteps 提示、requestFailed 拼接），虽然 JSON 中已定义对应 key
+> 4. **🟡 遗漏 `t()` 调用**：`App.tsx:handleModelConfigChange()` 中 modelUnchanged/modelUpdated/noActiveSession/codeRestoreFailed/conversationRestoreFailed 等仍为硬编码
+> 5. **🟡 遗漏 `t()` 调用**：`cli.tsx` 第 84 行非 TTY 错误消息未翻译
+> 6. **🟡 大量翻译 Key 未在源代码中调用**：扫查发现 `en/index.json` 中有约 35 个 key 未在代码中被 `t()` 引用（详见下方 Key 使用审计）
+> 7. **🟡 Key 使用审计结果**：
+>    - 已定义且使用的 key：105 个（75%）
+>    - 已定义但未使用的 key：35 个（25%）— 详见 `i18n-todo.md` 的 Key 使用审计表格
+>    - 代码中调用但未定义的 key：0 个（所有 `t()` 调用均指向有效 key）
+> 8. **🟡 未使用的 Key 详细清单**：
+>    - `ui.app.error/statusStatus/statusTokens/statusFail` — App.tsx 中硬编码的状态行/错误行
+>    - `ui.app.modelUnchanged/modelUpdated/noActiveSession/codeRestoreFailed/conversationRestoreFailed` — App.tsx handleModelConfigChange/handleUndoRestore 硬编码
+>    - `ui.app.sessionDefaultSummary/sessionAgentSteps/apiKeyNotFound/requestFailed` — session.ts 硬编码
+>    - `ui.config.languageUpdated/thinkingLanguageUpdated/replyLanguageUpdated` — 未在任何 t() 中调用
+>    - `ui.welcome.deepCodeTitle` — WelcomeScreen 未使用该 key
+>    - `ui.mcp.serverList/statusConnecting` — McpStatusList 硬编码
+>    - `ui.slashCommands.continueDesc` — slashCommands.ts 第 62 行硬编码英文
+>    - `ui.sessionList.title/empty` — SessionList 硬编码
+>    - `ui.askUserQuestion.submit/cancel/selectOption` — AskUserQuestionPrompt 硬编码
+>    - `ui.processStdout.title/running/adjustTimeout/noOutput` — ProcessStdoutView 硬编码
+>    - `ui.updatePrompt.planHeader` — UpdatePrompt 硬编码
+>    - `session.skillPromptHeader` — session.ts 第 987 行硬编码 "Use the skill document below..."
+>    - `ui.promptInput.footerBusy/ctrlOViewOutput/ctrlOExpand/ctrlOCollapse/imageCount` — PromptInput 中动态拼接
+>
 > **Review 6 发现与修正（综合审计）**:
 > 1. **回滚方案**：每个 Phase 需明确回滚步骤；Phase 1 最安全，Phase 2 风险最高（13+ 文件）
 > 2. **验证策略细化**：Phase 1 应验证 `t("ui.loading.thinking")` 返回正确字符串而非 key 自身

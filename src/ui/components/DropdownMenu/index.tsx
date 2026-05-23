@@ -1,5 +1,7 @@
 import React, { useMemo } from "react";
 import { Box, Text } from "ink";
+import { displayWidth } from "../common/display-width";
+import { t } from "../common/i18n";
 
 /**
  * Generic dropdown menu item structure
@@ -67,7 +69,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
   titleColor = "#229ac3",
   activeColor = "cyanBright",
   helpText,
-  emptyText = "No items found",
+  emptyText = t("ui.dropdownMenu.emptyText"),
   renderItem,
 }: DropdownMenuProps): React.ReactElement | null {
   // Calculate visible window
@@ -86,7 +88,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
         if (item.selected !== undefined) {
           width += 2; // "● " or "○ "
         }
-        width += item.label.length;
+        width += displayWidth(item.label);
         if (item.statusIndicator) {
           width += 2; // " ✓" or similar
         }
@@ -134,7 +136,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
       {/* Scroll indicator - top */}
       {visibleStart > 0 ? (
         <Box marginLeft={2}>
-          <Text dimColor>… {visibleStart} above</Text>
+          <Text dimColor>{t("ui.dropdownMenu.above", { n: visibleStart })}</Text>
         </Box>
       ) : null}
 
@@ -170,7 +172,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
       {/* Scroll indicator - bottom */}
       {visibleStart + visibleItems.length < items.length ? (
         <Box marginLeft={2}>
-          <Text dimColor>… {items.length - visibleStart - visibleItems.length} more</Text>
+          <Text dimColor>{t("ui.dropdownMenu.more", { n: items.length - visibleStart - visibleItems.length })}</Text>
         </Box>
       ) : null}
 

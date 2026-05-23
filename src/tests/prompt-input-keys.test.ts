@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { initI18n } from "../common/i18n";
+
+initI18n("en");
 
 const ANSI_RE = /\u001b\[[0-9;]*m/g;
 function stripAnsi(text: string): string {
@@ -244,8 +247,8 @@ test("parseTerminalInput recognizes ctrl+shift+- modifyOtherKeys sequence (exten
 
 test("formatImageAttachmentStatus formats the image count label", () => {
   assert.equal(formatImageAttachmentStatus(0), "");
-  assert.equal(formatImageAttachmentStatus(1), "📎 1 image attached");
-  assert.equal(formatImageAttachmentStatus(2), "📎 2 images attached");
+  assert.equal(formatImageAttachmentStatus(1), "\uD83D\uDCCE 1 image(s) attached");
+  assert.equal(formatImageAttachmentStatus(2), "\uD83D\uDCCE 2 image(s) attached");
   assert.equal(IMAGE_ATTACHMENT_CLEAR_HINT, "ctrl+x clear images");
 });
 

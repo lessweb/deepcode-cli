@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Box, Text, useApp, useInput } from "ink";
+import { t } from "../common/i18n";
 
 export type UpdatePromptChoice = "install" | "ignore-once" | "ignore-version";
 
@@ -21,15 +22,15 @@ export function UpdatePrompt({ currentVersion, latestVersion, installCommand, on
   const options: UpdatePromptOption[] = [
     {
       value: "install",
-      label: `Install the latest version with \`${installCommand}\``,
+      label: t("ui.updatePrompt.installLabel", { installCommand }),
     },
     {
       value: "ignore-once",
-      label: "Ignore once",
+      label: t("ui.updatePrompt.ignoreOnce"),
     },
     {
       value: "ignore-version",
-      label: `Ignore this version (${latestVersion})`,
+      label: t("ui.updatePrompt.ignoreVersion", { latestVersion }),
     },
   ];
 
@@ -60,9 +61,7 @@ export function UpdatePrompt({ currentVersion, latestVersion, installCommand, on
 
   return (
     <Box flexDirection="column" marginY={1}>
-      <Text bold>
-        Deep Code latest version has been released: {currentVersion} -&gt; {latestVersion}
-      </Text>
+      <Text bold>{t("ui.updatePrompt.title", { currentVersion, latestVersion })}</Text>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, index) => {
           const selected = index === selectedIndex;
@@ -75,7 +74,7 @@ export function UpdatePrompt({ currentVersion, latestVersion, installCommand, on
         })}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>Use Up/Down to choose, Enter to confirm, Esc to ignore once.</Text>
+        <Text dimColor>{t("ui.updatePrompt.footerHelp")}</Text>
       </Box>
     </Box>
   );

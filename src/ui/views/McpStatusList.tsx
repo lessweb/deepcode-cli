@@ -42,20 +42,20 @@ export function McpStatusList({ statuses, onCancel, onReconnect }: Props): React
       <Box flexDirection="column" marginLeft={1} paddingX={1} gap={1} borderStyle="round" borderDimColor>
         <Box flexDirection="column">
           <Text color="#229ac3" bold>
-            Manage MCP servers
+            {t("ui.mcp.manageTitle")}
           </Text>
-          <Text dimColor>0 servers</Text>
+          <Text dimColor>{t("ui.mcp.zeroServers")}</Text>
         </Box>
         <Box flexDirection="column">
-          <Text dimColor>No MCP servers configured.</Text>
-          <Text dimColor>Add MCP servers to your settings to get started.</Text>
+          <Text dimColor>{t("ui.mcp.noServersConfigured")}</Text>
+          <Text dimColor>{t("ui.mcp.addServersHint")}</Text>
         </Box>
-        <Text dimColor>Esc to close</Text>
+        <Text dimColor>{t("ui.mcp.escToClose")}</Text>
       </Box>
     );
   }
 
-  if (viewMode === t("ui.mcp.serverDetail")) {
+  if (viewMode === "server-detail") {
     return (
       <ServerDetailView
         server={statuses[selectedServerIndex]}
@@ -174,10 +174,10 @@ function ServerListView({
     }
   });
 
-  const readyCount = statuses.filter((s) => s.status === t("ui.mcp.statusReady")).length;
+  const readyCount = statuses.filter((s) => s.status === "ready").length;
   const startingCount = statuses.filter((s) => s.status === "starting").length;
-  const reconnectingCount = statuses.filter((s) => s.status === t("ui.mcp.statusReconnecting")).length;
-  const failedCount = statuses.filter((s) => s.status === t("ui.mcp.statusFailed")).length;
+  const reconnectingCount = statuses.filter((s) => s.status === "reconnecting").length;
+  const failedCount = statuses.filter((s) => s.status === "failed").length;
 
   return (
     <Box
@@ -192,14 +192,24 @@ function ServerListView({
         {/* Header row */}
         <Box paddingX={1} gap={1}>
           <Text bold color="#229ac3">
-            Manage MCP servers
+            {t("ui.mcp.manageTitle")}
           </Text>
           <Box gap={1}>
             <Text dimColor>(</Text>
-            <Text color="green">{readyCount} ready,</Text>
-            <Text color="yellow">{startingCount} starting,</Text>
-            {reconnectingCount > 0 && <Text color="#ff9900">{reconnectingCount} reconnecting,</Text>}
-            <Text color="red">{failedCount} failed</Text>
+            <Text color="green" bold>
+              {t("ui.mcp.countReady", { count: readyCount })}
+            </Text>
+            <Text color="yellow" bold>
+              {t("ui.mcp.countStarting", { count: startingCount })}
+            </Text>
+            {reconnectingCount > 0 && (
+              <Text color="#ff9900" bold>
+                {t("ui.mcp.countReconnecting", { count: reconnectingCount })}
+              </Text>
+            )}
+            <Text color="red" bold>
+              {t("ui.mcp.countFailed", { count: failedCount })}
+            </Text>
             <Text dimColor>)</Text>
           </Box>
         </Box>
@@ -231,16 +241,16 @@ function ServerListView({
           })}
           {scrollOffset > 0 || scrollOffset + maxVisible < serverCount ? (
             <Box marginTop={1}>
-              {scrollOffset > 0 ? <Text dimColor>… {scrollOffset} servers above. </Text> : null}
+              {scrollOffset > 0 ? <Text dimColor>{t("ui.mcp.serversAbove", { n: scrollOffset })} </Text> : null}
               {scrollOffset + maxVisible < serverCount ? (
-                <Text dimColor>… {serverCount - scrollOffset - maxVisible} servers below.</Text>
+                <Text dimColor>{t("ui.mcp.serversBelow", { n: serverCount - scrollOffset - maxVisible })}</Text>
               ) : null}
             </Box>
           ) : null}
         </Box>
         {/* Footer */}
         <Box paddingX={1}>
-          <Text dimColor>↑/↓ navigate · Enter view details · Esc close</Text>
+          <Text dimColor>{t("ui.mcp.footerHelp")}</Text>
         </Box>
       </Box>
     </Box>
@@ -257,26 +267,20 @@ function ServerRow({
   labelColumnWidth: number;
 }): React.ReactElement {
   const icon =
-    status.status === t("ui.mcp.statusReady")
-      ? "✓"
-      : status.status === t("ui.mcp.statusFailed")
-        ? "✗"
-        : status.status === t("ui.mcp.statusReconnecting")
-          ? "↻"
-          : "●";
+    status.status === "ready" ? "✓" : status.status === "failed" ? "✗" : status.status === "reconnecting" ? "↻" : "●";
   const color =
-    status.status === t("ui.mcp.statusReady")
+    status.status === "ready"
       ? "green"
-      : status.status === t("ui.mcp.statusFailed")
+      : status.status === "failed"
         ? "red"
-        : status.status === t("ui.mcp.statusReconnecting")
+        : status.status === "reconnecting"
           ? "#ff9900"
           : "yellow";
 
   // 加载动画：循环显示 (空) → . → .. → ... → (空) → ...
   const [dots, setDots] = React.useState(0);
   React.useEffect(() => {
-    if (status.status !== "starting" && status.status !== t("ui.mcp.statusReconnecting")) return;
+    if (status.status !== "starting" && status.status !== "reconnecting") return;
     const interval = setInterval(() => {
       setDots((d) => (d + 1) % 4);
     }, 500);
@@ -284,13 +288,13 @@ function ServerRow({
   }, [status.status]);
 
   const detail =
-    status.status === t("ui.mcp.statusReady")
-      ? `Ready (${status.toolCount} tools, ${status.promptCount} prompts, ${status.resourceCount} resources)`
-      : status.status === t("ui.mcp.statusFailed")
-        ? `Failed`
-        : status.status === t("ui.mcp.statusReconnecting")
-          ? `Reconnecting${dots > 0 ? ".".repeat(dots) : "   "}`
-          : "Starting" + (dots > 0 ? ".".repeat(dots) : "   ");
+    status.status === "ready"
+      ? `${t("ui.mcp.statusReady")} ${t("ui.mcp.itemCounts", { tools: status.toolCount, prompts: status.promptCount, resources: status.resourceCount })}`
+      : status.status === "failed"
+        ? t("ui.mcp.statusFailed")
+        : status.status === "reconnecting"
+          ? `${t("ui.mcp.statusReconnecting")}${dots > 0 ? ".".repeat(dots) : "   "}`
+          : `${t("ui.mcp.starting")}${dots > 0 ? ".".repeat(dots) : "   "}`;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -309,8 +313,7 @@ function ServerRow({
       </Box>
 
       {/* Error message for failed or reconnecting servers */}
-      {(status.status === t("ui.mcp.statusFailed") || status.status === t("ui.mcp.statusReconnecting")) &&
-      status.error ? (
+      {(status.status === "failed" || status.status === "reconnecting") && status.error ? (
         <ErrorRow error={status.error} />
       ) : null}
     </Box>
@@ -334,8 +337,8 @@ function ServerDetailView({
   columns: number;
 }): React.ReactElement {
   const [activeIndex, setActiveIndex] = React.useState(0);
-  const hasReconnect = server.status === t("ui.mcp.statusFailed");
-  const canScroll = server.status === t("ui.mcp.statusReady");
+  const hasReconnect = server.status === "failed";
+  const canScroll = server.status === "ready";
 
   // 合并所有 items（tools, prompts, resources）+ Reconnect 选项
   const allItems = useMemo(() => {
@@ -420,19 +423,13 @@ function ServerDetailView({
   });
 
   const statusIcon =
-    server.status === t("ui.mcp.statusReady")
-      ? "✓"
-      : server.status === t("ui.mcp.statusFailed")
-        ? "✗"
-        : server.status === t("ui.mcp.statusReconnecting")
-          ? "↻"
-          : "●";
+    server.status === "ready" ? "✓" : server.status === "failed" ? "✗" : server.status === "reconnecting" ? "↻" : "●";
   const statusColor =
-    server.status === t("ui.mcp.statusReady")
+    server.status === "ready"
       ? "green"
-      : server.status === t("ui.mcp.statusFailed")
+      : server.status === "failed"
         ? "red"
-        : server.status === t("ui.mcp.statusReconnecting")
+        : server.status === "reconnecting"
           ? "#ff9900"
           : "yellow";
 
@@ -452,19 +449,22 @@ function ServerDetailView({
           <Text bold color="#229ac3" wrap="truncate-end">
             {server.name}
           </Text>
-          <Text dimColor>— {server.status === t("ui.mcp.statusReady") ? "Details" : "Status"}</Text>
+          <Text dimColor>— {server.status === "ready" ? t("ui.mcp.details") : t("ui.mcp.status")}</Text>
         </Box>
         {/* Server info */}
         <Box paddingX={1} marginLeft={3}>
           <Text wrap="truncate-end">
-            {server.status === t("ui.mcp.statusReady")
-              ? `${server.toolCount} tools, ${server.promptCount} prompts, ${server.resourceCount} resources`
-              : `Status: ${server.status}`}
+            {server.status === "ready"
+              ? t("ui.mcp.itemCounts", {
+                  tools: server.toolCount,
+                  prompts: server.promptCount,
+                  resources: server.resourceCount,
+                })
+              : t("ui.mcp.statusPrefix", { status: server.status })}
           </Text>
         </Box>
         {/* Error for failed/reconnecting */}
-        {server.error &&
-        (server.status === t("ui.mcp.statusFailed") || server.status === t("ui.mcp.statusReconnecting")) ? (
+        {server.error && (server.status === "failed" || server.status === "reconnecting") ? (
           <Box paddingX={1} marginLeft={3}>
             <ErrorRow error={server.error} />
           </Box>
@@ -492,7 +492,7 @@ function ServerDetailView({
           <Box paddingX={1} flexDirection="column">
             {visibleItems.length === 0 ? (
               <Box paddingY={1}>
-                <Text dimColor>No items available</Text>
+                <Text dimColor>{t("ui.mcp.noItems")}</Text>
               </Box>
             ) : (
               visibleItems.map((item, idx) => {
@@ -505,9 +505,9 @@ function ServerDetailView({
           {visibleStart > 0 || visibleStart + maxVisible < totalItems ? (
             <Box marginTop={1} gap={1}>
               {totalItems - visibleStart - maxVisible > 0 ? <Text dimColor>▼</Text> : <Text> </Text>}
-              {visibleStart > 0 ? <Text dimColor>… {visibleStart} items above. </Text> : null}
+              {visibleStart > 0 ? <Text dimColor>{t("ui.dropdownMenu.above", { n: visibleStart })} </Text> : null}
               {totalItems - visibleStart - maxVisible > 0 ? (
-                <Text dimColor>… {totalItems - visibleStart - maxVisible} items below.</Text>
+                <Text dimColor>{t("ui.dropdownMenu.more", { n: totalItems - visibleStart - maxVisible })}</Text>
               ) : null}
             </Box>
           ) : null}
@@ -515,11 +515,7 @@ function ServerDetailView({
         {/* Footer */}
         <Box paddingX={1}>
           <Text dimColor>
-            {hasReconnect
-              ? "Enter to reconnect · Esc back · Ctrl+C close"
-              : canScroll
-                ? "↑/↓ scroll · Space/Enter back · Esc back · Ctrl+C close"
-                : "Space/Enter back · Esc back · Ctrl+C close"}
+            {hasReconnect ? t("ui.mcp.enterReconnect") : canScroll ? t("ui.mcp.scrollBack") : t("ui.mcp.spaceBack")}
           </Text>
         </Box>
       </Box>
