@@ -1,0 +1,47 @@
+{
+  "ui": {
+    "dropdownMenu": {
+      "emptyText": "无可用项目",
+      "above": "上方 {n} 项",
+      "more": "下方 {n} 项"
+    },
+    "fileMentionMenu": {
+      "title": "引用文件",
+      "helpText": "回车/Tab 插入 · Esc 关闭",
+      "noMatching": "无匹配文件",
+      "typeHint": "在 @ 后输入搜索文件",
+      "directory": "目录",
+      "file": "文件"
+    },
+    "modelsDropdown": {
+      "thinkingMax": "思考模式 [最大]",
+      "thinkingHigh": "思考模式 [高]",
+      "noThinking": "不思考",
+      "currentModel": "当前模型",
+      "reasoningEffort": "努力程度：{value}",
+      "thinkingDisabled": "思考已禁用",
+      "selectModel": "选择模型",
+      "selectThinkingMode": "选择思考模式",
+      "selectModelHelp": "空格/回车选择模型 · Esc 取消",
+      "applyHelp": "空格/回车确认 · Esc 取消"
+    },
+    "rawModelDropdown": {
+      "title": "选择模式",
+      "helpText": "空格/回车选择模式 · Esc 关闭",
+      "liteMode": "精简模式",
+      "normalMode": "标准模式",
+      "rawScrollbackMode": "原始回滚模式",
+      "liteDesc": "折叠思维链推理内容。",
+      "normalDesc": "显示完整的思维链推理内容。",
+      "rawDesc": "显示回滚模式，便于终端复制。"
+    },
+    "skillsDropdown": {
+      "title": "选择技能",
+      "helpText": "空格切换 · 回车切换 · Esc 关闭",
+      "emptyText": "未找到技能"
+    },
+    "slashCommandMenu": {
+      "footerHelp": "({current}/{total}) ↑↓ 导航 · 回车选择"
+    }
+  }
+}

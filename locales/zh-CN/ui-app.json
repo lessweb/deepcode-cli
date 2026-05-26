@@ -1,0 +1,24 @@
+{
+  "ui": {
+    "app": {
+      "error": "错误：{message}",
+      "statusStatus": "状态：{status}",
+      "statusTokens": "token 数：{tokens}",
+      "statusFail": "失败原因：{reason}",
+      "interrupted": "已中断。",
+      "killedProcesses": "已终止进程：{pids}",
+      "failedKillProcesses": "终止进程失败：{pids}",
+      "modelUnchanged": "模型设置未变更",
+      "modelUpdated": "模型设置已更新：{before} → {after}",
+      "noActiveSession": "没有活跃会话可供撤销。",
+      "codeRestoreFailed": "代码恢复失败：{error}",
+      "conversationRestoreFailed": "对话恢复失败：{error}",
+      "sessionAgentSteps": "AI 助手已执行多个步骤但未得出结论。是否继续？",
+      "apiKeyNotFound": "未找到 OpenAI API key。请配置 ~/.deepcode/settings.json 或 ./.deepcode/settings.json。",
+      "requestFailed": "请求失败：{error}",
+      "pressEscExitRaw": "按 ESC 退出原始模式",
+      "noMessagesInSession": "（此会话暂无消息，开始聊天即可看到）",
+      "permissionDenied": "权限已拒绝。添加回复后按 Enter 继续。"
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "prompt": {
+    "skillDocumentsHeader": "Use the skill documents below to assist the user:\n",
+    "dateAndModel": "Today is {date}. As the conversation progresses, time passes.\nCurrent LLM model is {model}. You can switch models using the /model command.",
+    "thinkingLanguageInstruction": "IMPORTANT: Your reasoning and thinking process should be in English.",
+    "replyLanguageInstruction": "IMPORTANT: Always respond to the user in English."
+  }
+}

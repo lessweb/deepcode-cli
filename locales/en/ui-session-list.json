@@ -1,0 +1,31 @@
+{
+  "ui": {
+    "sessionList": {
+      "title": "Sessions",
+      "empty": "No sessions yet",
+      "searchHint": "Type to search…",
+      "searchQuery": "Search: {query}",
+      "escBack": "Press Esc to go back.",
+      "total": "total",
+      "matched": ", {n} matched",
+      "noMatch": "No sessions match \"{query}\".",
+      "untitled": "Untitled",
+      "above": "{n} sessions above.",
+      "below": "{n} sessions below.",
+      "footerHelp": "Type to search · ↑/↓ navigate · PgUp/PgDn page · Enter select · Esc cancel",
+      "footerSearch": "Esc clear search · ↑/↓ navigate · Enter select · Esc again to cancel",
+      "statusDone": "done",
+      "statusRunning": "running",
+      "statusPending": "pending",
+      "statusWaiting": "waiting",
+      "statusFailed": "failed",
+      "statusStopped": "stopped",
+      "deleteConfirmHint": " [Delete? Enter=yes, Esc=no]",
+      "deleteTitle": "Delete this session? ",
+      "confirmAction": " to confirm · ",
+      "cancelAction": " to cancel",
+      "statusPermission": "waiting",
+      "statusDenied": "denied"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "ui": {
+    "askUserQuestion": {
+      "selectOptionHelp": "选择一个选项，或输入其他答案。",
+      "selectMultiHelp": "请使用空格选择至少一个选项，或输入其他答案。",
+      "typeAnswerHelp": "输入答案 · 退格编辑 · 回车提交/下一步 · ↑ 选择预设 · Esc 手动输入",
+      "otherLabel": "其他",
+      "selectMultiMove": "↑/↓ 移动 · 空格切换 · 回车提交/下一步 · Esc 手动输入",
+      "selectSingleMove": "↑/↓ 移动 · 回车选择/下一步 · Esc 手动输入"
+    }
+  }
+}

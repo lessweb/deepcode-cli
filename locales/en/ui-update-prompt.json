@@ -1,0 +1,11 @@
+{
+  "ui": {
+    "updatePrompt": {
+      "title": "Deep Code latest version has been released: {currentVersion} -> {latestVersion}",
+      "installLabel": "Install the latest version with `{installCommand}`",
+      "ignoreOnce": "Ignore once",
+      "ignoreVersion": "Ignore this version ({latestVersion})",
+      "footerHelp": "Use Up/Down to choose, Enter to confirm, Esc to ignore once."
+    }
+  }
+}

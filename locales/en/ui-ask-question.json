@@ -1,0 +1,12 @@
+{
+  "ui": {
+    "askUserQuestion": {
+      "selectOptionHelp": "Select an option, or type an Other answer.",
+      "selectMultiHelp": "Select at least one option with Space, or type an Other answer.",
+      "typeAnswerHelp": "Type your answer · Backspace edit · Enter submit/next · ↑ choose presets · Esc type manually",
+      "otherLabel": "Other",
+      "selectMultiMove": "↑/↓ move · Space toggle · Enter submit/next · Esc type manually",
+      "selectSingleMove": "↑/↓ move · Enter select/next · Esc type manually"
+    }
+  }
+}

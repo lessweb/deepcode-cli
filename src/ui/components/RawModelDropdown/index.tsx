@@ -1,8 +1,34 @@
 import React, { useState } from "react";
 import { useInput } from "ink";
 import DropdownMenu from "../DropdownMenu";
-import type { RawMode } from "../../contexts";
-import { RAW_COMMAND_MODELS, useRawModeContext } from "../../contexts";
+import { RAW_COMMAND_MODELS, useRawModeContext, RawMode } from "../../contexts";
+import { t } from "../../../common/i18n";
+
+function getRawModeLabel(key: string): string {
+  switch (key) {
+    case RawMode.Lite:
+      return t("ui.rawModelDropdown.liteMode");
+    case RawMode.None:
+      return t("ui.rawModelDropdown.normalMode");
+    case RawMode.Raw:
+      return t("ui.rawModelDropdown.rawScrollbackMode");
+    default:
+      return key;
+  }
+}
+
+function getRawModeDescription(key: string): string {
+  switch (key) {
+    case RawMode.Lite:
+      return t("ui.rawModelDropdown.liteDesc");
+    case RawMode.None:
+      return t("ui.rawModelDropdown.normalDesc");
+    case RawMode.Raw:
+      return t("ui.rawModelDropdown.rawDesc");
+    default:
+      return "";
+  }
+}
 
 const RawModelDropdown: React.FC<{
   open: boolean;
@@ -40,9 +66,14 @@ const RawModelDropdown: React.FC<{
   }
   return (
     <DropdownMenu
-      title="Select mode"
-      items={RAW_COMMAND_MODELS.map((model) => ({ ...model, selected: model.key === mode }))}
-      helpText="Space/Enter select mode · Esc to close"
+      title={t("ui.rawModelDropdown.title")}
+      items={RAW_COMMAND_MODELS.map((model) => ({
+        ...model,
+        label: getRawModeLabel(model.key),
+        description: getRawModeDescription(model.key),
+        selected: model.key === mode,
+      }))}
+      helpText={t("ui.rawModelDropdown.helpText")}
       // onSelect={onSelect}
       activeColor="#229ac3"
       maxVisible={6}

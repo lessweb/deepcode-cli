@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text } from "ink";
 import type { AskUserQuestionAnswers, AskUserQuestionItem } from "../core/ask-user-question";
 import { useTerminalInput } from "../hooks";
+import { t } from "../../common/i18n";
 
 type Props = {
   questions: AskUserQuestionItem[];
@@ -140,9 +141,7 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
     const answer = buildAnswerForQuestion(question, options[cursorIndex], selectedForQuestion, otherText);
     if (!answer) {
       setStatusMessage(
-        question.multiSelect
-          ? "Select at least one option with Space, or type an Other answer."
-          : "Select an option, or type an Other answer."
+        question.multiSelect ? t("ui.askUserQuestion.selectMultiHelp") : t("ui.askUserQuestion.selectOptionHelp")
       );
       return;
     }
@@ -215,10 +214,10 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
         <Text dimColor>
           {statusMessage ??
             (isCurrentOther
-              ? "Type your answer · Backspace edit · Enter submit/next · ↑ choose presets · Esc type manually"
+              ? t("ui.askUserQuestion.typeAnswerHelp")
               : question.multiSelect
-                ? "↑/↓ move · Space toggle · Enter submit/next · Esc type manually"
-                : "↑/↓ move · Enter select/next · Esc type manually")}
+                ? t("ui.askUserQuestion.selectMultiMove")
+                : t("ui.askUserQuestion.selectSingleMove"))}
         </Text>
       </Box>
     </Box>
@@ -236,7 +235,7 @@ function buildOptions(question: AskUserQuestionItem | undefined): OptionEntry[] 
       value: option.label,
     })),
     {
-      label: "Other",
+      label: t("ui.askUserQuestion.otherLabel"),
       value: OTHER_VALUE,
       isOther: true,
     },

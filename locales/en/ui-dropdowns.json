@@ -1,0 +1,47 @@
+{
+  "ui": {
+    "dropdownMenu": {
+      "emptyText": "No items found",
+      "above": "{n} above",
+      "more": "{n} more"
+    },
+    "fileMentionMenu": {
+      "title": "Mention File",
+      "helpText": "Enter/Tab insert · Esc close",
+      "noMatching": "No matching files",
+      "typeHint": "Type after @ to search files",
+      "directory": "directory",
+      "file": "file"
+    },
+    "modelsDropdown": {
+      "thinkingMax": "Thinking mode [max]",
+      "thinkingHigh": "Thinking mode [high]",
+      "noThinking": "No thinking",
+      "currentModel": "current model",
+      "reasoningEffort": "reasoningEffort: {value}",
+      "thinkingDisabled": "thinking disabled",
+      "selectModel": "Select Model",
+      "selectThinkingMode": "Select Thinking Mode",
+      "selectModelHelp": "Space/Enter select model · Esc to cancel",
+      "applyHelp": "Space/Enter apply · Esc to cancel"
+    },
+    "rawModelDropdown": {
+      "title": "Select mode",
+      "helpText": "Space/Enter select mode · Esc to close",
+      "liteMode": "Lite mode",
+      "normalMode": "Normal mode",
+      "rawScrollbackMode": "Raw scrollback mode",
+      "liteDesc": "Collapse chain-of-thought reasoning.",
+      "normalDesc": "Show full chain-of-thought reasoning.",
+      "rawDesc": "Show scrollback mode for copy-friendly terminal selection."
+    },
+    "skillsDropdown": {
+      "title": "Select Skills",
+      "helpText": "Space toggle · Enter toggle · Esc to close",
+      "emptyText": "No skills found"
+    },
+    "slashCommandMenu": {
+      "footerHelp": "({current}/{total}) ↑↓ to navigate · Enter to select"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "ui": {
+    "mcp": {
+      "statusReady": "就绪",
+      "statusFailed": "失败",
+      "statusReconnecting": "重连中",
+      "reconnect": "重连",
+      "starting": "启动中",
+      "details": "详情",
+      "status": "状态",
+      "enterReconnect": "回车重连 · Esc 返回 · Ctrl+C 关闭",
+      "scrollBack": "↑/↓ 滚动 · 空格/回车返回 · Esc 返回 · Ctrl+C 关闭",
+      "spaceBack": "空格/回车返回 · Esc 返回 · Ctrl+C 关闭",
+      "noItems": "无可用项目",
+      "footerHelp": "↑/↓ 导航 · 回车查看详情 · Esc 关闭",
+      "countReady": "{count} 就绪，",
+      "countStarting": "{count} 启动中，",
+      "countReconnecting": "{count} 重连中，",
+      "countFailed": "{count} 失败",
+      "manageTitle": "管理 MCP 服务器",
+      "zeroServers": "0 个服务器",
+      "noServersConfigured": "未配置 MCP 服务器。",
+      "addServersHint": "将 MCP 服务器添加到设置中以开始使用。",
+      "escToClose": "Esc 关闭",
+      "serversAbove": "上方 {n} 个服务器。",
+      "serversBelow": "下方 {n} 个服务器。",
+      "itemCounts": "{tools} 个工具，{prompts} 个提示，{resources} 个资源",
+      "statusPrefix": "状态：{status}"
+    }
+  }
+}

@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildLoadingText } from "../ui";
+import { initI18n } from "../common/i18n";
+
+// Initialize i18n for all tests in this file
+initI18n("en");
 
 test("buildLoadingText returns plain Thinking... when no progress", () => {
   assert.equal(buildLoadingText({ progress: null, now: Date.now() }), "Thinking...");

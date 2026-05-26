@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import type { SessionMessage } from "./session";
 import { findGitBashPath, resolveShellPath } from "./common/shell-utils";
 import { supportsMultimodal } from "./common/model-capabilities";
+import { t, getThinkingLocale, getReplyLocale } from "./common/i18n";
 
 const COMPACT_PROMPT_BASE = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
@@ -154,19 +155,24 @@ export function getDefaultSkillPrompt(): string {
 ${skill.content}
 </${skill.name}-skill>`
   );
-  return `Use the skill documents below to assist the user:\n${blocks.join("\n\n")}`;
+  return `${t("prompt.skillDocumentsHeader")}${blocks.join("\n\n")}`;
 }
 
 function getCurrentDateAndModelPrompt(model?: string): string {
   const date = new Date();
-  let prompt = `今天是${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日。随着对话的进行，时间在流逝。`;
-  prompt += model ? `\n当前LLM模型为${model}，对话中可通过/model命令切换模型。` : "";
+  const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+  const prompt = t("prompt.dateAndModel", { date: dateStr, model: model || "unknown" });
   return prompt;
 }
 
 export function getSystemPrompt(_projectRoot: string, options: PromptToolOptions = {}): string {
   const toolDocs = readToolDocs(getExtensionRoot(), options);
-  return toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
+  const basePrompt = toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
+
+  // Append language instructions for thinking and reply
+  const thinkingInstruction = t("prompt.thinkingLanguageInstruction", undefined, getThinkingLocale());
+  const replyInstruction = t("prompt.replyLanguageInstruction", undefined, getReplyLocale());
+  return `${basePrompt}\n\n${thinkingInstruction}\n${replyInstruction}`;
 }
 
 export function getCompactPrompt(sessionMessages: SessionMessage[]): string {

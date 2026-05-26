@@ -1,0 +1,16 @@
+{
+  "ui": {
+    "messageView": {
+      "thinking": "Thinking",
+      "reasoningFallback": "(reasoning...)",
+      "noContent": "(no content)",
+      "loadedSkill": "⚡ Loaded skill: {name}",
+      "conversationSummaryInserted": "(conversation summary inserted)",
+      "changes": "└ Changes",
+      "plan": "└ Plan",
+      "result": "└ Result",
+      "toolName": "Tool",
+      "imageAttachment": "image(s)"
+    }
+  }
+}

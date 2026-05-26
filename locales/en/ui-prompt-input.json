@@ -1,0 +1,25 @@
+{
+  "ui": {
+    "promptInput": {
+      "interrupting": "Interrupting…",
+      "imageAttached": "Attached image from clipboard",
+      "noImageFound": "No image found in clipboard",
+      "readingClipboard": "Reading clipboard...",
+      "failedClipboard": "Failed to read clipboard",
+      "clearedImages": "Cleared attached images",
+      "noImagesToClear": "No attached images to clear",
+      "placeholder": "Type your message...",
+      "waitForResponse": "wait for the current response or press esc to interrupt",
+      "pressCtrlDExit": "press ctrl+d to exit",
+      "pressCtrlDAgain": "press ctrl+d again to exit",
+      "footer": "enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit",
+      "footerBusy": "esc to interrupt · ctrl+c to cancel input",
+      "ctrlOViewOutput": " · ctrl+o view output",
+      "ctrlOExpand": " · ctrl+o expand",
+      "ctrlOCollapse": " · ctrl+o collapse",
+      "noPasteMarker": "No paste marker at cursor",
+      "pasteNotFound": "Paste content not found",
+      "imageCount": "📎 {count} image(s) attached"
+    }
+  }
+}

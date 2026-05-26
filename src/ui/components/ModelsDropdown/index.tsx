@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useInput } from "ink";
 import DropdownMenu from "../DropdownMenu";
 import type { ModelConfigSelection, ReasoningEffort } from "../../../settings";
+import { t } from "../../../common/i18n";
 
 type ModelStep = "model" | "thinking";
 
@@ -14,10 +15,16 @@ type ThinkingModeOption = {
 export const MODEL_COMMAND_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"] as const;
 
 export const MODEL_COMMAND_THINKING_OPTIONS: ThinkingModeOption[] = [
-  { label: "Thinking mode [max]", thinkingEnabled: true, reasoningEffort: "max" },
-  { label: "Thinking mode [high]", thinkingEnabled: true, reasoningEffort: "high" },
-  { label: "No thinking", thinkingEnabled: false },
+  { label: "thinking-max", thinkingEnabled: true, reasoningEffort: "max" },
+  { label: "thinking-high", thinkingEnabled: true, reasoningEffort: "high" },
+  { label: "no-thinking", thinkingEnabled: false },
 ];
+
+function getThinkingOptionLabel(option: ThinkingModeOption): string {
+  if (!option.thinkingEnabled) return t("ui.modelsDropdown.noThinking");
+  if (option.reasoningEffort === "max") return t("ui.modelsDropdown.thinkingMax");
+  return t("ui.modelsDropdown.thinkingHigh");
+}
 
 function getThinkingOptionIndex(config: Pick<ModelConfigSelection, "thinkingEnabled" | "reasoningEffort">): number {
   const index = MODEL_COMMAND_THINKING_OPTIONS.findIndex((option) => {
@@ -138,21 +145,23 @@ const ModelsDropdown: React.FC<Props> = ({
       ? MODEL_COMMAND_MODELS.map((model) => ({
           key: model,
           label: model,
-          description: model === modelConfig.model ? "current model" : "",
+          description: model === modelConfig.model ? t("ui.modelsDropdown.currentModel") : "",
           selected: model === (pendingModel ?? modelConfig.model),
         }))
       : MODEL_COMMAND_THINKING_OPTIONS.map((option, i) => ({
           key: option.label,
-          label: option.label,
-          description: option.thinkingEnabled ? `reasoningEffort: ${option.reasoningEffort}` : "thinking disabled",
+          label: getThinkingOptionLabel(option),
+          description: option.thinkingEnabled
+            ? t("ui.modelsDropdown.reasoningEffort", { value: option.reasoningEffort ?? "" })
+            : t("ui.modelsDropdown.thinkingDisabled"),
           selected: getThinkingOptionIndex(modelConfig) === i,
         }));
 
   return (
     <DropdownMenu
       width={width}
-      title={step === "model" ? "Select Model" : "Select Thinking Mode"}
-      helpText={step === "model" ? "Space/Enter select model · Esc to cancel" : "Space/Enter apply · Esc to cancel"}
+      title={step === "model" ? t("ui.modelsDropdown.selectModel") : t("ui.modelsDropdown.selectThinkingMode")}
+      helpText={step === "model" ? t("ui.modelsDropdown.selectModelHelp") : t("ui.modelsDropdown.applyHelp")}
       items={items}
       activeIndex={activeIndex}
       activeColor="#229ac3"

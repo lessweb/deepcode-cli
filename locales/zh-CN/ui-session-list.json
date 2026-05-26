@@ -1,0 +1,31 @@
+{
+  "ui": {
+    "sessionList": {
+      "title": "会话",
+      "empty": "暂无会话",
+      "searchHint": "输入搜索…",
+      "searchQuery": "搜索：{query}",
+      "escBack": "按 Esc 返回。",
+      "total": "共",
+      "matched": "，匹配 {n} 个",
+      "noMatch": "没有匹配 \"{query}\" 的会话。",
+      "untitled": "无标题",
+      "above": "上方 {n} 个会话。",
+      "below": "下方 {n} 个会话。",
+      "footerHelp": "输入搜索 · ↑/↓ 导航 · PgUp/PgDn 翻页 · 回车选择 · Esc 取消",
+      "footerSearch": "Esc 清除搜索 · ↑/↓ 导航 · 回车选择 · Esc 再次取消",
+      "statusDone": "已完成",
+      "statusRunning": "运行中",
+      "statusPending": "待处理",
+      "statusWaiting": "等待中",
+      "statusFailed": "失败",
+      "statusStopped": "已停止",
+      "deleteConfirmHint": " [删除？Enter=是, Esc=否]",
+      "deleteTitle": "删除此会话？",
+      "confirmAction": " 确认 · ",
+      "cancelAction": " 取消",
+      "statusPermission": "等待中",
+      "statusDenied": "已拒绝"
+    }
+  }
+}

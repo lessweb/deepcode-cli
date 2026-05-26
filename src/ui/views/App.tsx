@@ -22,17 +22,16 @@ import {
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
 import { buildExitSummaryText } from "../exit-summary";
 import { RawMode, useRawModeContext } from "../contexts";
+import { useI18n } from "../contexts/i18n";
+import { t } from "../../common/i18n";
+import type { Locale } from "../../common/i18n";
 import { renderMessageToStdout } from "../components/MessageView/utils";
-import {
-  buildPromptDraftFromSessionMessage,
-  buildStatusLine,
-  buildSyntheticUserMessage,
-  formatModelConfig,
-  isCurrentSessionEmpty,
-  renderRawModeMessages,
-} from "../utils";
-import { resolveCurrentSettings, writeModelConfigSelection } from "../../settings";
-import { isCollapsedThinking } from "../core/thinking-state";
+import { renderRawModeMessages } from "../utils";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import type { DeepcodingSettings, ResolvedDeepcodingSettings } from "../../settings";
+import { applyModelConfigSelection, resolveSettingsSources, DEFAULT_MODEL, DEFAULT_BASE_URL } from "../../settings";
 import { ANSI_CLEAR_SCREEN } from "../constants";
 import type {
   LlmStreamProgress,
@@ -59,6 +58,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
   const { mode, setMode } = useRawModeContext();
+  const { locale, setLocale, thinkingLocale, replyLocale, setThinkingLocale, setReplyLocale } = useI18n();
   const initialPromptSubmittedRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
   const rawModeRef = useRef<RawMode>(mode);
@@ -286,7 +286,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       if (submission.command === "undo") {
         const activeSessionId = sessionManager.getActiveSessionId();
         if (!activeSessionId) {
-          setErrorLine("No active session to undo.");
+          setErrorLine(t("ui.app.noActiveSession"));
           return;
         }
         setUndoTargets(sessionManager.listUndoTargets(activeSessionId));
@@ -376,6 +376,33 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     [sessionManager]
   );
 
+  const handleLocaleChange = useCallback(
+    (newLocale: Locale): void => {
+      setLocale(newLocale);
+      const rawSettings = readSettings();
+      writeSettings({ ...(rawSettings ?? {}), locale: newLocale });
+    },
+    [setLocale]
+  );
+
+  const handleThinkingLocaleChange = useCallback(
+    (newLocale: Locale): void => {
+      setThinkingLocale(newLocale);
+      const rawSettings = readSettings();
+      writeSettings({ ...(rawSettings ?? {}), thinkingLocale: newLocale });
+    },
+    [setThinkingLocale]
+  );
+
+  const handleReplyLocaleChange = useCallback(
+    (newLocale: Locale): void => {
+      setReplyLocale(newLocale);
+      const rawSettings = readSettings();
+      writeSettings({ ...(rawSettings ?? {}), replyLocale: newLocale });
+    },
+    [setReplyLocale]
+  );
+
   const handleModelConfigChange = useCallback(
     (selection: ModelConfigSelection): string => {
       const current = resolveCurrentSettings(projectRoot);
@@ -384,7 +411,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       setResolvedSettings(next);
 
       if (!changed) {
-        return "Model settings unchanged";
+        return t("ui.app.modelUnchanged");
       }
 
       const activeSessionId = sessionManager.getActiveSessionId();
@@ -415,7 +442,10 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         ]);
       }
 
-      return `Model settings updated: ${formatModelConfig(current)} → ${formatModelConfig(next)}`;
+      return t("ui.app.modelUpdated", {
+        before: formatModelConfig(current),
+        after: formatModelConfig(next),
+      });
     },
     [projectRoot, sessionManager]
   );
@@ -488,7 +518,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     async (target: UndoTarget, restoreMode: UndoRestoreMode): Promise<void> => {
       const sessionId = sessionManager.getActiveSessionId();
       if (!sessionId) {
-        setErrorLine("No active session to undo.");
+        setErrorLine(t("ui.app.noActiveSession"));
         setView("chat");
         setShowWelcome(true);
         return;
@@ -499,7 +529,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         try {
           sessionManager.restoreSessionCode(sessionId, target.message.id);
         } catch (error) {
-          errors.push(`Code restore failed: ${error instanceof Error ? error.message : String(error)}`);
+          errors.push(t("ui.app.codeRestoreFailed", { error: error instanceof Error ? error.message : String(error) }));
         }
       }
 
@@ -508,7 +538,9 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         sessionManager.restoreSessionConversation(sessionId, target.message.id);
         conversationRestored = true;
       } catch (error) {
-        errors.push(`Conversation restore failed: ${error instanceof Error ? error.message : String(error)}`);
+        errors.push(
+          t("ui.app.conversationRestoreFailed", { error: error instanceof Error ? error.message : String(error) })
+        );
       }
 
       refreshSessionsList();
@@ -666,7 +698,8 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           permissions: result.permissions,
           alwaysAllows: result.alwaysAllows,
         });
-        setStatusLine("Permission denied. Add a reply, then press Enter to continue.");
+        setStatusLine(t("ui.app.permissionDenied"));
+        setPromptDraft(null);
         sessionManager.denySessionPermission(sessionId);
         return;
       }
@@ -725,7 +758,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       ) : null}
       {errorLine ? (
         <Box>
-          <Text color="red">Error: {errorLine}</Text>
+          <Text color="red">{t("ui.app.error", { message: errorLine })}</Text>
         </Box>
       ) : null}
       {showProcessStdout ? (
@@ -796,7 +829,13 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           onRawModeChange={handleRawModeChange}
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}
-          placeholder="Type your message..."
+          placeholder={t("ui.promptInput.placeholder")}
+          currentLocale={locale}
+          currentThinkingLocale={thinkingLocale}
+          currentReplyLocale={replyLocale}
+          onLocaleChange={handleLocaleChange}
+          onThinkingLocaleChange={handleThinkingLocaleChange}
+          onReplyLocaleChange={handleReplyLocaleChange}
         />
       )}
     </Box>
@@ -804,3 +843,163 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 }
 
 export default App;
+
+function isCollapsedThinking(message: SessionMessage, expandedId: string | null): boolean {
+  if (message.role !== "assistant") {
+    return false;
+  }
+  if (!message.meta?.asThinking) {
+    return false;
+  }
+  return message.id !== expandedId;
+}
+
+function buildSyntheticUserMessage(content: string, imageCount: number): SessionMessage {
+  const now = new Date().toISOString();
+  return {
+    id: `local-${Math.random().toString(36).slice(2)}`,
+    sessionId: "local",
+    role: "user",
+    content,
+    contentParams:
+      imageCount > 0
+        ? Array.from({ length: imageCount }, () => ({
+            type: "image_url",
+            image_url: { url: "" },
+          }))
+        : null,
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  };
+}
+
+export function buildPromptDraftFromSessionMessage(message: SessionMessage, nonce: number): PromptDraft {
+  return {
+    nonce,
+    text: typeof message.content === "string" ? message.content : "",
+    imageUrls: extractImageUrlsFromContentParams(message.contentParams),
+  };
+}
+
+function extractImageUrlsFromContentParams(contentParams: unknown): string[] {
+  const params = Array.isArray(contentParams) ? contentParams : contentParams ? [contentParams] : [];
+  const imageUrls: string[] = [];
+  for (const param of params) {
+    if (!param || typeof param !== "object") {
+      continue;
+    }
+    const record = param as { type?: unknown; image_url?: { url?: unknown } };
+    const url = record.image_url?.url;
+    if (record.type === "image_url" && typeof url === "string" && url) {
+      imageUrls.push(url);
+    }
+  }
+  return imageUrls;
+}
+
+function isCurrentSessionEmpty(sessionManager: SessionManager): boolean {
+  const activeSessionId = sessionManager.getActiveSessionId();
+  return !activeSessionId || !sessionManager.getSession(activeSessionId);
+}
+
+function buildStatusLine(entry: SessionEntry): string {
+  const parts: string[] = [];
+  parts.push(t("ui.app.statusStatus", { status: entry.status }));
+  if (typeof entry.activeTokens === "number" && entry.activeTokens > 0) {
+    parts.push(t("ui.app.statusTokens", { tokens: entry.activeTokens }));
+  }
+  if (entry.failReason) {
+    parts.push(t("ui.app.statusFail", { reason: entry.failReason }));
+  }
+  return parts.join(" · ");
+}
+
+export function readSettings(): DeepcodingSettings | null {
+  return readSettingsFile(getUserSettingsPath());
+}
+
+export function readProjectSettings(projectRoot: string = process.cwd()): DeepcodingSettings | null {
+  return readSettingsFile(getProjectSettingsPath(projectRoot));
+}
+
+function readSettingsFile(settingsPath: string): DeepcodingSettings | null {
+  try {
+    if (!fs.existsSync(settingsPath)) {
+      return null;
+    }
+    const raw = fs.readFileSync(settingsPath, "utf8");
+    return JSON.parse(raw) as DeepcodingSettings;
+  } catch {
+    return null;
+  }
+}
+
+export function writeSettings(settings: DeepcodingSettings): void {
+  const settingsPath = getUserSettingsPath();
+  writeSettingsFile(settingsPath, settings);
+}
+
+export function writeProjectSettings(settings: DeepcodingSettings, projectRoot: string = process.cwd()): void {
+  const settingsPath = getProjectSettingsPath(projectRoot);
+  writeSettingsFile(settingsPath, settings);
+}
+
+function writeSettingsFile(settingsPath: string, settings: DeepcodingSettings): void {
+  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+}
+
+export function writeModelConfigSelection(
+  selection: ModelConfigSelection,
+  current: ModelConfigSelection = resolveCurrentSettings(),
+  projectRoot: string = process.cwd()
+): { changed: boolean; settings: DeepcodingSettings } {
+  const projectSettingsPath = getProjectSettingsPath(projectRoot);
+  const shouldWriteProjectSettings = fs.existsSync(projectSettingsPath);
+  const rawSettings = shouldWriteProjectSettings ? readProjectSettings(projectRoot) : readSettings();
+  const result = applyModelConfigSelection(rawSettings, current, selection);
+  if (result.changed) {
+    if (shouldWriteProjectSettings) {
+      writeProjectSettings(result.settings, projectRoot);
+    } else {
+      writeSettings(result.settings);
+    }
+  }
+  return result;
+}
+
+export function resolveCurrentSettings(projectRoot: string = process.cwd()): ResolvedDeepcodingSettings {
+  return resolveSettingsSources(
+    readSettings(),
+    readProjectSettings(projectRoot),
+    {
+      model: DEFAULT_MODEL,
+      baseURL: DEFAULT_BASE_URL,
+    },
+    process.env
+  );
+}
+
+export { createOpenAIClient } from "../../common/openai-client";
+
+function getUserSettingsPath(): string {
+  return path.join(os.homedir(), ".deepcode", "settings.json");
+}
+
+function getProjectSettingsPath(projectRoot: string): string {
+  return path.join(projectRoot, ".deepcode", "settings.json");
+}
+
+function formatThinkingMode(settings: Pick<ModelConfigSelection, "thinkingEnabled" | "reasoningEffort">): string {
+  if (!settings.thinkingEnabled) {
+    return "no thinking";
+  }
+  return `thinking ${settings.reasoningEffort}`;
+}
+
+function formatModelConfig(settings: ModelConfigSelection): string {
+  return `${settings.model}, ${formatThinkingMode(settings)}`;
+}

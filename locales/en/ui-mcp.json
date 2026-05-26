@@ -1,0 +1,31 @@
+{
+  "ui": {
+    "mcp": {
+      "statusReady": "ready",
+      "statusFailed": "failed",
+      "statusReconnecting": "reconnecting",
+      "reconnect": "Reconnect",
+      "starting": "Starting",
+      "details": "Details",
+      "status": "Status",
+      "enterReconnect": "Enter to reconnect · Esc back · Ctrl+C close",
+      "scrollBack": "↑/↓ scroll · Space/Enter back · Esc back · Ctrl+C close",
+      "spaceBack": "Space/Enter back · Esc back · Ctrl+C close",
+      "noItems": "No items available",
+      "footerHelp": "↑/↓ navigate · Enter view details · Esc close",
+      "countReady": "{count} ready,",
+      "countStarting": "{count} starting,",
+      "countReconnecting": "{count} reconnecting,",
+      "countFailed": "{count} failed",
+      "manageTitle": "Manage MCP servers",
+      "zeroServers": "0 servers",
+      "noServersConfigured": "No MCP servers configured.",
+      "addServersHint": "Add MCP servers to your settings to get started.",
+      "escToClose": "Esc to close",
+      "serversAbove": "{n} servers above.",
+      "serversBelow": "{n} servers below.",
+      "itemCounts": "{tools} tools, {prompts} prompts, {resources} resources",
+      "statusPrefix": "Status: {status}"
+    }
+  }
+}

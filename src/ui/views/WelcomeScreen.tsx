@@ -8,6 +8,7 @@ import { buildSlashCommands, BUILTIN_SLASH_COMMANDS, formatSlashCommandDescripti
 import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../ascii-art";
 import { useAppContext } from "../contexts";
+import { t } from "../../common/i18n";
 
 type WelcomeScreenProps = {
   projectRoot: string;
@@ -19,14 +20,16 @@ type WelcomeScreenProps = {
 const TITLE_PANEL_WIDTH = 70;
 const PANEL_CONTENT_HEIGHT = 8;
 
-const SHORTCUT_TIPS = [
-  { label: "Enter", description: "Send the prompt" },
-  { label: "Shift+Enter", description: "Insert a newline" },
-  { label: "Ctrl+V", description: "Paste an image from the clipboard" },
-  { label: "Esc", description: "Interrupt the current model turn" },
-  { label: "/", description: "Open the skills and commands menu" },
-  { label: "Ctrl+D twice", description: "Quit Deep Code CLI" },
-];
+function getShortcutTips(): Array<{ label: string; description: string }> {
+  return [
+    { label: "Enter", description: t("ui.welcome.sendPrompt") },
+    { label: "Shift+Enter", description: t("ui.welcome.insertNewline") },
+    { label: "Ctrl+V", description: t("ui.welcome.pasteImage") },
+    { label: "Esc", description: t("ui.welcome.interrupt") },
+    { label: "/", description: t("ui.welcome.openMenu") },
+    { label: "Ctrl+D twice", description: t("ui.welcome.quit") },
+  ];
+}
 
 export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeScreenProps): React.ReactElement {
   const { version } = useAppContext();
@@ -61,10 +64,13 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
               <Text color="gray"> (v{version || "unknown"})</Text>
             </Box>
             {!compact ? <Text> </Text> : null}
-            <SettingRow label="Model" value={settings.model} />
-            <SettingRow label="Thinking Enabled" value={String(settings.thinkingEnabled)} />
-            <SettingRow label="Reasoning Effort" value={settings.thinkingEnabled ? settings.reasoningEffort : "-"} />
-            <SettingRow label="CWD" value={cwd} />
+            <SettingRow label={t("ui.welcome.model")} value={settings.model} />
+            <SettingRow label={t("ui.welcome.thinkingEnabled")} value={String(settings.thinkingEnabled)} />
+            <SettingRow
+              label={t("ui.welcome.reasoningEffort")}
+              value={settings.thinkingEnabled ? settings.reasoningEffort : "-"}
+            />
+            <SettingRow label={t("ui.welcome.cwd")} value={cwd} />
           </Box>
         </Box>
       </Box>
@@ -73,7 +79,8 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
         {tip ? (
           <Box marginTop={1}>
             <Text dimColor>
-              Tips: {tip.label} - {tip.description}
+              {t("ui.welcome.tipsPrefix")}
+              {tip.label} - {tip.description}
             </Text>
           </Box>
         ) : null}
@@ -119,7 +126,7 @@ export function buildWelcomeTips(skills: SkillInfo[]): Array<{ label: string; de
 
   return [
     ...slashTips,
-    ...SHORTCUT_TIPS.filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
+    ...getShortcutTips().filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
   ];
 }
 

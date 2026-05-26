@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { UndoTarget } from "../../session";
+import { t } from "../../common/i18n";
 
 export type UndoRestoreMode = "code-and-conversation" | "conversation";
 
@@ -82,8 +83,8 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
   if (targets.length === 0) {
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Text color="yellow">Nothing to undo yet.</Text>
-        <Text dimColor>Press Esc to go back.</Text>
+        <Text color="yellow">{t("ui.undoSelector.nothingYet")}</Text>
+        <Text dimColor>{t("ui.undoSelector.escBack")}</Text>
       </Box>
     );
   }
@@ -99,10 +100,10 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
     >
       <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
         <Box paddingX={1}>
-          <Text bold color="#229ac3">
-            Undo
+          <Text bold color="cyanBright">
+            {t("ui.undoSelector.title")}
           </Text>
-          <Text dimColor> restore to the point before a prompt</Text>
+          <Text dimColor> {t("ui.undoSelector.subtitle")}</Text>
         </Box>
         {phase === "message" ? (
           <Box
@@ -129,7 +130,9 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
                     </Text>
                     <Text dimColor>
                       {formatTimestamp(target.message.createTime)}
-                      {target.canRestoreCode ? " · code checkpoint available" : " · conversation only"}
+                      {target.canRestoreCode
+                        ? ` · ${t("ui.undoSelector.checkpointAvailable")}`
+                        : ` · ${t("ui.undoSelector.conversationOnly")}`}
                     </Text>
                   </Box>
                 </Box>
@@ -149,30 +152,31 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
             paddingX={1}
             overflow="hidden"
           >
-            <Text dimColor>Selected prompt:</Text>
+            <Text dimColor>{t("ui.undoSelector.selectedPrompt")}</Text>
             <Text>{formatUndoMessage(selectedTarget?.message.content ?? "")}</Text>
             <Box marginTop={1} flexDirection="column">
               <Text color={modeIndex === 0 ? "cyanBright" : undefined}>
-                {modeIndex === 0 ? "> " : "  "}Restore code and conversation
+                {modeIndex === 0 ? "> " : "  "}
+                {t("ui.undoSelector.restoreCodeAndConversation")}
               </Text>
               <Text dimColor>
                 {"  "}
-                {selectedTarget?.canRestoreCode
-                  ? "Restore files from the recorded Git checkpoint, then fork the conversation."
-                  : "No code checkpoint is recorded for this prompt."}
+                {selectedTarget?.canRestoreCode ? t("ui.undo.restoreFiles") : t("ui.undo.noCheckpoint")}
               </Text>
               <Text color={modeIndex === 1 ? "cyanBright" : undefined}>
-                {modeIndex === 1 ? "> " : "  "}Restore conversation
+                {modeIndex === 1 ? "> " : "  "}
+                {t("ui.undoSelector.restoreConversation")}
               </Text>
-              <Text dimColor>{"  "}Fork the conversation without changing files.</Text>
+              <Text dimColor>
+                {"  "}
+                {t("ui.undoSelector.forkConversation")}
+              </Text>
             </Box>
           </Box>
         )}
         <Box>
           <Text dimColor>
-            {phase === "message"
-              ? "↑/↓ navigate · Enter choose · Esc cancel"
-              : "↑/↓ choose restore mode · Enter restore · Esc back"}
+            {phase === "message" ? t("ui.undoSelector.footerMessage") : t("ui.undoSelector.footerMode")}
           </Text>
         </Box>
       </Box>
@@ -181,9 +185,9 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
 }
 
 function formatUndoMessage(content: unknown): string {
-  const text = typeof content === "string" && content.trim() ? content.trim() : "(empty message)";
+  const text = typeof content === "string" && content.trim() ? content.trim() : t("ui.undoSelector.emptyMessage");
   const singleLine = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
-  return singleLine.length > 90 ? `${singleLine.slice(0, 89)}…` : singleLine;
+  return singleLine.length > 90 ? `${singleLine.slice(0, 89)}\u2026` : singleLine;
 }
 
 function formatTimestamp(value: string): string {

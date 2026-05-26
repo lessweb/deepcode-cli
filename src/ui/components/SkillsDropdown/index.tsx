@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import type { SkillInfo } from "../../../session";
 import { useInput } from "ink";
 import { isSkillSelected } from "../../views/SlashCommandMenu";
+import { t } from "../../../common/i18n";
 
 const SkillsDropdown: React.FC<{
   open: boolean;
@@ -54,9 +55,9 @@ const SkillsDropdown: React.FC<{
   return (
     <DropdownMenu
       width={width}
-      title="Select Skills"
-      helpText="Space toggle · Enter toggle · Esc to close"
-      emptyText="No skills found"
+      title={t("ui.skillsDropdown.title")}
+      helpText={t("ui.skillsDropdown.helpText")}
+      emptyText={t("ui.skillsDropdown.emptyText")}
       items={skills.map((skill) => ({
         key: skill.path || skill.name,
         label: skill.name,

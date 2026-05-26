@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { useTerminalInput } from "../hooks";
 import type { AskPermissionRequest, AskPermissionScope, UserToolPermission } from "../../common/permissions";
 import type { PermissionScope } from "../../settings";
+import { t } from "../../common/i18n";
 
 export type PermissionPromptResult = {
   permissions: UserToolPermission[];
@@ -129,7 +130,7 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
     <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
       <Box marginBottom={1}>
         <Text color="yellow" bold>
-          Permission required
+          {t("ui.permissionPrompt.title")}
         </Text>
         <Text dimColor>
           {" "}
@@ -140,7 +141,7 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
       <Text>{prompt.request.command}</Text>
       {prompt.request.description ? <Text dimColor>{prompt.request.description}</Text> : null}
       <Box marginTop={1}>
-        <Text>Do you want to proceed?</Text>
+        <Text>{t("ui.permissionPrompt.proceedQuestion")}</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, optionIndex) => (
@@ -151,7 +152,7 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
         ))}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>↑/↓ move · Enter select · Esc interrupt</Text>
+        <Text dimColor>{t("ui.permissionPrompt.footerHelp")}</Text>
       </Box>
     </Box>
   );
@@ -180,16 +181,16 @@ function buildScopePrompts(requests: AskPermissionRequest[]): ScopePrompt[] {
 }
 
 function buildOptions(scope: AskPermissionScope): PromptOption[] {
-  const options: PromptOption[] = [{ kind: "allow", label: "Yes" }];
+  const options: PromptOption[] = [{ kind: "allow", label: t("ui.permissionPrompt.allowLabel") }];
   if (isAlwaysAllowedScope(scope)) {
     options.push({
       kind: "always",
-      label: "Yes, and always allow ",
+      label: t("ui.permissionPrompt.alwaysAllowLabel"),
       scopeDescription: describeScope(scope),
       scopeColor: getScopeRiskColor(scope),
     });
   }
-  options.push({ kind: "deny", label: "No" });
+  options.push({ kind: "deny", label: t("ui.permissionPrompt.denyLabel") });
   return options;
 }
 
@@ -250,25 +251,25 @@ export function getScopeRiskColor(scope: AskPermissionScope): string {
 function describeScope(scope: PermissionScope): string {
   switch (scope) {
     case "read-in-cwd":
-      return "reads inside this workspace";
+      return t("ui.permissionPrompt.scopeReadInCwd");
     case "read-out-cwd":
-      return "reads outside this workspace";
+      return t("ui.permissionPrompt.scopeReadOutCwd");
     case "write-in-cwd":
-      return "writes inside this workspace";
+      return t("ui.permissionPrompt.scopeWriteInCwd");
     case "write-out-cwd":
-      return "writes outside this workspace";
+      return t("ui.permissionPrompt.scopeWriteOutCwd");
     case "delete-in-cwd":
-      return "deletes inside this workspace";
+      return t("ui.permissionPrompt.scopeDeleteInCwd");
     case "delete-out-cwd":
-      return "deletes outside this workspace";
+      return t("ui.permissionPrompt.scopeDeleteOutCwd");
     case "query-git-log":
-      return "Git history queries";
+      return t("ui.permissionPrompt.scopeQueryGitLog");
     case "mutate-git-log":
-      return "Git history changes";
+      return t("ui.permissionPrompt.scopeMutateGitLog");
     case "network":
-      return "network access";
+      return t("ui.permissionPrompt.scopeNetwork");
     case "mcp":
-      return "MCP tool access";
+      return t("ui.permissionPrompt.scopeMcp");
     default:
       return scope;
   }

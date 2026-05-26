@@ -1,0 +1,17 @@
+{
+  "ui": {
+    "welcome": {
+      "sendPrompt": "发送提示",
+      "insertNewline": "插入新行",
+      "pasteImage": "从剪贴板粘贴图片",
+      "interrupt": "中断当前模型响应",
+      "openMenu": "打开技能和命令菜单",
+      "quit": "退出 Deep Code CLI",
+      "thinkingEnabled": "思考模式",
+      "reasoningEffort": "思考努力程度",
+      "model": "模型",
+      "cwd": "当前目录",
+      "tipsPrefix": "提示："
+    }
+  }
+}

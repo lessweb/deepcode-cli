@@ -1,0 +1,23 @@
+{
+  "ui": {
+    "undo": {
+      "restoreFiles": "Restore files from the recorded Git checkpoint, then fork the conversation.",
+      "noCheckpoint": "No code checkpoint is recorded for this prompt."
+    },
+    "undoSelector": {
+      "nothingYet": "Nothing to undo yet.",
+      "escBack": "Press Esc to go back.",
+      "title": "Undo",
+      "subtitle": "restore to the point before a prompt",
+      "checkpointAvailable": "code checkpoint available",
+      "conversationOnly": "conversation only",
+      "selectedPrompt": "Selected prompt:",
+      "restoreCodeAndConversation": "Restore code and conversation",
+      "restoreConversation": "Restore conversation",
+      "forkConversation": "Fork the conversation without changing files.",
+      "footerMessage": "↑/↓ navigate · Enter choose · Esc cancel",
+      "footerMode": "↑/↓ choose restore mode · Enter restore · Esc back",
+      "emptyMessage": "(empty message)"
+    }
+  }
+}

@@ -2,6 +2,8 @@ import type { DiffPreviewLine, ToolSummary } from "./types";
 import type { SessionMessage } from "../../../session";
 import { RawMode } from "../../contexts";
 import chalk from "chalk";
+import { t } from "../../../common/i18n";
+import { truncateDisplay } from "../../../common/display-width";
 
 /** Type guard that checks whether a value is a plain object (not null, not an array). */
 export function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -10,7 +12,7 @@ export function isPlainRecord(value: unknown): value is Record<string, unknown> 
 
 /** Capitalizes the first character of a tool status name, falling back to "Tool". */
 export function formatStatusName(value: string): string {
-  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : "Tool";
+  return value ? `${value.charAt(0).toUpperCase()}${value.slice(1)}` : t("ui.messageView.toolName");
 }
 
 /** Truncates a string to the given maximum length, appending an ellipsis when truncated. */
@@ -39,7 +41,7 @@ export function firstNonEmptyLine(value: string): string {
 export function buildThinkingSummary(content: string, messageParams: unknown | null, mode?: RawMode): string {
   if (content) {
     const normalized = content.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
-    let result = truncate(normalized, 100);
+    let result = truncateDisplay(normalized, 100);
     if (result.endsWith(":") || result.endsWith("：")) {
       result = result.slice(0, -1);
     }
@@ -48,7 +50,7 @@ export function buildThinkingSummary(content: string, messageParams: unknown | n
 
   const params = messageParams as { reasoning_content?: unknown } | null | undefined;
   if (typeof params?.reasoning_content === "string" && params.reasoning_content.trim()) {
-    return mode !== RawMode.Lite ? params?.reasoning_content || "" : "(reasoning...)";
+    return mode !== RawMode.Lite ? params?.reasoning_content || "" : t("ui.messageView.reasoningFallback");
   }
 
   return "";
@@ -57,7 +59,7 @@ export function buildThinkingSummary(content: string, messageParams: unknown | n
 /** Formats a tool's parameters for status display, preserving full bash commands but truncating others. */
 export function formatToolStatusParams(summary: ToolSummary): string {
   const params = firstNonEmptyLine(summary.params);
-  return summary.name.toLowerCase() === "bash" ? params : truncate(params, 120);
+  return summary.name.toLowerCase() === "bash" ? params : truncateDisplay(params, 120);
 }
 
 /** Builds a structured summary (name, params, ok, metadata) from a tool session message. */
@@ -209,7 +211,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   }
 
   if (message.role === "user") {
-    const text = message.content || "(no content)";
+    const text = message.content || t("ui.messageView.noContent");
     return chalk(`> ${text}`);
   }
 
@@ -219,7 +221,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
 
     if (isThinking) {
       const summary = buildThinkingSummary(content, message.messageParams, mode);
-      return `${chalk("✧")} ${chalk("Thinking")}${summary ? ` ${chalk(summary)}` : ""}`;
+      return `${chalk("✧")} ${chalk(t("ui.messageView.thinking"))}${summary ? ` ${chalk(summary)}` : ""}`;
     }
 
     return `${chalk("✦")} ${content}`;
@@ -233,11 +235,11 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
         : null;
     const name = payload.name || metaFunctionName || "tool";
     const metaParams = typeof message.meta?.paramsMd === "string" ? message.meta.paramsMd.trim() : "";
-    const params = name.toLowerCase() === "bash" ? metaParams : truncate(metaParams, 120);
+    const params = name.toLowerCase() === "bash" ? metaParams : truncateDisplay(metaParams, 120);
     const statusLine = `${chalk("✧")} ${chalk(formatStatusName(name))}${params ? ` ${chalk(params)}` : ""}`;
 
     const metaResultMd = typeof message.meta?.resultMd === "string" ? message.meta.resultMd.trim() : "";
-    const result = metaResultMd ? `\n${chalk.dim("  └ Result")}\n${metaResultMd}` : "";
+    const result = metaResultMd ? `\n${chalk.dim(t("ui.messageView.result"))}\n${metaResultMd}` : "";
 
     const summary: ToolSummary = {
       name,
@@ -248,7 +250,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     const planLines = getUpdatePlanPreviewLines(summary);
     if (planLines.length > 0) {
       const planText = planLines.map((line) => `  ${line}`).join("\n");
-      return `${statusLine}\n${chalk.dim("  └ Plan")}\n${planText}${result}`;
+      return `${statusLine}\n${chalk.dim(t("ui.messageView.plan"))}\n${planText}${result}`;
     }
 
     return `${statusLine}${result}`;
@@ -260,10 +262,10 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     }
     if (message.meta?.skill && typeof message.meta.skill === "object") {
       const skillName = (message.meta.skill as { name?: unknown }).name;
-      return chalk(`⚡ Loaded skill: ${typeof skillName === "string" ? skillName : ""}`);
+      return chalk(t("ui.messageView.loadedSkill", { name: typeof skillName === "string" ? skillName : "" }));
     }
     if (message.meta?.isSummary) {
-      return chalk.dim.italic("(conversation summary inserted)");
+      return chalk.dim.italic(t("ui.messageView.conversationSummaryInserted"));
     }
     return "";
   }

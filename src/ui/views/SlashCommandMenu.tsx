@@ -4,6 +4,8 @@ import { ARGS_SEPARATOR } from "../constants";
 import React from "react";
 import { Box, Text } from "ink";
 import type { SkillInfo } from "../../session";
+import { displayWidth } from "../../common/display-width";
+import { t } from "../../common/i18n";
 
 type SlashCommandMenuProps = {
   items: SlashCommandItem[];
@@ -26,7 +28,7 @@ const SlashCommandMenu = React.memo(function SlashCommandMenu({
       return 0;
     }
     const longestLabel = Math.max(
-      ...items.map((s) => s.label.length + (s.args ? s.args?.join(ARGS_SEPARATOR)?.length + 4 : 0))
+      ...items.map((s) => displayWidth(s.label) + (s.args ? s.args?.join(ARGS_SEPARATOR)?.length + 4 : 0))
     );
     const contentWidth = longestLabel + 2; // +2 for prefix "> " or "  "
     const maxAllowed = Math.max(10, (width - 2) >> 1); // 容器50%宽度（减去gap），至少保留10列
@@ -72,9 +74,7 @@ const SlashCommandMenu = React.memo(function SlashCommandMenu({
       })}
       <Box marginLeft={2} flexDirection="column">
         {visibleStart + visibleItems.length < items.length ? <Text dimColor>▼</Text> : null}
-        <Text dimColor>
-          ({activeIndex + 1}/{items.length}) ↑↓ to navigate · Enter to select
-        </Text>
+        <Text dimColor>{t("ui.slashCommandMenu.footerHelp", { current: activeIndex + 1, total: items.length })}</Text>
       </Box>
     </Box>
   );

@@ -18,6 +18,7 @@
     "templates/tools/**",
     "templates/prompts/**",
     "templates/skills/**",
+    "locales/**",
     "README.md",
     "LICENSE"
   ],
@@ -35,6 +36,7 @@
     "build": "npm run check && npm run bundle && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
     "test": "node src/tests/run-tests.mjs",
     "test:single": "tsx --test",
+    "check:i18n": "node scripts/check-i18n.mjs",
     "prepack": "npm run build",
     "prepare": "husky"
   },

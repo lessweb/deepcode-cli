@@ -1,0 +1,20 @@
+{
+  "ui": {
+    "config": {
+      "title": "设置",
+      "language": "语言",
+      "thinkingLanguage": "推理语言",
+      "replyLanguage": "回复语言",
+      "selectLanguage": "选择语言",
+      "selectCategoryHelp": "空格/回车选择 · Esc 取消",
+      "selectLanguageHelp": "空格/回车确认 · Esc 返回",
+      "currentLabel": "当前",
+      "localeEn": "English",
+      "localeZhCN": "中文",
+      "categoryWithValue": "{label}（{value}）",
+      "languageUpdated": "语言：{locale}",
+      "thinkingLanguageUpdated": "推理语言：{locale}",
+      "replyLanguageUpdated": "回复语言：{locale}"
+    }
+  }
+}

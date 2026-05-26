@@ -1,0 +1,23 @@
+{
+  "ui": {
+    "undo": {
+      "restoreFiles": "从记录的 Git 检查点恢复文件，然后分支对话。",
+      "noCheckpoint": "此提示没有记录的代码检查点。"
+    },
+    "undoSelector": {
+      "nothingYet": "暂无内容可撤销。",
+      "escBack": "按 Esc 返回。",
+      "title": "撤销",
+      "subtitle": "恢复到某个提示之前的节点",
+      "checkpointAvailable": "代码检查点可用",
+      "conversationOnly": "仅对话",
+      "selectedPrompt": "已选提示：",
+      "restoreCodeAndConversation": "恢复代码和对话",
+      "restoreConversation": "恢复对话",
+      "forkConversation": "分支对话而不更改文件。",
+      "footerMessage": "↑/↓ 导航 · 回车选择 · Esc 取消",
+      "footerMode": "↑/↓ 选择恢复模式 · 回车恢复 · Esc 返回",
+      "emptyMessage": "(空消息)"
+    }
+  }
+}

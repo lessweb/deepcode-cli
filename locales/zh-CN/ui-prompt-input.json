@@ -1,0 +1,25 @@
+{
+  "ui": {
+    "promptInput": {
+      "interrupting": "正在中断…",
+      "imageAttached": "已从剪贴板粘贴图片",
+      "noImageFound": "剪贴板中没有图片",
+      "readingClipboard": "正在读取剪贴板...",
+      "failedClipboard": "读取剪贴板失败",
+      "clearedImages": "已清除粘贴的图片",
+      "noImagesToClear": "没有需要清除的图片",
+      "placeholder": "输入你的消息...",
+      "waitForResponse": "请等待当前响应完成，或按 esc 中断",
+      "pressCtrlDExit": "按 ctrl+d 退出",
+      "pressCtrlDAgain": "再按一次 ctrl+d 退出",
+      "footer": "回车发送 · shift+回车换行 · @ 文件 · ctrl+v 图片 · / 命令 · ctrl+d 退出",
+      "footerBusy": "esc 中断 · ctrl+c 取消输入",
+      "ctrlOViewOutput": " · ctrl+o 查看输出",
+      "ctrlOExpand": " · ctrl+o 展开",
+      "ctrlOCollapse": " · ctrl+o 折叠",
+      "noPasteMarker": "光标位置没有粘贴标记",
+      "pasteNotFound": "找不到粘贴内容",
+      "imageCount": "📎 {count} 张图片已粘贴"
+    }
+  }
+}

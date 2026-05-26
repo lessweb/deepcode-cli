@@ -1,0 +1,17 @@
+{
+  "ui": {
+    "welcome": {
+      "sendPrompt": "Send the prompt",
+      "insertNewline": "Insert a newline",
+      "pasteImage": "Paste an image from the clipboard",
+      "interrupt": "Interrupt the current model turn",
+      "openMenu": "Open the skills and commands menu",
+      "quit": "Quit Deep Code CLI",
+      "thinkingEnabled": "Thinking Enabled",
+      "reasoningEffort": "Reasoning Effort",
+      "model": "Model",
+      "cwd": "CWD",
+      "tipsPrefix": "Tips: "
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "ui": {
+    "messageView": {
+      "thinking": "思考",
+      "reasoningFallback": "(推理中...)",
+      "noContent": "(无内容)",
+      "loadedSkill": "⚡ 已加载技能：{name}",
+      "conversationSummaryInserted": "(已插入对话摘要)",
+      "changes": "└ 变更",
+      "plan": "└ 计划",
+      "result": "└ 结果",
+      "toolName": "工具",
+      "imageAttachment": "张图片"
+    }
+  }
+}

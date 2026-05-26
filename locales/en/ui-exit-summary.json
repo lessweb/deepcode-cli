@@ -1,0 +1,12 @@
+{
+  "ui": {
+    "exitSummary": {
+      "goodbye": "Goodbye!",
+      "modelUsage": "Model Usage",
+      "reqs": "Reqs",
+      "inputTokens": "Input Tokens",
+      "outputTokens": "Output Tokens",
+      "cachedTokens": "Cached Tokens"
+    }
+  }
+}

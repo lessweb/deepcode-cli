@@ -1,0 +1,16 @@
+{
+  "ui": {
+    "processStdout": {
+      "noAdjustableTimeout": "无可用 Bash 超时调整",
+      "processLabel": "── 进程 {pid} [{command}] ──",
+      "noOutputYet": "（暂无输出）",
+      "noRunning": "（无运行中的进程）",
+      "scrollHint": "...（上方 {start} 行 · ↑/↓ 滚动 · 共 {total} 行）...",
+      "title": "📟 进程输出",
+      "footerHelp": "（{timeoutHint} · +/- 调整 · Ctrl+O 或 Esc 关闭 · ↑↓ PageUp/PageDown 滚动）",
+      "timeoutUnavailable": "超时不可用",
+      "timeoutHint": "超时 {duration}",
+      "timeoutSet": "超时已设为 {duration}"
+    }
+  }
+}

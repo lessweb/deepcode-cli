@@ -1,0 +1,18 @@
+{
+  "ui": {
+    "slashCommands": {
+      "skillsDesc": "列出可用技能",
+      "modelDesc": "选择模型、思考模式和努力程度",
+      "newDesc": "开始新的对话",
+      "initDesc": "初始化 AGENTS.md 文件为 LLM 添加指令",
+      "resumeDesc": "选择之前的对话继续",
+      "continueDesc": "继续当前对话，或选择一个对话恢复",
+      "undoDesc": "恢复到之前的代码和/或对话",
+      "mcpDesc": "显示 MCP 服务器状态和可用工具",
+      "rawDesc": "切换显示模式以查看或折叠推理内容",
+      "exitDesc": "退出 Deep Code CLI",
+      "configDesc": "配置设置：语言、模型等",
+      "noDescription": "(无描述)"
+    }
+  }
+}

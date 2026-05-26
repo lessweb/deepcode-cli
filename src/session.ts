@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
+import { fileURLToPath } from "url";
+import { t } from "./common/i18n";
 import matter from "gray-matter";
 import ejs from "ejs";
 import type { ChatCompletionMessageParam, ChatCompletionContentPart } from "openai/resources/chat/completions";
@@ -1038,7 +1040,7 @@ The candidate skills are as follows:\n\n`;
           continue;
         }
         const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
+        const skillPrompt = `${t("session.skillPromptHeader")}
 <${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
 ${skillMd}
 </${skill.name}-skill>`;
@@ -1112,7 +1114,7 @@ ${skillMd}
           continue;
         }
         const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
+        const skillPrompt = `${t("session.skillPromptHeader")}
 <${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
 ${skillMd}
 </${skill.name}-skill>`;
@@ -1148,17 +1150,10 @@ ${skillMd}
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
         status: "failed",
-        failReason: "OpenAI API key not found",
+        failReason: t("ui.app.apiKeyNotFound"),
         updateTime: now,
       }));
-      this.onAssistantMessage(
-        this.buildAssistantMessage(
-          sessionId,
-          "OpenAI API key not found. Please configure ~/.deepcode/settings.json or ./.deepcode/settings.json.",
-          null
-        ),
-        false
-      );
+      this.onAssistantMessage(this.buildAssistantMessage(sessionId, t("ui.app.apiKeyNotFound"), null), false);
       this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
       return;
     }
@@ -1220,11 +1215,7 @@ ${skillMd}
 
         const compactPromptTokenThreshold = getCompactPromptTokenThreshold(model);
         if (session.activeTokens > compactPromptTokenThreshold) {
-          const message = this.buildAssistantMessage(
-            sessionId,
-            "The conversation is getting long, compacting...",
-            null
-          );
+          const message = this.buildAssistantMessage(sessionId, t("session.compacting"), null);
           message.meta = { asThinking: true };
           this.onAssistantMessage(message, false);
           await this.compactSession(sessionId, sessionController.signal);
@@ -1345,14 +1336,7 @@ ${skillMd}
         status: "completed",
         updateTime: new Date().toISOString(),
       }));
-      this.onAssistantMessage(
-        this.buildAssistantMessage(
-          sessionId,
-          "The AI agent has taken several steps but hasn't reached a conclusion yet. Do you want to continue?",
-          null
-        ),
-        false
-      );
+      this.onAssistantMessage(this.buildAssistantMessage(sessionId, t("ui.app.sessionAgentSteps"), null), false);
     } catch (error) {
       const errMessage = error instanceof Error ? error.message : String(error);
       const aborted = this.isAbortLikeError(error) || sessionController.signal.aborted;
@@ -1364,7 +1348,10 @@ ${skillMd}
       }));
 
       if (!aborted) {
-        this.onAssistantMessage(this.buildAssistantMessage(sessionId, `Request failed: ${errMessage}`, null), false);
+        this.onAssistantMessage(
+          this.buildAssistantMessage(sessionId, t("ui.app.requestFailed", { error: errMessage }), null),
+          false
+        );
       }
     } finally {
       if (this.sessionControllers.get(sessionId) === sessionController) {
@@ -1528,12 +1515,12 @@ ${skillMd}
       updateTime: now,
     }));
 
-    const contentParts = ["Interrupted."];
+    const contentParts = [t("ui.app.interrupted")];
     if (killedPids.length > 0) {
-      contentParts.push(`Killed processes: ${killedPids.join(", ")}.`);
+      contentParts.push(`${t("ui.app.killedProcesses", { pids: killedPids.join(", ") })}.`);
     }
     if (failedPids.length > 0) {
-      contentParts.push(`Failed to kill processes: ${failedPids.join(", ")}.`);
+      contentParts.push(`${t("ui.app.failedKillProcesses", { pids: failedPids.join(", ") })}.`);
     }
 
     this.onAssistantMessage(this.buildUserMessage(sessionId, { text: contentParts.join(" ") }), false);

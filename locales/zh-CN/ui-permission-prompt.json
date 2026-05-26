@@ -1,0 +1,22 @@
+{
+  "ui": {
+    "permissionPrompt": {
+      "title": "需要权限",
+      "proceedQuestion": "是否继续执行？",
+      "footerHelp": "\u2191/\u2193 移动 \u00b7 Enter 选择 \u00b7 Esc 中断",
+      "allowLabel": "是",
+      "alwaysAllowLabel": "是，始终允许 ",
+      "denyLabel": "否",
+      "scopeReadInCwd": "读取工作目录内文件",
+      "scopeReadOutCwd": "读取工作目录外文件",
+      "scopeWriteInCwd": "写入工作目录内文件",
+      "scopeWriteOutCwd": "写入工作目录外文件",
+      "scopeDeleteInCwd": "删除工作目录内文件",
+      "scopeDeleteOutCwd": "删除工作目录外文件",
+      "scopeQueryGitLog": "查询 Git 历史",
+      "scopeMutateGitLog": "修改 Git 历史",
+      "scopeNetwork": "网络访问",
+      "scopeMcp": "MCP 工具访问"
+    }
+  }
+}

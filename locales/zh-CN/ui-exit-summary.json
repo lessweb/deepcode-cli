@@ -1,0 +1,12 @@
+{
+  "ui": {
+    "exitSummary": {
+      "goodbye": "再见！",
+      "modelUsage": "模型用量",
+      "reqs": "请求数",
+      "inputTokens": "输入 Tokens",
+      "outputTokens": "输出 Tokens",
+      "cachedTokens": "缓存 Tokens"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "ui": {
+    "processStdout": {
+      "noAdjustableTimeout": "No adjustable Bash timeout",
+      "processLabel": "── Process {pid} [{command}] ──",
+      "noOutputYet": "(no output yet)",
+      "noRunning": "(no running processes)",
+      "scrollHint": "... ({start} lines above · ↑/↓ to scroll · {total} total lines) ...",
+      "title": "📟 Process Output",
+      "footerHelp": "({timeoutHint} · +/- adjust · Ctrl+O or Esc to close · ↑↓ PageUp/PageDown to scroll)",
+      "timeoutUnavailable": "timeout unavailable",
+      "timeoutHint": "timeout {duration}",
+      "timeoutSet": "Timeout set to {duration}"
+    }
+  }
+}

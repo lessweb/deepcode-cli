@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { parseDiffPreview } from "../ui";
+import { initI18n } from "../common/i18n";
 import {
   buildThinkingSummary,
   renderMessageToStdout,
@@ -9,6 +10,8 @@ import {
 } from "../ui/components/MessageView/utils";
 import { RawMode } from "../ui/contexts";
 import type { SessionMessage } from "../session";
+
+initI18n("en");
 import type { ToolSummary } from "../ui/components/MessageView/types";
 
 test("parseDiffPreview removes headers and classifies lines", () => {

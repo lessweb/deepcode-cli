@@ -1,0 +1,6 @@
+{
+  "session": {
+    "compacting": "The conversation is getting long, compacting...",
+    "skillPromptHeader": "Use the skill document below to assist the user:\n"
+  }
+}

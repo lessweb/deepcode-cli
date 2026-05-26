@@ -3,9 +3,19 @@ import { render } from "ink";
 import { setShellIfWindows } from "./common/shell-utils";
 import { checkForNpmUpdate, promptForPendingUpdate, type PackageInfo } from "./common/update-check";
 import { AppContainer } from "./ui";
+import { t } from "./common/i18n";
+import { initI18n } from "./common/i18n";
+import { resolveCurrentSettings } from "./ui/views/App";
 
 const args = process.argv.slice(2);
 const packageInfo = readPackageInfo();
+
+// Initialize i18n early so --help and --version can use translations
+const settings = resolveCurrentSettings(process.cwd());
+initI18n(settings.locale, {
+  thinkingLocale: settings.thinkingLocale,
+  replyLocale: settings.replyLocale,
+});
 
 if (args.includes("--version") || args.includes("-v")) {
   process.stdout.write(`${packageInfo.version || "unknown"}\n`);
@@ -15,43 +25,44 @@ if (args.includes("--version") || args.includes("-v")) {
 if (args.includes("--help") || args.includes("-h")) {
   process.stdout.write(
     [
-      "deepcode - Deep Code CLI",
+      t("cli.help.title"),
       "",
-      "Usage:",
-      "  deepcode                              Launch the interactive TUI in the current directory",
-      "  deepcode -p <prompt>                  Launch with a pre-filled prompt",
-      "  deepcode --prompt <prompt>            Same as -p",
-      "  deepcode --version                    Print the version",
-      "  deepcode --help                       Show this help",
+      t("cli.help.usage"),
+      t("cli.help.launchTui"),
+      t("cli.help.launchWithPrompt"),
+      t("cli.help.launchWithPromptLong"),
+      t("cli.help.printVersion"),
+      t("cli.help.printHelp"),
       "",
-      "Configuration:",
-      "  ~/.deepcode/settings.json    User-level API key, model, base URL",
-      "  ./.deepcode/settings.json    Project-level settings",
-      "  ~/.agents/skills/*/SKILL.md  User-level skills",
-      "  ./.agents/skills/*/SKILL.md  Project-level skills",
-      "  ./.deepcode/skills/*/SKILL.md Legacy project-level skills",
+      t("cli.help.configSection"),
+      t("cli.help.userSettings"),
+      t("cli.help.projectSettings"),
+      t("cli.help.userSkills"),
+      t("cli.help.projectSkills"),
+      t("cli.help.legacySkills"),
       "",
-      "Inside the TUI:",
-      "  enter            Send the prompt",
-      "  shift+enter      Insert a newline",
-      "  home/end         Move within the current line",
-      "  alt+left/right   Move by word",
-      "  ctrl+w           Delete the previous word",
-      "  ctrl+v           Paste an image from the clipboard",
-      "  ctrl+x           Clear pasted images",
-      "  esc              Interrupt the current model turn",
-      "  /                Open the skills/commands menu",
-      "  /skills          List available skills",
-      "  /model           Select model, thinking mode and effort control",
-      "  /new             Start a fresh conversation",
-      "  /init            Initialize an AGENTS.md file with instructions for LLM",
-      "  /resume          Pick a previous conversation to continue",
-      "  /continue        Continue the active conversation, or resume one if empty",
-      "  /undo            Restore code and/or conversation to a previous point",
-      "  /mcp             Show MCP server status and available tools",
-      "  /raw             Toggle display mode for viewing or collapsing reasoning content",
-      "  /exit            Quit",
-      "  ctrl+d twice     Quit",
+      t("cli.help.tuiSection"),
+      t("cli.help.enterSend"),
+      t("cli.help.shiftEnterNewline"),
+      t("cli.help.homeEnd"),
+      t("cli.help.altLeftRight"),
+      t("cli.help.ctrlW"),
+      t("cli.help.ctrlV"),
+      t("cli.help.ctrlX"),
+      t("cli.help.esc"),
+      t("cli.help.slash"),
+      t("cli.help.slashSkills"),
+      t("cli.help.slashModel"),
+      t("cli.help.slashNew"),
+      t("cli.help.slashInit"),
+      t("cli.help.slashResume"),
+      t("cli.help.slashContinue"),
+      t("cli.help.slashUndo"),
+      t("cli.help.slashMcp"),
+      t("cli.help.slashRaw"),
+      t("cli.help.slashExit"),
+      t("cli.help.slashConfig"),
+      t("cli.help.ctrlD"),
     ].join("\n") + "\n"
   );
   process.exit(0);
@@ -70,7 +81,7 @@ const projectRoot = process.cwd();
 configureWindowsShell();
 
 if (!process.stdin.isTTY) {
-  process.stderr.write("deepcode requires an interactive terminal (TTY). " + "Re-run from a real terminal session.\n");
+  process.stderr.write(t("cli.help.ttyRequired") + "\n");
   process.exit(1);
 }
 
@@ -85,12 +96,23 @@ async function main(): Promise<void> {
     let restarting = false;
     const appInitialPrompt = initialPrompt;
     initialPrompt = undefined;
+
+    // Initialize i18n before rendering
+    const settings = resolveCurrentSettings(projectRoot);
+    initI18n(settings.locale, {
+      thinkingLocale: settings.thinkingLocale,
+      replyLocale: settings.replyLocale,
+    });
+
     const inkInstance = render(
       <AppContainer
         projectRoot={projectRoot}
         version={packageInfo.version}
         initialPrompt={appInitialPrompt}
         onRestart={() => restartRef.current?.()}
+        initialLocale={settings.locale}
+        initialThinkingLocale={settings.thinkingLocale}
+        initialReplyLocale={settings.replyLocale}
       />,
       { exitOnCtrlC: false }
     );

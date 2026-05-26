@@ -53,9 +53,11 @@ import {
 } from "../hooks";
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "../../settings";
-import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
+import { FileMentionMenu, ConfigDropdown, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
 import type { SessionEntry, SkillInfo } from "../../session";
 import type { UserToolPermission } from "../../common/permissions";
+import { t } from "../../common/i18n";
+import type { Locale } from "../../common/i18n";
 
 export type PromptSubmission = {
   text: string;
@@ -89,6 +91,12 @@ type Props = {
   onRawModeChange?: (mode: string) => void;
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
+  onLocaleChange?: (locale: Locale) => void;
+  onThinkingLocaleChange?: (locale: Locale) => void;
+  onReplyLocaleChange?: (locale: Locale) => void;
+  currentLocale?: Locale;
+  currentThinkingLocale?: Locale;
+  currentReplyLocale?: Locale;
 };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -128,6 +136,12 @@ export const PromptInput = React.memo(function PromptInput({
   onInterrupt,
   onToggleProcessStdout,
   onRawModeChange,
+  onLocaleChange,
+  onThinkingLocaleChange,
+  onReplyLocaleChange,
+  currentLocale,
+  currentThinkingLocale,
+  currentReplyLocale,
 }: Props): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -140,6 +154,7 @@ export const PromptInput = React.memo(function PromptInput({
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [openRawModelDropdown, setOpenRawModelDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [showConfigDropdown, setShowConfigDropdown] = useState(false);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
   const [hasTerminalFocus, setHasTerminalFocus] = useState(true);
@@ -174,30 +189,30 @@ export const PromptInput = React.memo(function PromptInput({
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      showSkillsDropdown || showModelDropdown || showFileMentionMenu
+      showSkillsDropdown || showModelDropdown || showConfigDropdown || showFileMentionMenu
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
           : [],
-    [showSkillsDropdown, showModelDropdown, showFileMentionMenu, slashToken, slashItems]
+    [showSkillsDropdown, showModelDropdown, showConfigDropdown, showFileMentionMenu, slashToken, slashItems]
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
   const hasRunningProcess = runningProcesses && runningProcesses.size > 0;
   const processOrPasteHint = hasRunningProcess
-    ? " · ctrl+o view output"
+    ? t("ui.promptInput.ctrlOViewOutput")
     : hasCollapsedMarkers
-      ? " · ctrl+o expand"
+      ? t("ui.promptInput.ctrlOExpand")
       : hasExpandedRegions
-        ? " · ctrl+o collapse"
+        ? t("ui.promptInput.ctrlOCollapse")
         : "";
   const footerText = statusMessage
     ? statusMessage
     : busy
       ? loadingText && loadingText.trim()
         ? `${loadingText}${processOrPasteHint}`
-        : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`
-      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
+        : `${t("ui.promptInput.footerBusy")}${processOrPasteHint}`
+      : t("ui.promptInput.footer") + processOrPasteHint;
   useTerminalFocusReporting(stdout, !disabled);
   useTerminalExtendedKeys(stdout, !disabled);
   useBracketedPaste(stdout, !disabled);
@@ -289,7 +304,7 @@ export const PromptInput = React.memo(function PromptInput({
         }
         if (busy) {
           onInterrupt();
-          setStatusMessage("Interrupting…");
+          setStatusMessage(t("ui.promptInput.interrupting"));
         }
         return;
       }
@@ -315,20 +330,20 @@ export const PromptInput = React.memo(function PromptInput({
         }
         lastCtrlDAt.current = now;
         setPendingExit(true);
-        setStatusMessage("press ctrl+d again to exit");
+        setStatusMessage(t("ui.promptInput.pressCtrlDAgain"));
         return;
       }
 
       if (key.ctrl && (input === "c" || input === "C")) {
         if (busy) {
           onInterrupt();
-          setStatusMessage("Interrupting…");
+          setStatusMessage(t("ui.promptInput.interrupting"));
         } else if (!isEmpty(buffer)) {
           setBuffer(EMPTY_BUFFER);
           clearUndoRedoStacks();
           resetPastes();
         } else {
-          setStatusMessage("press ctrl+d to exit");
+          setStatusMessage(t("ui.promptInput.pressCtrlDExit"));
         }
         return;
       }
@@ -337,7 +352,7 @@ export const PromptInput = React.memo(function PromptInput({
         setPendingExit(false);
       }
 
-      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
+      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown || showConfigDropdown) {
         return;
       }
 
@@ -351,18 +366,18 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.ctrl && (input === "v" || input === "V")) {
-        setStatusMessage("Reading clipboard...");
+        setStatusMessage(t("ui.promptInput.readingClipboard"));
         readClipboardImageAsync()
           .then((image) => {
             if (image) {
               setImageUrls((prev) => [...prev, image.dataUrl]);
-              setStatusMessage("Attached image from clipboard");
+              setStatusMessage(t("ui.promptInput.imageAttached"));
             } else {
-              setStatusMessage("No image found in clipboard");
+              setStatusMessage(t("ui.promptInput.noImageFound"));
             }
           })
           .catch(() => {
-            setStatusMessage("Failed to read clipboard");
+            setStatusMessage(t("ui.promptInput.failedClipboard"));
           });
         return;
       }
@@ -370,9 +385,9 @@ export const PromptInput = React.memo(function PromptInput({
       if (isClearImageAttachmentsShortcut(input, key)) {
         if (imageUrls.length > 0) {
           setImageUrls([]);
-          setStatusMessage("Cleared attached images");
+          setStatusMessage(t("ui.promptInput.clearedImages"));
         } else {
-          setStatusMessage("No attached images to clear");
+          setStatusMessage(t("ui.promptInput.noImagesToClear"));
         }
         return;
       }
@@ -406,7 +421,7 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (busy && isPlainReturn) {
-        setStatusMessage("wait for the current response or press esc to interrupt");
+        setStatusMessage(t("ui.promptInput.waitForResponse"));
         return;
       }
 
@@ -609,7 +624,7 @@ export const PromptInput = React.memo(function PromptInput({
 
   function handleSlashSelection(item: SlashCommandItem): void {
     if (busy && item.kind !== "exit") {
-      setStatusMessage("wait for the current response or press esc to interrupt");
+      setStatusMessage(t("ui.promptInput.waitForResponse"));
       return;
     }
 
@@ -633,6 +648,11 @@ export const PromptInput = React.memo(function PromptInput({
     if (item.kind === "raw") {
       clearSlashToken();
       setOpenRawModelDropdown(true);
+      return;
+    }
+    if (item.kind === "config") {
+      clearSlashToken();
+      setShowConfigDropdown(true);
       return;
     }
     if (item.kind === "new") {
@@ -675,7 +695,7 @@ export const PromptInput = React.memo(function PromptInput({
 
   function submitCurrentBuffer(): void {
     if (busy) {
-      setStatusMessage("wait for the current response or press esc to interrupt");
+      setStatusMessage(t("ui.promptInput.waitForResponse"));
       return;
     }
 
@@ -715,8 +735,14 @@ export const PromptInput = React.memo(function PromptInput({
   }
 
   const showFooterText = useMemo(
-    () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
-    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
+    () =>
+      showMenu ||
+      showSkillsDropdown ||
+      openRawModelDropdown ||
+      showModelDropdown ||
+      showConfigDropdown ||
+      showFileMentionMenu,
+    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showConfigDropdown, showFileMentionMenu]
   );
 
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
@@ -785,6 +811,18 @@ export const PromptInput = React.memo(function PromptInput({
         }}
         onSelect={insertFileMentionSelection}
       />
+      <ConfigDropdown
+        open={showConfigDropdown}
+        currentLocale={currentLocale ?? "en"}
+        currentThinkingLocale={currentThinkingLocale ?? "en"}
+        currentReplyLocale={currentReplyLocale ?? "en"}
+        width={screenWidth}
+        onClose={() => setShowConfigDropdown(false)}
+        onLocaleChange={(locale) => onLocaleChange?.(locale)}
+        onThinkingLocaleChange={(locale) => onThinkingLocaleChange?.(locale)}
+        onReplyLocaleChange={(locale) => onReplyLocaleChange?.(locale)}
+        onStatusMessage={setStatusMessage}
+      />
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showFooterText && (
         <Box>
@@ -801,7 +839,7 @@ export function formatImageAttachmentStatus(count: number): string {
   if (count <= 0) {
     return "";
   }
-  return `📎 ${count} image${count === 1 ? "" : "s"} attached`;
+  return t("ui.promptInput.imageCount", { count });
 }
 
 export function formatSelectedSkillsStatus(skills: SkillInfo[]): string {

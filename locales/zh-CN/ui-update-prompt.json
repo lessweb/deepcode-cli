@@ -1,0 +1,11 @@
+{
+  "ui": {
+    "updatePrompt": {
+      "title": "Deep Code 新版本已发布：{currentVersion} -> {latestVersion}",
+      "installLabel": "使用 `{installCommand}` 安装最新版本",
+      "ignoreOnce": "忽略一次",
+      "ignoreVersion": "忽略此版本（{latestVersion}）",
+      "footerHelp": "↑/↓ 选择 · 回车确认 · Esc 忽略一次"
+    }
+  }
+}

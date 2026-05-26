@@ -1,4 +1,5 @@
 import type { LlmStreamProgress, SessionEntry } from "../../session";
+import { t } from "../../common/i18n";
 
 type RunningProcesses = SessionEntry["processes"];
 
@@ -18,22 +19,22 @@ export function buildLoadingText(input: LoadingTextInput): string {
   }
 
   if (!progress) {
-    return "Thinking...";
+    return t("ui.loading.thinking");
   }
 
   const startedAt = parseTimestamp(progress.startedAt);
   if (startedAt === null) {
-    return "Thinking...";
+    return t("ui.loading.thinking");
   }
 
   const elapsedMs = Math.max(0, now - startedAt);
   if (elapsedMs < STALL_THRESHOLD_MS) {
-    return "Thinking...";
+    return t("ui.loading.thinking");
   }
 
   const elapsedSeconds = Math.floor(elapsedMs / 1000);
   const tokens = progress.formattedTokens || "0";
-  return `Thinking... (${elapsedSeconds}s) · ↓ ${tokens} tokens`;
+  return t("ui.loading.thinkingElapsed", { elapsed: String(elapsedSeconds), tokens });
 }
 
 function buildProcessLoadingText(processes: RunningProcesses | undefined, now: number): string | null {

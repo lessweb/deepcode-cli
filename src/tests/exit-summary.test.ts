@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildExitSummaryText } from "../ui";
 import type { ModelUsage, SessionEntry } from "../session";
+import { initI18n } from "../common/i18n";
+
+initI18n("en");
 
 const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
 

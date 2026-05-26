@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { initI18n } from "../common/i18n";
 import {
   buildSlashCommands,
   filterSlashCommands,
@@ -8,6 +9,8 @@ import {
   formatSlashCommandLabel,
 } from "../ui";
 import type { SkillInfo } from "../session";
+
+initI18n("en");
 
 const skills: SkillInfo[] = [
   { name: "skill-writer", path: "~/.agents/skills/skill-writer/SKILL.md", description: "Write a SKILL.md" },
@@ -30,6 +33,7 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
     "mcp",
     "raw",
     "exit",
+    "config",
   ]);
 });
 
@@ -67,7 +71,7 @@ test("findExactSlashCommand returns built-in /init", () => {
   const item = findExactSlashCommand(items, "/init");
   assert.ok(item);
   assert.equal(item?.kind, "init");
-  assert.equal(item?.description, "Initialize an AGENTS.md file with instructions for LLM");
+  assert.equal(item?.name, "init");
 });
 
 test("findExactSlashCommand returns built-in /continue", () => {

@@ -1,0 +1,8 @@
+{
+  "prompt": {
+    "skillDocumentsHeader": "使用以下技能文档来协助用户：\n",
+    "dateAndModel": "今天是{date}。随着对话的进行，时间在流逝。\n当前 LLM 模型为{model}，可通过 /model 命令切换模型。",
+    "thinkingLanguageInstruction": "重要：你的推理和思考过程请使用中文。",
+    "replyLanguageInstruction": "重要：请始终使用中文回复用户。"
+  }
+}

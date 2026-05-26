@@ -2,6 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { formatSessionTitle, filterSessions, formatSessionStatus } from "../ui";
 import type { SessionEntry } from "../session";
+import { initI18n } from "../common/i18n";
+
+initI18n("en");
 
 test("formatSessionTitle replaces newlines with spaces", () => {
   assert.equal(formatSessionTitle("first line\nsecond line\r\nthird"), "first line second line third");

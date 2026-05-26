@@ -11,15 +11,17 @@ import {
 } from "./utils";
 import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
+import { useI18n } from "../../contexts/i18n";
 
 export function MessageView({ message, collapsed, width = 80 }: MessageViewProps): React.ReactElement | null {
   const { mode } = useRawModeContext();
+  const { t } = useI18n();
   if (!message.visible) {
     return null;
   }
 
   if (message.role === "user") {
-    const text = message.content || "(no content)";
+    const text = message.content || t("ui.messageView.noContent");
     return (
       <Box marginLeft={1} marginBottom={1} flexDirection="row" marginY={0} flexGrow={1} gap={1}>
         <Box>
@@ -28,7 +30,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
         <Box flexGrow={1}>
           <Text color="#229ac3">{text}</Text>
           {Array.isArray(message.contentParams) && message.contentParams.length > 0 ? (
-            <Text color="#229ac3">{`  📎 ${message.contentParams.length} image attachment(s)`}</Text>
+            <Text color="#229ac3">{`  📎 ${message.contentParams.length} ${t("ui.messageView.imageAttachment")}`}</Text>
           ) : null}
         </Box>
       </Box>
@@ -38,19 +40,20 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
   if (message.role === "assistant") {
     const isThinking = Boolean(message.meta?.asThinking);
     const content = (message.content || "").trim();
+    const thinkingLabel = t("ui.messageView.thinking");
 
     if (isThinking) {
       const summary = buildThinkingSummary(content, message.messageParams, mode);
       if (collapsed !== false) {
         return (
           <Box marginLeft={1} marginBottom={1} marginY={0}>
-            <StatusLine width={width} bulletColor="gray" name="Thinking" params={summary} />
+            <StatusLine width={width} bulletColor="gray" name={thinkingLabel} params={summary} />
           </Box>
         );
       }
       return (
         <Box marginLeft={1} flexDirection="column" marginBottom={1} marginY={0}>
-          <StatusLine width={width} bulletColor="gray" name="Thinking" params={content ? "" : summary} />
+          <StatusLine width={width} bulletColor="gray" name={thinkingLabel} params={content ? "" : summary} />
           <Box flexDirection="column" marginLeft={2}>
             {content ? <Text dimColor>{renderMarkdown(content)}</Text> : null}
           </Box>
@@ -124,7 +127,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     if (message.meta?.skill) {
       return (
         <Box marginY={0} marginLeft={1} marginBottom={1}>
-          <Text color="magenta">⚡ Loaded skill: {message.meta.skill.name}</Text>
+          <Text color="magenta">{t("ui.messageView.loadedSkill", { name: message.meta.skill.name })}</Text>
         </Box>
       );
     }
@@ -132,7 +135,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
       return (
         <Box marginY={0} marginLeft={1} marginBottom={1}>
           <Text dimColor italic>
-            (conversation summary inserted)
+            {t("ui.messageView.conversationSummaryInserted")}
           </Text>
         </Box>
       );
@@ -181,9 +184,10 @@ function StatusLine({
 }
 
 function DiffPreview({ lines }: { lines: DiffPreviewLine[] }): React.ReactElement {
+  const { t } = useI18n();
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text dimColor>└ Changes</Text>
+      <Text dimColor>{t("ui.messageView.changes")}</Text>
       <Box flexDirection="column" marginLeft={2}>
         {lines.map((line, index) => (
           <Text key={`${index}-${line.marker}-${line.content}`} wrap="truncate-end">
@@ -201,9 +205,10 @@ function DiffPreview({ lines }: { lines: DiffPreviewLine[] }): React.ReactElemen
 }
 
 function PlanPreview({ lines }: { lines: string[] }): React.ReactElement {
+  const { t } = useI18n();
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text dimColor>└ Plan</Text>
+      <Text dimColor>{t("ui.messageView.plan")}</Text>
       <Box flexDirection="column" marginLeft={2}>
         {lines.map((line, index) => (
           <Text key={`${index}-${line}`} wrap="wrap">

@@ -1,0 +1,42 @@
+{
+  "cli": {
+    "help": {
+      "title": "deepcode - Deep Code CLI",
+      "usage": "用法：",
+      "launchTui": "  deepcode                              启动交互式 TUI",
+      "launchWithPrompt": "  deepcode -p <prompt>                  使用预设提示启动",
+      "launchWithPromptLong": "  deepcode --prompt <prompt>            同 -p",
+      "printVersion": "  deepcode --version                    打印版本号",
+      "printHelp": "  deepcode --help                       显示此帮助",
+      "configSection": "配置：",
+      "userSettings": "  ~/.deepcode/settings.json    用户级别 API key、模型、base URL",
+      "projectSettings": "  ./.deepcode/settings.json    项目级别设置",
+      "userSkills": "  ~/.agents/skills/*/SKILL.md  用户级别技能",
+      "projectSkills": "  ./.agents/skills/*/SKILL.md  项目级别技能",
+      "legacySkills": "  ./.deepcode/skills/*/SKILL.md 旧版项目级别技能",
+      "tuiSection": "TUI 内部操作：",
+      "enterSend": "  enter            发送提示",
+      "shiftEnterNewline": "  shift+enter      插入换行",
+      "homeEnd": "  home/end         在当前行内移动",
+      "altLeftRight": "  alt+left/right   按词移动",
+      "ctrlW": "  ctrl+w           删除前一个词",
+      "ctrlV": "  ctrl+v           从剪贴板粘贴图片",
+      "ctrlX": "  ctrl+x           清除已粘贴的图片",
+      "esc": "  esc              中断当前模型响应",
+      "slash": "  /                打开技能/命令菜单",
+      "slashSkills": "  /skills          列出可用技能",
+      "slashModel": "  /model           选择模型、思考模式",
+      "slashNew": "  /new             开始新对话",
+      "slashInit": "  /init            初始化 AGENTS.md 文件",
+      "slashResume": "  /resume          选择之前的对话继续",
+      "slashContinue": "  /continue        继续当前对话或恢复",
+      "slashUndo": "  /undo            恢复到之前的代码/对话",
+      "slashMcp": "  /mcp             显示 MCP 状态和工具",
+      "slashRaw": "  /raw             切换推理内容显示模式",
+      "slashExit": "  /exit            退出",
+      "slashConfig": "  /config          配置语言设置",
+      "ctrlD": "  ctrl+d 两次      退出",
+      "ttyRequired": "deepcode 需要一个交互式终端（TTY）。请从真实终端会话重新运行。"
+    }
+  }
+}

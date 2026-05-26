@@ -1,0 +1,42 @@
+{
+  "cli": {
+    "help": {
+      "title": "deepcode - Deep Code CLI",
+      "usage": "Usage:",
+      "launchTui": "  deepcode                              Launch the interactive TUI in the current directory",
+      "launchWithPrompt": "  deepcode -p <prompt>                  Launch with a pre-filled prompt",
+      "launchWithPromptLong": "  deepcode --prompt <prompt>            Same as -p",
+      "printVersion": "  deepcode --version                    Print the version",
+      "printHelp": "  deepcode --help                       Show this help",
+      "configSection": "Configuration:",
+      "userSettings": "  ~/.deepcode/settings.json    User-level API key, model, base URL",
+      "projectSettings": "  ./.deepcode/settings.json    Project-level settings",
+      "userSkills": "  ~/.agents/skills/*/SKILL.md  User-level skills",
+      "projectSkills": "  ./.agents/skills/*/SKILL.md  Project-level skills",
+      "legacySkills": "  ./.deepcode/skills/*/SKILL.md Legacy project-level skills",
+      "tuiSection": "Inside the TUI:",
+      "enterSend": "  enter            Send the prompt",
+      "shiftEnterNewline": "  shift+enter      Insert a newline",
+      "homeEnd": "  home/end         Move within the current line",
+      "altLeftRight": "  alt+left/right   Move by word",
+      "ctrlW": "  ctrl+w           Delete the previous word",
+      "ctrlV": "  ctrl+v           Paste an image from the clipboard",
+      "ctrlX": "  ctrl+x           Clear pasted images",
+      "esc": "  esc              Interrupt the current model turn",
+      "slash": "  /                Open the skills/commands menu",
+      "slashSkills": "  /skills          List available skills",
+      "slashModel": "  /model           Select model, thinking mode and effort control",
+      "slashNew": "  /new             Start a fresh conversation",
+      "slashInit": "  /init            Initialize an AGENTS.md file with instructions for LLM",
+      "slashResume": "  /resume          Pick a previous conversation to continue",
+      "slashContinue": "  /continue        Continue the active conversation, or resume one if empty",
+      "slashUndo": "  /undo            Restore code and/or conversation to a previous point",
+      "slashMcp": "  /mcp             Show MCP server status and available tools",
+      "slashRaw": "  /raw             Toggle display mode for viewing or collapsing reasoning content",
+      "slashExit": "  /exit            Quit",
+      "slashConfig": "  /config          Configure language settings",
+      "ctrlD": "  ctrl+d twice     Quit",
+      "ttyRequired": "deepcode requires an interactive terminal (TTY). Re-run from a real terminal session."
+    }
+  }
+}

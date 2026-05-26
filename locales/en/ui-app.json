@@ -1,0 +1,24 @@
+{
+  "ui": {
+    "app": {
+      "error": "Error: {message}",
+      "statusStatus": "status: {status}",
+      "statusTokens": "tokens: {tokens}",
+      "statusFail": "fail: {reason}",
+      "interrupted": "Interrupted.",
+      "killedProcesses": "Killed processes: {pids}",
+      "failedKillProcesses": "Failed to kill processes: {pids}",
+      "modelUnchanged": "Model settings unchanged",
+      "modelUpdated": "Model settings updated: {before} → {after}",
+      "noActiveSession": "No active session to undo.",
+      "codeRestoreFailed": "Code restore failed: {error}",
+      "conversationRestoreFailed": "Conversation restore failed: {error}",
+      "sessionAgentSteps": "The AI agent has taken several steps but hasn't reached a conclusion yet. Do you want to continue?",
+      "apiKeyNotFound": "OpenAI API key not found. Please configure ~/.deepcode/settings.json or ./.deepcode/settings.json.",
+      "requestFailed": "Request failed: {error}",
+      "pressEscExitRaw": "Press ESC to exit raw mode",
+      "noMessagesInSession": "(No messages in this session yet. Start chatting to see them here.)",
+      "permissionDenied": "Permission denied. Add a reply, then press Enter to continue."
+    }
+  }
+}

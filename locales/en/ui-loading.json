@@ -1,0 +1,8 @@
+{
+  "ui": {
+    "loading": {
+      "thinking": "Thinking...",
+      "thinkingElapsed": "Thinking... ({elapsed}s) · ↓ {tokens} tokens"
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "ui": {
+    "slashCommands": {
+      "skillsDesc": "List available skills",
+      "modelDesc": "Select model, thinking mode and effort control",
+      "newDesc": "Start a fresh conversation",
+      "initDesc": "Initialize an AGENTS.md file with instructions for LLM",
+      "resumeDesc": "Pick a previous conversation to continue",
+      "continueDesc": "Continue the active conversation or pick one to resume",
+      "undoDesc": "Restore code and/or conversation to a previous point",
+      "mcpDesc": "Show MCP server status and available tools",
+      "rawDesc": "Toggle display mode for viewing or collapsing reasoning content",
+      "exitDesc": "Quit Deep Code CLI",
+      "configDesc": "Configure settings: language, model, etc.",
+      "noDescription": "(no description)"
+    }
+  }
+}

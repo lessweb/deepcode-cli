@@ -1,0 +1,22 @@
+{
+  "ui": {
+    "permissionPrompt": {
+      "title": "Permission required",
+      "proceedQuestion": "Do you want to proceed?",
+      "footerHelp": "\u2191/\u2193 move \u00b7 Enter select \u00b7 Esc interrupt",
+      "allowLabel": "Yes",
+      "alwaysAllowLabel": "Yes, and always allow ",
+      "denyLabel": "No",
+      "scopeReadInCwd": "reads inside this workspace",
+      "scopeReadOutCwd": "reads outside this workspace",
+      "scopeWriteInCwd": "writes inside this workspace",
+      "scopeWriteOutCwd": "writes outside this workspace",
+      "scopeDeleteInCwd": "deletes inside this workspace",
+      "scopeDeleteOutCwd": "deletes outside this workspace",
+      "scopeQueryGitLog": "Git history queries",
+      "scopeMutateGitLog": "Git history changes",
+      "scopeNetwork": "network access",
+      "scopeMcp": "MCP tool access"
+    }
+  }
+}

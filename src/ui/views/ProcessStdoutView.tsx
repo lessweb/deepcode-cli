@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { BASH_TIMEOUT_DECREMENT_MS, BASH_TIMEOUT_INCREMENT_MS } from "../../common/bash-timeout";
 import type { BashTimeoutAdjustment, SessionEntry, SessionProcessEntry } from "../../session";
 import { useTerminalInput } from "../hooks";
+import { t } from "../../common/i18n";
 
 type RunningProcesses = SessionEntry["processes"];
 
@@ -47,12 +48,12 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
             text += "\n";
           }
           if (runningProcesses.size > 1) {
-            text += `── Process ${pid} [${proc.command}] ──\n`;
+            text += `${t("ui.processStdout.processLabel", { pid, command: proc.command })}\n`;
           }
-          text += stdout || "(no output yet)";
+          text += stdout || t("ui.processStdout.noOutputYet");
         }
       } else {
-        text = "(no running processes)";
+        text = t("ui.processStdout.noRunning");
       }
       setStdoutText(text);
     };
@@ -81,7 +82,7 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
     const start = Math.max(0, lines.length - outputLineLimit - scrollOffset);
     const slice = lines.slice(start, start + outputLineLimit);
     if (lines.length > visibleLineLimit) {
-      slice.unshift(`... (${start} lines above · ↑/↓ to scroll · ${lines.length} total lines) ...`);
+      slice.unshift(t("ui.processStdout.scrollHint", { start, total: lines.length }));
     }
     return slice;
   }, [lines, scrollOffset, visibleLineLimit]);
@@ -133,10 +134,10 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   return (
     <Box flexDirection="column" width={screenWidth} minWidth={80} height={panelHeight} overflow="hidden">
       <Box borderStyle="single" borderBottom={true} borderLeft={false} borderRight={false} borderTop={false}>
-        <Text bold>📟 Process Output</Text>
-        <Text dimColor>{` (${formatTimeoutHint(
-          timeoutProcess?.entry
-        )} · +/- adjust · Ctrl+O or Esc to close · ↑↓ PageUp/PageDown to scroll)`}</Text>
+        <Text bold>{t("ui.processStdout.title")}</Text>
+        <Text dimColor>
+          {t("ui.processStdout.footerHelp", { timeoutHint: formatTimeoutHint(timeoutProcess?.entry) })}
+        </Text>
       </Box>
       <Box flexDirection="column" paddingX={1} overflow="hidden">
         {visibleLines.map((line, index) => (
@@ -170,16 +171,16 @@ function getLatestTimeoutProcess(
 
 function formatTimeoutHint(entry?: SessionProcessEntry): string {
   if (!entry || typeof entry.timeoutMs !== "number") {
-    return "timeout unavailable";
+    return t("ui.processStdout.timeoutUnavailable");
   }
-  return `timeout ${formatDuration(entry.timeoutMs)}`;
+  return t("ui.processStdout.timeoutHint", { duration: formatDuration(entry.timeoutMs) });
 }
 
 function formatAdjustmentStatus(adjustment: BashTimeoutAdjustment | null): string {
   if (!adjustment) {
-    return "No adjustable Bash timeout";
+    return t("ui.processStdout.noAdjustableTimeout");
   }
-  return `Timeout set to ${formatDuration(adjustment.timeoutMs)}`;
+  return t("ui.processStdout.timeoutSet", { duration: formatDuration(adjustment.timeoutMs) });
 }
 
 function formatDuration(ms: number): string {
