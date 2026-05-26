@@ -29,6 +29,17 @@ const snippetsBySession = new Map<string, Map<string, FileSnippet>>();
 const snippetCountersBySession = new Map<string, number>();
 const fileVersionsBySession = new Map<string, Map<string, number>>();
 
+export function clearSessionState(sessionId: string): void {
+  if (!sessionId) {
+    return;
+  }
+
+  fileStatesBySession.delete(sessionId);
+  snippetsBySession.delete(sessionId);
+  snippetCountersBySession.delete(sessionId);
+  fileVersionsBySession.delete(sessionId);
+}
+
 export function normalizeFilePath(filePath: string, platform: NodeJS.Platform = process.platform): string {
   const nativePath = normalizeNativeFilePath(filePath, platform);
   return platform === "win32" ? path.win32.normalize(nativePath) : path.normalize(nativePath);

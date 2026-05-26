@@ -15,6 +15,13 @@ const MAX_OUTPUT_CHARS = 30000;
 const MAX_CAPTURE_CHARS = 10 * 1024 * 1024;
 const sessionWorkingDirs = new Map<string, string>();
 
+export function clearSessionWorkingDir(sessionId: string): void {
+  if (!sessionId) {
+    return;
+  }
+  sessionWorkingDirs.delete(sessionId);
+}
+
 type ToolCommandResult = {
   ok: boolean;
   output: string;
