@@ -38,13 +38,15 @@ export function useHistoryNavigation(
 
     const previousCursor = historyCursor === -1 ? promptHistory.length : historyCursor;
     const nextCursor = Math.max(0, Math.min(promptHistory.length, previousCursor + direction));
+    // Capture the current draft synchronously before `setDraftBeforeHistory`.
+    const draft = historyCursor === -1 ? buffer.text : draftBeforeHistory;
 
     if (historyCursor === -1) {
       setDraftBeforeHistory(buffer.text);
     }
 
     if (nextCursor === promptHistory.length) {
-      const text = draftBeforeHistory ?? "";
+      const text = draft ?? "";
       setBuffer({ text, cursor: text.length });
       setHistoryCursor(-1);
       setDraftBeforeHistory(null);

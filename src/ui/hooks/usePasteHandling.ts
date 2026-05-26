@@ -1,5 +1,5 @@
 import type React from "react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { PromptBufferState } from "../core/prompt-buffer";
 import { cleanPasteContent, findPasteMarkerContaining, hasActivePasteMarkers, insertText } from "../core/prompt-buffer";
 
@@ -50,6 +50,13 @@ export function usePasteHandling(
     setHasCollapsedMarkers(hasActivePasteMarkers(buffer.text, pastesRef.current));
     setHasExpandedRegions(expandedRegionsRef.current.size > 0);
   }
+
+  // Recompute derived flags whenever the buffer text changes, so they stay
+  // in sync after any state update (e.g. large paste, expand/collapse, undo).
+  useEffect(() => {
+    refreshDerivedFlags();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buffer.text]);
 
   function handlePaste(pastedText: string): void {
     const totalChars = pastedText.length;
