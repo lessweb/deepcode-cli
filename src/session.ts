@@ -1065,7 +1065,7 @@ The candidate skills are as follows:\n\n`;
     const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
     index.entries = keptEntries;
     this.saveSessionsIndex(index);
-	    for (const dropped of droppedEntries) {
+    for (const dropped of droppedEntries) {
       this.cleanupSessionResources(dropped.id, {
         removeMessages: true,
         processIds: this.getProcessIds(dropped.processes ?? null),

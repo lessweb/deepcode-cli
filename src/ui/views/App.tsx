@@ -1,9 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
-import * as fs from "fs";
-import * as os from "os";
-import * as path from "path";
 import { createOpenAIClient } from "../../common/openai-client";
 import {
   type LlmStreamProgress,
@@ -18,13 +15,7 @@ import {
   type UndoTarget,
   type UserPromptContent,
 } from "../../session";
-import {
-  applyModelConfigSelection,
-  type DeepcodingSettings,
-  type ModelConfigSelection,
-  type ResolvedDeepcodingSettings,
-  resolveSettingsSources,
-} from "../../settings";
+import { type ModelConfigSelection } from "../../settings";
 import { PromptInput, type PromptDraft, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
