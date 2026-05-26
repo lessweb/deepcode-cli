@@ -11,9 +11,9 @@ export {
   writeProjectSettings,
   writeModelConfigSelection,
   resolveCurrentSettings,
-  createOpenAIClient,
   buildPromptDraftFromSessionMessage,
 } from "./App";
+export { createOpenAIClient } from "../common/openai-client";
 export { default as AppContainer } from "./AppContainer";
 export { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 export { MessageView } from "./components";
@@ -54,7 +54,7 @@ export {
 } from "./askUserQuestion";
 export { readClipboardImage, type ClipboardImage } from "./clipboard";
 export { buildLoadingText, type LoadingTextInput } from "./loadingText";
-export { renderMarkdown } from "./components/MessageView/markdown";
+export { renderMarkdown, renderMarkdownSegments, type MarkdownSegment } from "./components/MessageView/markdown";
 export {
   EMPTY_BUFFER,
   insertText,

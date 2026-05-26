@@ -4,6 +4,7 @@ export type { InputKey } from "./useTerminalInput";
 export {
   useHiddenTerminalCursor,
   useTerminalExtendedKeys,
+  useBracketedPaste,
   usePromptTerminalCursor,
   useTerminalFocusReporting,
   getPromptCursorPlacement,

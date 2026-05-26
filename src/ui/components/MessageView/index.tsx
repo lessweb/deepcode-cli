@@ -1,6 +1,6 @@
 import React from "react";
 import { Box, Text } from "ink";
-import { renderMarkdown } from "./markdown";
+import { renderMarkdown, renderMarkdownSegments } from "./markdown";
 import {
   buildThinkingSummary,
   buildToolSummary,
@@ -66,8 +66,23 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
         <Box alignSelf="stretch">
           <Text color="#229ac3">✦</Text>
         </Box>
-        <Box flexGrow={1} width={contentWidth}>
-          {content ? <Text wrap="wrap">{renderMarkdown(content)}</Text> : null}
+        <Box flexGrow={1} width={contentWidth} flexDirection="column">
+          {content
+            ? renderMarkdownSegments(content, Math.max(20, contentWidth - 4)).map((seg, i) => {
+                if (seg.kind === "table") {
+                  return (
+                    <Box key={i} flexDirection="column">
+                      {seg.body.split("\n").map((line, lineIndex) => (
+                        <Text key={lineIndex} wrap="truncate-end">
+                          {line}
+                        </Text>
+                      ))}
+                    </Box>
+                  );
+                }
+                return <Text key={i}>{seg.body}</Text>;
+              })
+            : null}
         </Box>
       </Box>
     );

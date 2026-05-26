@@ -18,6 +18,8 @@ test("formatSessionStatus maps status values to display labels", () => {
   assert.equal(formatSessionStatus("waiting_for_user"), "waiting");
   assert.equal(formatSessionStatus("failed"), "failed");
   assert.equal(formatSessionStatus("interrupted"), "stopped");
+  assert.equal(formatSessionStatus("ask_permission"), "waiting");
+  assert.equal(formatSessionStatus("permission_denied"), "denied");
   assert.equal(formatSessionStatus("unknown_status" as any), "unknown_status");
 });
 

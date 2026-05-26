@@ -1,11 +1,13 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { SessionEntry, SessionStatus } from "../session";
+import { truncate } from "./components/MessageView/utils";
 
 type Props = {
   sessions: SessionEntry[];
   onSelect: (sessionId: string) => void;
   onCancel: () => void;
+  onDelete?: (sessionId: string) => void;
 };
 
 /**
@@ -36,9 +38,10 @@ export function filterSessions(sessions: SessionEntry[], query: string): Session
   });
 }
 
-export function SessionList({ sessions, onSelect, onCancel }: Props): React.ReactElement {
+export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): React.ReactElement {
   const [index, setIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
   const { columns, rows } = useWindowSize();
 
   // Filter sessions by search query
@@ -77,7 +80,23 @@ export function SessionList({ sessions, onSelect, onCancel }: Props): React.Reac
     setIndex(0);
   }, []);
 
+  const selectedSession = filteredSessions[safeIndex];
+
   useInput((input, key) => {
+    // If in delete confirmation mode, handle confirm/cancel
+    if (confirmDeleteSessionId) {
+      if (key.return) {
+        onDelete?.(confirmDeleteSessionId);
+        setConfirmDeleteSessionId(null);
+        return;
+      }
+      if (key.escape) {
+        setConfirmDeleteSessionId(null);
+        return;
+      }
+      return;
+    }
+
     // ESC: clear search first, then cancel
     if (key.escape) {
       if (searchQuery) {
@@ -95,13 +114,18 @@ export function SessionList({ sessions, onSelect, onCancel }: Props): React.Reac
       return;
     }
 
-    // Backspace / Delete: remove last search character
-    if (key.backspace || key.delete) {
+    // Delete key: remove search character, or start delete confirmation
+    if (key.delete || key.backspace) {
       if (searchQuery) {
+        // remove last search character
         handleBackspace();
         return;
       }
-      // If no search query, navigation keys below handle the rest
+      // No search query: start delete confirmation if session is selected
+      if (selectedSession && onDelete) {
+        setConfirmDeleteSessionId(selectedSession.id);
+        return;
+      }
     }
 
     // Printable character: append to search query
@@ -211,20 +235,23 @@ export function SessionList({ sessions, onSelect, onCancel }: Props): React.Reac
           ) : (
             visibleSessions.map((session, i) => {
               const actualIndex = scrollOffset + i;
+              const isSelected = actualIndex === safeIndex;
+              const isConfirming = confirmDeleteSessionId === session.id;
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
                   <Box>
-                    <Text color="#229ac3">{actualIndex === safeIndex ? "> " : "  "}</Text>
+                    <Text color="#229ac3">{isSelected ? "> " : "  "}</Text>
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
                     <Box width={"100%"}>
-                      <Text
-                        {...(actualIndex === safeIndex ? { bold: true } : {})}
-                        color={actualIndex === safeIndex ? "#229ac3" : undefined}
-                      >
+                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? "#229ac3" : undefined}>
                         {formatSessionTitle(session.summary || "Untitled")}
                       </Text>
-                      <Text dimColor> ({formatSessionStatus(session.status)})</Text>
+                      {isConfirming ? (
+                        <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
+                      ) : (
+                        <Text dimColor> ({formatSessionStatus(session.status)})</Text>
+                      )}
                     </Box>
                     <Box width="100%">
                       <Text dimColor>{formatTimestamp(session.updateTime)} </Text>
@@ -245,14 +272,28 @@ export function SessionList({ sessions, onSelect, onCancel }: Props): React.Reac
         </Box>
         {/* Footer */}
         <Box flexDirection="column">
-          {hasActiveSearch ? (
+          {confirmDeleteSessionId ? (
+            <Box>
+              <Text color="yellow">Delete this session? </Text>
+              <Text bold color="green">
+                Enter
+              </Text>
+              <Text dimColor> to confirm · </Text>
+              <Text bold color="red">
+                Esc
+              </Text>
+              <Text dimColor> to cancel</Text>
+            </Box>
+          ) : hasActiveSearch ? (
             <Box>
               <Text dimColor>Esc clear search · </Text>
               <Text dimColor>↑/↓ navigate · Enter select · Esc again to cancel</Text>
             </Box>
           ) : (
             <Box>
-              <Text dimColor>Type to search · ↑/↓ navigate · PgUp/PgDn page · Enter select · Esc cancel</Text>
+              <Text dimColor>
+                Type to search · ↑/↓ navigate · PgUp/PgDn page · Enter select · Esc cancel · Del delete
+              </Text>
             </Box>
           )}
         </Box>
@@ -291,14 +332,11 @@ export function formatSessionStatus(status: SessionStatus): string {
       return "failed";
     case "interrupted":
       return "stopped";
+    case "ask_permission":
+      return "waiting";
+    case "permission_denied":
+      return "denied";
     default:
       return status;
   }
-}
-
-function truncate(value: string, max: number): string {
-  if (value.length <= max) {
-    return value;
-  }
-  return `${value.slice(0, max)}…`;
 }

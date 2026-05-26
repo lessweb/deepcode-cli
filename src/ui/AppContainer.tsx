@@ -1,6 +1,6 @@
 import React from "react";
 import { AppContext } from "./contexts";
-import { App } from "./App";
+import App from "./App";
 import { RawModeProvider } from "./contexts/RawModeContext";
 
 const AppContainer: React.FC<{

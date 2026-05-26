@@ -17,6 +17,27 @@ export type McpServerConfig = {
   env?: Record<string, string>;
 };
 
+export type PermissionScope =
+  | "read-in-cwd"
+  | "read-out-cwd"
+  | "write-in-cwd"
+  | "write-out-cwd"
+  | "delete-in-cwd"
+  | "delete-out-cwd"
+  | "query-git-log"
+  | "mutate-git-log"
+  | "network"
+  | "mcp";
+
+export type PermissionDefaultMode = "allowAll" | "askAll";
+
+export type PermissionSettings = {
+  allow?: PermissionScope[];
+  deny?: PermissionScope[];
+  ask?: PermissionScope[];
+  defaultMode?: PermissionDefaultMode;
+};
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   model?: string;
@@ -26,6 +47,7 @@ export type DeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  permissions?: PermissionSettings;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -39,6 +61,7 @@ export type ResolvedDeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  permissions: Required<PermissionSettings>;
 };
 
 export type ModelConfigSelection = {
@@ -73,6 +96,79 @@ function parseBoolean(value: unknown): boolean | undefined {
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
+  "read-in-cwd",
+  "read-out-cwd",
+  "write-in-cwd",
+  "write-out-cwd",
+  "delete-in-cwd",
+  "delete-out-cwd",
+  "query-git-log",
+  "mutate-git-log",
+  "network",
+  "mcp",
+]);
+
+function normalizePermissionList(value: unknown): PermissionScope[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: PermissionScope[] = [];
+  for (const item of value) {
+    if (typeof item !== "string" || !VALID_PERMISSION_SCOPES.has(item as PermissionScope)) {
+      continue;
+    }
+    const scope = item as PermissionScope;
+    if (!result.includes(scope)) {
+      result.push(scope);
+    }
+  }
+  return result;
+}
+
+function mergePermissionLists(...lists: Array<PermissionScope[] | undefined>): PermissionScope[] {
+  const result: PermissionScope[] = [];
+  for (const list of lists) {
+    for (const scope of list ?? []) {
+      if (!result.includes(scope)) {
+        result.push(scope);
+      }
+    }
+  }
+  return result;
+}
+
+function normalizePermissionDefaultMode(value: unknown): PermissionDefaultMode | undefined {
+  return value === "allowAll" || value === "askAll" ? value : undefined;
+}
+
+function normalizePermissions(settings: PermissionSettings | null | undefined): Required<PermissionSettings> {
+  return {
+    allow: normalizePermissionList(settings?.allow),
+    deny: normalizePermissionList(settings?.deny),
+    ask: normalizePermissionList(settings?.ask),
+    defaultMode: normalizePermissionDefaultMode(settings?.defaultMode) ?? "allowAll",
+  };
+}
+
+function mergePermissions(
+  userSettings: DeepcodingSettings | null | undefined,
+  projectSettings: DeepcodingSettings | null | undefined
+): Required<PermissionSettings> {
+  const userPermissions = normalizePermissions(userSettings?.permissions);
+  const projectPermissions = normalizePermissions(projectSettings?.permissions);
+  return {
+    allow: mergePermissionLists(userPermissions.allow, projectPermissions.allow),
+    deny: mergePermissionLists(userPermissions.deny, projectPermissions.deny),
+    ask: mergePermissionLists(userPermissions.ask, projectPermissions.ask),
+    defaultMode: projectSettings?.permissions
+      ? projectPermissions.defaultMode
+      : userSettings?.permissions
+        ? userPermissions.defaultMode
+        : "allowAll",
+  };
 }
 
 function normalizeEnv(env: DeepcodingSettings["env"]): Record<string, string> {
@@ -233,6 +329,7 @@ export function resolveSettingsSources(
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
+    permissions: mergePermissions(userSettings, projectSettings),
   };
 }
 

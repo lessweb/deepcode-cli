@@ -40,6 +40,14 @@ function disableTerminalFocusReporting(): string {
   return "\u001B[?1004l";
 }
 
+function enableBracketedPaste(): string {
+  return "\u001B[?2004h";
+}
+
+function disableBracketedPaste(): string {
+  return "\u001B[?2004l";
+}
+
 export function enableTerminalExtendedKeys(): string {
   return "\u001B[>4;1m";
 }
@@ -257,6 +265,19 @@ export function useTerminalExtendedKeys(stdout: NodeJS.WriteStream | undefined, 
     stdout.write(enableTerminalExtendedKeys());
     return () => {
       stdout.write(disableTerminalExtendedKeys());
+    };
+  }, [isActive, stdout]);
+}
+
+export function useBracketedPaste(stdout: NodeJS.WriteStream | undefined, isActive: boolean): void {
+  useLayoutEffect(() => {
+    if (!isActive || !stdout?.isTTY) {
+      return;
+    }
+
+    stdout.write(enableBracketedPaste());
+    return () => {
+      stdout.write(disableBracketedPaste());
     };
   }, [isActive, stdout]);
 }

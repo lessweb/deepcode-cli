@@ -22,13 +22,38 @@ import {
   type CreateOpenAIClient,
   type ProcessTimeoutControl,
   type ProcessTimeoutInfo,
+  type ToolCallExecution,
+  type ToolExecutionHooks,
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
-import type { McpServerConfig } from "./settings";
+import type { McpServerConfig, PermissionScope, PermissionSettings } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { killProcessTree } from "./common/process-tree";
 import { GitFileHistory } from "./common/file-history";
+import { getSnippet } from "./common/state";
+import {
+  appendProjectPermissionAllows,
+  buildPermissionToolExecution,
+  computeToolCallPermissions,
+  hasUserPermissionReplies,
+  normalizeAskPermissions,
+  parseToolCallForPermissions,
+  type AskPermissionRequest,
+  type MessageToolPermission,
+  type PermissionToolCall,
+  type UserToolPermission,
+} from "./common/permissions";
+
+export type { PermissionScope } from "./settings";
+export type {
+  AskPermissionRequest,
+  AskPermissionScope,
+  BashPermissionScope,
+  MessageToolPermission,
+  PermissionDecision,
+  UserToolPermission,
+} from "./common/permissions";
 
 const MAX_SESSION_ENTRIES = 50;
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
@@ -127,7 +152,15 @@ function getTotalTokens(usage: ModelUsage | null | undefined): number {
   return typeof totalTokens === "number" ? totalTokens : 0;
 }
 
-export type SessionStatus = "failed" | "pending" | "processing" | "waiting_for_user" | "completed" | "interrupted";
+export type SessionStatus =
+  | "failed"
+  | "pending"
+  | "processing"
+  | "waiting_for_user"
+  | "completed"
+  | "interrupted"
+  | "ask_permission"
+  | "permission_denied";
 
 export type ModelUsage = {
   prompt_tokens: number;
@@ -170,6 +203,7 @@ export type SessionEntry = {
   createTime: string;
   updateTime: string;
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
+  askPermissions?: AskPermissionRequest[];
 };
 
 export type SessionsIndex = {
@@ -188,6 +222,8 @@ export type MessageMeta = {
   isSummary?: boolean;
   isModelChange?: boolean;
   skill?: SkillInfo;
+  permissions?: MessageToolPermission[];
+  userPrompt?: UserPromptContent;
 };
 
 export type SessionMessage = {
@@ -216,6 +252,8 @@ export type UserPromptContent = {
   text?: string;
   imageUrls?: string[];
   skills?: SkillInfo[];
+  permissions?: UserToolPermission[];
+  alwaysAllows?: PermissionScope[];
 };
 
 export type SkillInfo = {
@@ -228,7 +266,12 @@ export type SkillInfo = {
 type SessionManagerOptions = {
   projectRoot: string;
   createOpenAIClient: CreateOpenAIClient;
-  getResolvedSettings: () => { model: string; webSearchTool?: string; mcpServers?: Record<string, McpServerConfig> };
+  getResolvedSettings: () => {
+    model: string;
+    webSearchTool?: string;
+    mcpServers?: Record<string, McpServerConfig>;
+    permissions?: Required<PermissionSettings>;
+  };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -253,6 +296,7 @@ export class SessionManager {
     model: string;
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
+    permissions?: Required<PermissionSettings>;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -570,9 +614,10 @@ export class SessionManager {
     const toolCalls = Array.from(toolCallsByIndex.entries())
       .sort(([left], [right]) => left - right)
       .map(([, toolCall]) => toolCall);
+    const normalizedToolCalls = this.normalizeLlmToolCalls(toolCalls);
     const message: Record<string, unknown> = { content };
-    if (toolCalls.length > 0) {
-      message.tool_calls = toolCalls;
+    if (normalizedToolCalls) {
+      message.tool_calls = normalizedToolCalls;
     }
     if (reasoningContent.length > 0) {
       message.reasoning_content = reasoningContent;
@@ -900,20 +945,6 @@ The candidate skills are as follows:\n\n`;
     const signal = controller?.signal;
     this.throwIfAborted(signal);
 
-    if (userPrompt.text) {
-      const skills = await this.listSkills();
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      const matchedSkill = skills.filter((skill) => skillSet.has(skill.name));
-      if (Array.isArray(userPrompt.skills)) {
-        userPrompt.skills.push(...matchedSkill);
-      } else if (matchedSkill.length > 0) {
-        userPrompt.skills = matchedSkill;
-      }
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
-    this.throwIfAborted(signal);
     const sessionId = crypto.randomUUID();
     this.ensureFileHistorySession(sessionId);
     const now = new Date().toISOString();
@@ -976,6 +1007,21 @@ The candidate skills are as follows:\n\n`;
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
+    if (userPrompt.text) {
+      const skills = await this.listSkills();
+      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal });
+      this.throwIfAborted(signal);
+      const skillSet = new Set(skillNames);
+      const matchedSkill = skills.filter((skill) => skillSet.has(skill.name));
+      if (Array.isArray(userPrompt.skills)) {
+        userPrompt.skills.push(...matchedSkill);
+      } else if (matchedSkill.length > 0) {
+        userPrompt.skills = matchedSkill;
+      }
+    }
+    userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
+    this.throwIfAborted(signal);
+
     if (userPrompt.skills && userPrompt.skills.length > 0) {
       for (const skill of userPrompt.skills) {
         if (skill.isLoaded) {
@@ -1000,11 +1046,15 @@ ${skillMd}
   async replySession(sessionId: string, userPrompt: UserPromptContent, controller?: AbortController): Promise<void> {
     const signal = controller?.signal;
     this.throwIfAborted(signal);
+    appendProjectPermissionAllows(this.projectRoot, userPrompt.alwaysAllows, {
+      inheritedPermissions: this.getResolvedSettings().permissions,
+    });
     const now = new Date().toISOString();
     const updated = this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
       status: "pending",
       failReason: null,
+      askPermissions: undefined,
       updateTime: now,
     }));
 
@@ -1013,13 +1063,23 @@ ${skillMd}
       return;
     }
 
+    if (hasUserPermissionReplies(userPrompt) && this.hasTrailingPendingToolCalls(sessionId)) {
+      this.activeSessionId = sessionId;
+      await this.activateSession(sessionId, controller, userPrompt);
+      return;
+    }
+
     if (this.isContinuePrompt(userPrompt)) {
       this.activeSessionId = sessionId;
-      await this.activateSession(sessionId, controller);
+      await this.activateSession(sessionId, controller, userPrompt);
       return;
     }
 
     this.reportNewPrompt();
+
+    this.ensureFileHistorySession(sessionId);
+    const userMessage = this.buildUserMessage(sessionId, userPrompt);
+    this.appendSessionMessage(sessionId, userMessage);
 
     if (userPrompt.text) {
       const skills = await this.listSkills(sessionId);
@@ -1035,10 +1095,6 @@ ${skillMd}
     }
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
-
-    this.ensureFileHistorySession(sessionId);
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
 
     if (userPrompt.skills && userPrompt.skills.length > 0) {
       for (const skill of userPrompt.skills) {
@@ -1068,7 +1124,11 @@ ${skillMd}
     );
   }
 
-  async activateSession(sessionId: string, controller?: AbortController): Promise<void> {
+  async activateSession(
+    sessionId: string,
+    controller?: AbortController,
+    permissionPrompt?: UserPromptContent
+  ): Promise<void> {
     const startedAt = Date.now();
     const { client, model, baseURL, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, env } =
       this.createOpenAIClient();
@@ -1127,16 +1187,20 @@ ${skillMd}
           return;
         }
 
-        const pendingToolCalls = this.getTrailingPendingToolCalls(this.listSessionMessages(sessionId));
-        if (pendingToolCalls.length > 0) {
-          const toolAppendResult = await this.appendToolMessages(sessionId, pendingToolCalls);
+        const pendingToolCallMessage = this.getTrailingPendingToolCallMessage(this.listSessionMessages(sessionId));
+        if (pendingToolCallMessage.toolCalls.length > 0) {
+          const toolAppendResult = await this.appendToolMessages(sessionId, pendingToolCallMessage.toolCalls, {
+            permissionOverrides: permissionPrompt?.permissions,
+            messagePermissions: pendingToolCallMessage.message?.meta?.permissions,
+          });
+          permissionPrompt = await this.appendDeferredPermissionPrompt(sessionId, permissionPrompt, sessionController);
           if (this.isInterrupted(sessionId)) {
             return;
           }
           if (toolAppendResult.waitingForUser) {
             this.updateSessionEntry(sessionId, (entry) => ({
               ...entry,
-              toolCalls: pendingToolCalls,
+              toolCalls: pendingToolCallMessage.toolCalls,
               status: "waiting_for_user",
               updateTime: new Date().toISOString(),
             }));
@@ -1180,7 +1244,7 @@ ${skillMd}
         const rawContent = message?.content;
         const content = typeof rawContent === "string" ? rawContent : "";
         const rawToolCalls = (message as { tool_calls?: unknown[] } | undefined)?.tool_calls ?? null;
-        toolCalls = Array.isArray(rawToolCalls) && rawToolCalls.length > 0 ? rawToolCalls : null;
+        toolCalls = this.normalizeLlmToolCalls(rawToolCalls);
         const rawThinking = (message as { reasoning_content?: unknown } | undefined)?.reasoning_content;
         const thinking = typeof rawThinking === "string" ? rawThinking : null;
         const refusal = (message as { refusal?: string } | undefined)?.refusal ?? null;
@@ -1190,12 +1254,47 @@ ${skillMd}
           return;
         }
         const assistantMessage = this.buildAssistantMessage(sessionId, content, toolCalls, thinking);
+        const permissionPlan = toolCalls
+          ? computeToolCallPermissions({
+              sessionId,
+              projectRoot: this.projectRoot,
+              toolCalls,
+              settings: this.getResolvedSettings().permissions,
+              resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
+            })
+          : null;
+        if (permissionPlan) {
+          assistantMessage.meta = {
+            ...(assistantMessage.meta ?? {}),
+            permissions: permissionPlan.permissions,
+          };
+        }
         this.appendSessionMessage(sessionId, assistantMessage);
         this.onAssistantMessage(assistantMessage, true);
 
         let waitingForUser = false;
+        const responseUsage = response.usage ?? null;
         if (toolCalls) {
-          const toolAppendResult = await this.appendToolMessages(sessionId, toolCalls);
+          if (permissionPlan?.askPermissions.length) {
+            this.updateSessionEntry(sessionId, (entry) => ({
+              ...entry,
+              assistantReply: content,
+              assistantThinking: thinking,
+              assistantRefusal: refusal,
+              toolCalls,
+              usage: accumulateUsage(entry.usage, responseUsage),
+              usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
+              activeTokens: getTotalTokens(responseUsage),
+              status: "ask_permission",
+              failReason: null,
+              askPermissions: permissionPlan.askPermissions,
+              updateTime: new Date().toISOString(),
+            }));
+            return;
+          }
+          const toolAppendResult = await this.appendToolMessages(sessionId, toolCalls, {
+            messagePermissions: permissionPlan?.permissions,
+          });
           waitingForUser = toolAppendResult.waitingForUser;
         }
 
@@ -1203,7 +1302,6 @@ ${skillMd}
           return;
         }
 
-        const responseUsage = response.usage ?? null;
         this.updateSessionEntry(sessionId, (entry) => ({
           ...entry,
           assistantReply: content,
@@ -1215,6 +1313,7 @@ ${skillMd}
           activeTokens: getTotalTokens(responseUsage),
           status: refusal ? "failed" : waitingForUser ? "waiting_for_user" : toolCalls ? "processing" : "completed",
           failReason: refusal ? refusal : entry.failReason,
+          askPermissions: undefined,
           updateTime: new Date().toISOString(),
         }));
 
@@ -1434,6 +1533,20 @@ ${skillMd}
     return !this.sessionControllers.has(sessionId);
   }
 
+  /**
+   * Mark a session's permission as denied by the user.
+   * Updates the session entry status and failReason so the denial is visible in the session list.
+   */
+  denySessionPermission(sessionId: string, reason?: string): void {
+    const now = new Date().toISOString();
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      status: "permission_denied",
+      failReason: reason ?? "Permission denied by user",
+      updateTime: now,
+    }));
+  }
+
   adjustActiveBashTimeout(deltaMs: number): BashTimeoutAdjustment | null {
     const sessionId = this.activeSessionId;
     if (!sessionId || !Number.isFinite(deltaMs)) {
@@ -1473,6 +1586,28 @@ ${skillMd}
   getSession(sessionId: string): SessionEntry | null {
     const index = this.loadSessionsIndex();
     return index.entries.find((entry) => entry.id === sessionId) ?? null;
+  }
+
+  /**
+   * Delete a session by its ID.
+   * Removes the session entry from the index and deletes the associated messages file.
+   * Returns true if the session was found and deleted, false otherwise.
+   */
+  deleteSession(sessionId: string): boolean {
+    const index = this.loadSessionsIndex();
+    const entryIndex = index.entries.findIndex((entry) => entry.id === sessionId);
+    if (entryIndex === -1) {
+      return false;
+    }
+
+    // Remove from index
+    index.entries.splice(entryIndex, 1);
+    this.saveSessionsIndex(index);
+
+    // Remove messages file
+    this.removeSessionMessages([sessionId]);
+
+    return true;
   }
 
   listSessionMessages(sessionId: string): SessionMessage[] {
@@ -1766,6 +1901,7 @@ ${skillMd}
       visible: true,
       createTime: now,
       updateTime: now,
+      meta: { userPrompt: this.cloneUserPromptForMeta(prompt) },
       checkpointHash: this.getCurrentCheckpointHash(sessionId),
     };
   }
@@ -1899,6 +2035,33 @@ ${skillMd}
     };
   }
 
+  private generateToolCallId(): string {
+    return crypto.randomBytes(16).toString("hex");
+  }
+
+  private normalizeLlmToolCalls(rawToolCalls: unknown[] | null | undefined): unknown[] | null {
+    if (!Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
+      return null;
+    }
+
+    return rawToolCalls.map((toolCall) => {
+      if (!toolCall || typeof toolCall !== "object" || Array.isArray(toolCall)) {
+        return toolCall;
+      }
+
+      const record = toolCall as Record<string, unknown>;
+      const id = typeof record.id === "string" ? record.id.trim() : "";
+      if (id) {
+        return toolCall;
+      }
+
+      return {
+        ...record,
+        id: this.generateToolCallId(),
+      };
+    });
+  }
+
   private buildToolMessage(
     sessionId: string,
     toolCallId: string,
@@ -1928,8 +2091,15 @@ ${skillMd}
     };
   }
 
-  private async appendToolMessages(sessionId: string, toolCalls: unknown[]): Promise<{ waitingForUser: boolean }> {
-    const toolExecutions = await this.toolExecutor.executeToolCalls(sessionId, toolCalls, {
+  private async appendToolMessages(
+    sessionId: string,
+    toolCalls: unknown[],
+    options: {
+      permissionOverrides?: UserToolPermission[];
+      messagePermissions?: MessageToolPermission[];
+    } = {}
+  ): Promise<{ waitingForUser: boolean }> {
+    const hooks: ToolExecutionHooks = {
       onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
@@ -1937,7 +2107,23 @@ ${skillMd}
       onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
       onAfterFileMutation: (filePath) => this.recordFileMutationCheckpoint(sessionId, filePath),
       shouldStop: () => this.isInterrupted(sessionId),
-    });
+    };
+    const parsedToolCalls = toolCalls
+      .map((toolCall) => parseToolCallForPermissions(toolCall))
+      .filter((toolCall): toolCall is PermissionToolCall => Boolean(toolCall));
+    const toolExecutions: ToolCallExecution[] = [];
+    for (const toolCall of parsedToolCalls) {
+      if (hooks.shouldStop?.()) {
+        break;
+      }
+      const blockedResult = buildPermissionToolExecution(toolCall, options);
+      if (blockedResult) {
+        toolExecutions.push(blockedResult);
+        continue;
+      }
+      const executions = await this.toolExecutor.executeToolCalls(sessionId, [toolCall], hooks);
+      toolExecutions.push(...executions);
+    }
     if (this.isInterrupted(sessionId)) {
       return { waitingForUser: false };
     }
@@ -1966,6 +2152,72 @@ ${skillMd}
       this.appendSessionMessage(sessionId, followUpMessage);
     }
     return { waitingForUser };
+  }
+
+  private cloneUserPromptForMeta(prompt: UserPromptContent): UserPromptContent {
+    return {
+      text: prompt.text,
+      imageUrls: prompt.imageUrls ? [...prompt.imageUrls] : undefined,
+      skills: prompt.skills ? prompt.skills.map((skill) => ({ ...skill })) : undefined,
+      permissions: prompt.permissions ? prompt.permissions.map((permission) => ({ ...permission })) : undefined,
+      alwaysAllows: prompt.alwaysAllows ? [...prompt.alwaysAllows] : undefined,
+    };
+  }
+
+  private hasTrailingPendingToolCalls(sessionId: string): boolean {
+    return this.getTrailingPendingToolCallMessage(this.listSessionMessages(sessionId)).toolCalls.length > 0;
+  }
+
+  private async appendDeferredPermissionPrompt(
+    sessionId: string,
+    userPrompt: UserPromptContent | undefined,
+    controller: AbortController
+  ): Promise<UserPromptContent | undefined> {
+    if (!userPrompt || this.isContinuePrompt(userPrompt)) {
+      return undefined;
+    }
+    const text = userPrompt.text ?? "";
+    const hasUserContent =
+      text.trim().length > 0 ||
+      (Array.isArray(userPrompt.imageUrls) && userPrompt.imageUrls.length > 0) ||
+      (Array.isArray(userPrompt.skills) && userPrompt.skills.length > 0);
+    if (!hasUserContent) {
+      return undefined;
+    }
+    this.reportNewPrompt();
+    const signal = controller.signal;
+    const userMessage = this.buildUserMessage(sessionId, userPrompt);
+    this.appendSessionMessage(sessionId, userMessage);
+    if (userPrompt.text) {
+      const skills = await this.listSkills(sessionId);
+      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
+      this.throwIfAborted(signal);
+      const skillSet = new Set(skillNames);
+      const matchedSkill = skills.filter((skill) => skillSet.has(skill.name));
+      if (Array.isArray(userPrompt.skills)) {
+        userPrompt.skills.push(...matchedSkill);
+      } else if (matchedSkill.length > 0) {
+        userPrompt.skills = matchedSkill;
+      }
+    }
+    userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
+    this.throwIfAborted(signal);
+    if (userPrompt.skills && userPrompt.skills.length > 0) {
+      for (const skill of userPrompt.skills) {
+        if (skill.isLoaded) {
+          continue;
+        }
+        const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
+        const skillPrompt = `Use the skill document below to assist the user:\n
+<${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
+${skillMd}
+</${skill.name}-skill>`;
+        const skillMessage = this.buildSkillMessage(sessionId, skillPrompt, skill);
+        this.appendSessionMessage(sessionId, skillMessage);
+        this.onAssistantMessage(skillMessage, true);
+      }
+    }
+    return undefined;
   }
 
   private buildOpenAIMessages(
@@ -2096,18 +2348,23 @@ ${skillMd}
     return pairings;
   }
 
-  private getTrailingPendingToolCalls(messages: SessionMessage[]): unknown[] {
+  private getTrailingPendingToolCallMessage(
+    messages: SessionMessage[]
+  ): { message: SessionMessage; toolCalls: unknown[] } | { message: null; toolCalls: [] } {
     const activeMessages = messages.filter((message) => !message.compacted);
     const latestMessage = activeMessages[activeMessages.length - 1];
     if (!latestMessage || latestMessage.role !== "assistant") {
-      return [];
+      return { message: null, toolCalls: [] };
     }
 
     const toolCalls = this.getAssistantToolCalls(latestMessage);
     if (toolCalls.length === 0) {
-      return [];
+      return { message: null, toolCalls: [] };
     }
-    return toolCalls.filter((toolCall) => Boolean(this.getToolCallId(toolCall)));
+    return {
+      message: latestMessage,
+      toolCalls: toolCalls.filter((toolCall) => Boolean(this.getToolCallId(toolCall))),
+    };
   }
 
   private findPairableToolMessageIndex(
@@ -2461,6 +2718,7 @@ ${skillMd}
       createTime: typeof value.createTime === "string" ? value.createTime : new Date().toISOString(),
       updateTime: typeof value.updateTime === "string" ? value.updateTime : new Date().toISOString(),
       processes: this.deserializeProcesses(value.processes),
+      askPermissions: normalizeAskPermissions(value.askPermissions),
     };
   }
 
@@ -2471,7 +2729,9 @@ ${skillMd}
       status === "processing" ||
       status === "waiting_for_user" ||
       status === "completed" ||
-      status === "interrupted"
+      status === "interrupted" ||
+      status === "ask_permission" ||
+      status === "permission_denied"
     ) {
       return status;
     }

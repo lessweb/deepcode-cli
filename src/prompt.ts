@@ -331,8 +331,29 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
               description:
                 'Clear, concise description of what this command does in active voice. Never use words like "complex" or "risk" in the description - just describe what it does.',
             },
+            sideEffects: {
+              description:
+                'Permission scopes required by this bash command. Use [] only for commands that do not read, write, delete, or access the network. Use ["unknown"] when the effects cannot be classified safely.',
+              type: "array",
+              items: {
+                type: "string",
+                enum: [
+                  "read-in-cwd",
+                  "read-out-cwd",
+                  "write-in-cwd",
+                  "write-out-cwd",
+                  "delete-in-cwd",
+                  "delete-out-cwd",
+                  "query-git-log",
+                  "mutate-git-log",
+                  "network",
+                  "unknown",
+                ],
+              },
+              uniqueItems: true,
+            },
           },
-          required: ["command"],
+          required: ["command", "sideEffects"],
           additionalProperties: false,
         },
       },
