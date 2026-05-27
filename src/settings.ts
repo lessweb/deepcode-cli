@@ -10,6 +10,8 @@ export type DeepcodingEnv = Record<string, string | undefined> & {
   THINKING_ENABLED?: string;
   REASONING_EFFORT?: string;
   DEBUG_LOG_ENABLED?: string;
+  REQUEST_TIMEOUT_MS?: string;
+  MAX_RETRIES?: string;
 };
 
 export type ReasoningEffort = "high" | "max";
@@ -47,6 +49,8 @@ export type DeepcodingSettings = {
   thinkingEnabled?: boolean;
   reasoningEffort?: ReasoningEffort;
   debugLogEnabled?: boolean;
+  requestTimeoutMs?: number;
+  maxRetries?: number;
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
@@ -61,6 +65,8 @@ export type ResolvedDeepcodingSettings = {
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   debugLogEnabled: boolean;
+  requestTimeoutMs: number;
+  maxRetries: number;
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
@@ -99,6 +105,14 @@ function parseBoolean(value: unknown): boolean | undefined {
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parseNonNegativeInteger(value: unknown, max: number): number | undefined {
+  const raw = typeof value === "number" ? value : typeof value === "string" ? Number(value.trim()) : NaN;
+  if (!Number.isFinite(raw) || raw < 0) {
+    return undefined;
+  }
+  return Math.min(Math.round(raw), max);
 }
 
 const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
@@ -313,6 +327,22 @@ export function resolveSettingsSources(
     parseBoolean(userEnv.DEBUG_LOG_ENABLED) ??
     false;
 
+  const requestTimeoutMs =
+    parseNonNegativeInteger(systemEnv.REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS) ??
+    parseNonNegativeInteger(projectSettings?.requestTimeoutMs, MAX_REQUEST_TIMEOUT_MS) ??
+    parseNonNegativeInteger(projectEnv.REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS) ??
+    parseNonNegativeInteger(userSettings?.requestTimeoutMs, MAX_REQUEST_TIMEOUT_MS) ??
+    parseNonNegativeInteger(userEnv.REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS) ??
+    DEFAULT_REQUEST_TIMEOUT_MS;
+
+  const maxRetries =
+    parseNonNegativeInteger(systemEnv.MAX_RETRIES, MAX_MAX_RETRIES) ??
+    parseNonNegativeInteger(projectSettings?.maxRetries, MAX_MAX_RETRIES) ??
+    parseNonNegativeInteger(projectEnv.MAX_RETRIES, MAX_MAX_RETRIES) ??
+    parseNonNegativeInteger(userSettings?.maxRetries, MAX_MAX_RETRIES) ??
+    parseNonNegativeInteger(userEnv.MAX_RETRIES, MAX_MAX_RETRIES) ??
+    DEFAULT_MAX_RETRIES;
+
   const notify =
     trimString(systemEnv.NOTIFY) || trimString(projectSettings?.notify) || trimString(userSettings?.notify) || "";
   const webSearchTool =
@@ -329,6 +359,8 @@ export function resolveSettingsSources(
     thinkingEnabled,
     reasoningEffort,
     debugLogEnabled,
+    requestTimeoutMs,
+    maxRetries,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
@@ -380,6 +412,11 @@ export function applyModelConfigSelection(
 
 export const DEFAULT_MODEL = "deepseek-v4-pro";
 export const DEFAULT_BASE_URL = "https://api.deepseek.com";
+export const DEFAULT_REQUEST_TIMEOUT_MS = 0;
+export const DEFAULT_MAX_RETRIES = 2;
+
+const MAX_REQUEST_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+const MAX_MAX_RETRIES = 10;
 
 // ---------------------------------------------------------------------------
 // Settings file I/O

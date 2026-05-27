@@ -2209,6 +2209,143 @@ test("SessionManager streams chat completions and counts reasoning progress", as
   assert.equal(progressEvents[2]?.formattedTokens, "3");
 });
 
+test("SessionManager retries transient chat completion failures", async () => {
+  const workspace = createTempDir("deepcode-retry-workspace-");
+  const home = createTempDir("deepcode-retry-home-");
+  setHomeDir(home);
+
+  let attempts = 0;
+  const signals: Array<AbortSignal | undefined> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (_request: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
+          attempts += 1;
+          signals.push(options?.signal);
+          if (attempts === 1) {
+            throw new Error("fetch failed");
+          }
+          return createChatResponse("recovered", {
+            prompt_tokens: 2,
+            completion_tokens: 1,
+            total_tokens: 3,
+          });
+        },
+      },
+    },
+  };
+
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      model: "test-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model", requestTimeoutMs: 1000, maxRetries: 1 }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const sessionId = await manager.createSession({ text: "" });
+  const assistantMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "assistant");
+
+  assert.equal(attempts, 2);
+  assert.equal(
+    signals.every((signal) => signal instanceof AbortSignal),
+    true
+  );
+  assert.equal(assistantMessage?.content, "recovered");
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+});
+
+test("SessionManager does not retry non-retryable chat completion errors", async () => {
+  const workspace = createTempDir("deepcode-no-retry-workspace-");
+  const home = createTempDir("deepcode-no-retry-home-");
+  setHomeDir(home);
+
+  let attempts = 0;
+  const client = {
+    chat: {
+      completions: {
+        create: async () => {
+          attempts += 1;
+          const error = new Error("bad request") as Error & { status?: number };
+          error.status = 400;
+          throw error;
+        },
+      },
+    },
+  };
+
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      model: "test-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model", maxRetries: 2 }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const sessionId = await manager.createSession({ text: "" });
+  const session = manager.getSession(sessionId);
+
+  assert.equal(attempts, 1);
+  assert.equal(session?.status, "failed");
+  assert.equal(session?.failReason, "bad request");
+});
+
+test("SessionManager fails timed-out chat completion requests without treating them as user interrupts", async () => {
+  const workspace = createTempDir("deepcode-timeout-workspace-");
+  const home = createTempDir("deepcode-timeout-home-");
+  setHomeDir(home);
+
+  const client = {
+    chat: {
+      completions: {
+        create: async (_request: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
+          return new Promise((_resolve, reject) => {
+            const abort = () => {
+              const error = new Error("aborted");
+              error.name = "AbortError";
+              reject(error);
+            };
+            if (options?.signal?.aborted) {
+              abort();
+              return;
+            }
+            options?.signal?.addEventListener("abort", abort, { once: true });
+          });
+        },
+      },
+    },
+  };
+
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      model: "test-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model", requestTimeoutMs: 10, maxRetries: 0 }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const sessionId = await manager.createSession({ text: "" });
+  const session = manager.getSession(sessionId);
+
+  assert.equal(session?.status, "failed");
+  assert.match(session?.failReason ?? "", /Request timed out after 10ms/);
+});
+
 test("SessionManager persists session and user message before skill matching is cancelled", async () => {
   const workspace = createTempDir("deepcode-skill-abort-workspace-");
   const home = createTempDir("deepcode-skill-abort-home-");

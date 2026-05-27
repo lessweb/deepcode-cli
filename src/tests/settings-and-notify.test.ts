@@ -7,7 +7,13 @@ import {
   type NotifyContext,
   type NotifySpawn,
 } from "../common/notify";
-import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import {
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  applyModelConfigSelection,
+  resolveSettings,
+  resolveSettingsSources,
+} from "../settings";
 
 const TEST_PROCESS_ENV = {};
 
@@ -81,6 +87,53 @@ test("resolveSettings reads THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_EN
   assert.equal(resolved.debugLogEnabled, true);
   assert.equal(resolved.model, "default-model");
   assert.equal(resolved.baseURL, "https://default.example.com");
+});
+
+test("resolveSettings reads request timeout and retry controls with documented precedence", () => {
+  const resolved = resolveSettingsSources(
+    {
+      requestTimeoutMs: 1000,
+      maxRetries: 1,
+      env: {
+        REQUEST_TIMEOUT_MS: "2000",
+        MAX_RETRIES: "2",
+      },
+    },
+    {
+      requestTimeoutMs: 3000,
+      env: {
+        MAX_RETRIES: "3",
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    {
+      DEEPCODE_REQUEST_TIMEOUT_MS: "4000",
+    }
+  );
+
+  assert.equal(resolved.requestTimeoutMs, 4000);
+  assert.equal(resolved.maxRetries, 3);
+});
+
+test("resolveSettings defaults and clamps request retry controls", () => {
+  const resolved = resolveSettings(
+    {
+      requestTimeoutMs: -1,
+      maxRetries: 999,
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.requestTimeoutMs, DEFAULT_REQUEST_TIMEOUT_MS);
+  assert.equal(resolved.maxRetries, 10);
+  assert.equal(DEFAULT_MAX_RETRIES, 2);
 });
 
 test("resolveSettings ignores removed legacy env.THINKING", () => {

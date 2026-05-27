@@ -26,7 +26,13 @@ import {
   type ToolExecutionHooks,
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
-import type { McpServerConfig, PermissionScope, PermissionSettings } from "./settings";
+import {
+  DEFAULT_MAX_RETRIES,
+  DEFAULT_REQUEST_TIMEOUT_MS,
+  type McpServerConfig,
+  type PermissionScope,
+  type PermissionSettings,
+} from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { killProcessTree } from "./common/process-tree";
@@ -62,6 +68,8 @@ const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
 const NEW_PROMPT_REPORT_TIMEOUT_MS = 3000;
 const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
 const DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD = 512 * 1024;
+const CHAT_RETRY_BASE_DELAY_MS = 250;
+const CHAT_RETRY_MAX_DELAY_MS = 4000;
 
 type ChatCompletionDebugOptions = {
   enabled?: boolean;
@@ -264,6 +272,8 @@ type SessionManagerOptions = {
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
+    requestTimeoutMs?: number;
+    maxRetries?: number;
   };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
@@ -290,6 +300,8 @@ export class SessionManager {
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
+    requestTimeoutMs?: number;
+    maxRetries?: number;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -418,6 +430,161 @@ export class SessionManager {
     throw error;
   }
 
+  private getChatRequestControls(): { requestTimeoutMs: number; maxRetries: number } {
+    const settings = this.getResolvedSettings();
+    const requestTimeoutMs =
+      typeof settings.requestTimeoutMs === "number"
+        ? Math.max(0, Math.round(settings.requestTimeoutMs))
+        : DEFAULT_REQUEST_TIMEOUT_MS;
+    const maxRetries =
+      typeof settings.maxRetries === "number" ? Math.max(0, Math.round(settings.maxRetries)) : DEFAULT_MAX_RETRIES;
+    return { requestTimeoutMs, maxRetries };
+  }
+
+  private createAttemptOptions(
+    options: Record<string, unknown> | undefined,
+    requestTimeoutMs: number
+  ): {
+    options?: Record<string, unknown>;
+    cleanup: () => void;
+    didTimeout: () => boolean;
+  } {
+    const parentSignal = options?.signal instanceof AbortSignal ? options.signal : undefined;
+    if (!parentSignal && requestTimeoutMs <= 0) {
+      return {
+        options,
+        cleanup: () => {},
+        didTimeout: () => false,
+      };
+    }
+
+    const controller = new AbortController();
+    let timedOut = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const abortFromParent = () => {
+      if (!controller.signal.aborted) {
+        controller.abort();
+      }
+    };
+
+    if (parentSignal?.aborted) {
+      controller.abort();
+    } else {
+      parentSignal?.addEventListener("abort", abortFromParent, { once: true });
+    }
+
+    if (requestTimeoutMs > 0) {
+      timeout = setTimeout(() => {
+        timedOut = true;
+        if (!controller.signal.aborted) {
+          controller.abort();
+        }
+      }, requestTimeoutMs);
+    }
+
+    return {
+      options: {
+        ...(options ?? {}),
+        signal: controller.signal,
+      },
+      cleanup: () => {
+        if (timeout) {
+          clearTimeout(timeout);
+        }
+        parentSignal?.removeEventListener("abort", abortFromParent);
+      },
+      didTimeout: () => timedOut,
+    };
+  }
+
+  private normalizeChatCompletionError(error: unknown, timedOut: boolean, requestTimeoutMs: number): Error | unknown {
+    if (!timedOut) {
+      return error;
+    }
+    const timeoutError = new Error(`Request timed out after ${requestTimeoutMs}ms.`);
+    timeoutError.name = "TimeoutError";
+    return timeoutError;
+  }
+
+  private getErrorStatus(error: unknown): number | null {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+    const status = (error as { status?: unknown; statusCode?: unknown }).status;
+    if (typeof status === "number") {
+      return status;
+    }
+    const statusCode = (error as { statusCode?: unknown }).statusCode;
+    return typeof statusCode === "number" ? statusCode : null;
+  }
+
+  private getErrorCode(error: unknown): string {
+    if (!error || typeof error !== "object") {
+      return "";
+    }
+    const code = (error as { code?: unknown }).code;
+    return typeof code === "string" ? code : "";
+  }
+
+  private isRetryableChatCompletionError(error: unknown, timedOut: boolean): boolean {
+    if (timedOut) {
+      return true;
+    }
+    if (this.isAbortLikeError(error)) {
+      return false;
+    }
+
+    const status = this.getErrorStatus(error);
+    if (status != null) {
+      return status === 408 || status === 409 || status === 425 || status === 429 || status >= 500;
+    }
+
+    const code = this.getErrorCode(error);
+    if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EAI_AGAIN", "ENOTFOUND"].includes(code)) {
+      return true;
+    }
+
+    const name = error instanceof Error ? error.name : "";
+    if (/APIConnectionError|APIConnectionTimeoutError|FetchError|TimeoutError/i.test(name)) {
+      return true;
+    }
+
+    const message = error instanceof Error ? error.message : String(error);
+    return /fetch failed|terminated|network|connection|socket|timeout|timed out/i.test(message);
+  }
+
+  private getChatRetryDelayMs(attemptIndex: number): number {
+    return Math.min(CHAT_RETRY_BASE_DELAY_MS * 2 ** attemptIndex, CHAT_RETRY_MAX_DELAY_MS);
+  }
+
+  private async waitForChatRetry(delayMs: number, signal?: AbortSignal): Promise<void> {
+    this.throwIfAborted(signal);
+    if (delayMs <= 0) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+        timer = null;
+        signal?.removeEventListener("abort", onAbort);
+        resolve();
+      }, delayMs);
+
+      const onAbort = () => {
+        if (timer) {
+          clearTimeout(timer);
+          timer = null;
+        }
+        const error = new Error("Request was aborted.");
+        error.name = "AbortError";
+        reject(error);
+      };
+
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
   private async createChatCompletionStream(
     client: NonNullable<ReturnType<CreateOpenAIClient>["client"]>,
     request: Record<string, unknown>,
@@ -433,6 +600,9 @@ export class SessionManager {
     const startedAtMs = Date.now();
     let estimatedTokens = 0;
     this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "start", sessionId);
+    const parentSignal = options?.signal instanceof AbortSignal ? options.signal : undefined;
+    const { requestTimeoutMs, maxRetries } = this.getChatRequestControls();
+    const maxAttempts = maxRetries + 1;
 
     const streamRequest = {
       ...request,
@@ -443,212 +613,220 @@ export class SessionManager {
       },
     };
 
-    let response: unknown;
     try {
-      response = await (
-        client.chat.completions.create as unknown as (
-          body: Record<string, unknown>,
-          options?: Record<string, unknown>
-        ) => Promise<unknown>
-      )(streamRequest, options);
-    } catch (error) {
-      this.logChatCompletionDebug(debug, {
-        timestamp: new Date().toISOString(),
-        location: debug?.location ?? "SessionManager.createChatCompletionStream:create",
-        requestId,
-        sessionId,
-        model: typeof request.model === "string" ? request.model : undefined,
-        baseURL: debug?.baseURL,
-        durationMs: Date.now() - startedAtMs,
-        params: { ...debug?.params, options: summarizeCompletionOptions(options) },
-        request: streamRequest,
-        error: normalizeDebugError(error),
-      });
-      logApiError({
-        timestamp: new Date().toISOString(),
-        location: "SessionManager.createChatCompletionStream:create",
-        requestId,
-        sessionId,
-        model: typeof request.model === "string" ? request.model : undefined,
-        error: {
-          name: error instanceof Error ? error.name : "UnknownError",
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        },
-        request: streamRequest,
-      });
-      this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
-      throw error;
-    }
+      for (let attemptIndex = 0; attemptIndex < maxAttempts; attemptIndex++) {
+        this.throwIfAborted(parentSignal);
+        const attemptOptions = this.createAttemptOptions(options, requestTimeoutMs);
+        const attemptParams = {
+          ...debug?.params,
+          attempt: attemptIndex + 1,
+          maxAttempts,
+          requestTimeoutMs,
+          maxRetries,
+          options: summarizeCompletionOptions(attemptOptions.options),
+        };
+        let response: unknown;
+        let responseChunks: unknown[] | undefined;
+        let locationSuffix = "create";
 
-    if (!response || typeof (response as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] !== "function") {
-      this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
-      this.logChatCompletionDebug(debug, {
-        timestamp: new Date().toISOString(),
-        location: debug?.location ?? "SessionManager.createChatCompletionStream",
-        requestId,
-        sessionId,
-        model: typeof request.model === "string" ? request.model : undefined,
-        baseURL: debug?.baseURL,
-        durationMs: Date.now() - startedAtMs,
-        params: { ...debug?.params, options: summarizeCompletionOptions(options) },
-        request: streamRequest,
-        response,
-      });
-      return response as { choices?: Array<{ message?: Record<string, unknown> }>; usage?: ModelUsage | null };
-    }
+        try {
+          response = await (
+            client.chat.completions.create as unknown as (
+              body: Record<string, unknown>,
+              options?: Record<string, unknown>
+            ) => Promise<unknown>
+          )(streamRequest, attemptOptions.options);
 
-    let content = "";
-    let reasoningContent = "";
-    let refusal: string | null = null;
-    let usage: ModelUsage | null = null;
-    const responseChunks: unknown[] = [];
-    const toolCallsByIndex = new Map<
-      number,
-      {
-        id?: string;
-        type?: string;
-        function?: { name?: string; arguments?: string };
-      }
-    >();
-
-    const trackText = (value: unknown) => {
-      if (typeof value !== "string" || value.length === 0) {
-        return;
-      }
-      estimatedTokens += this.estimateStreamTokens(value);
-      this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "update", sessionId);
-    };
-
-    try {
-      for await (const chunk of response as AsyncIterable<Record<string, unknown>>) {
-        if (debug?.enabled) {
-          responseChunks.push(chunk);
-        }
-        if ("usage" in chunk && chunk.usage != null) {
-          usage = chunk.usage as ModelUsage;
-        }
-
-        const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
-        for (const choice of choices) {
-          const delta = isUsageRecord(choice) && isUsageRecord(choice.delta) ? choice.delta : null;
-          if (!delta) {
-            continue;
+          if (
+            !response ||
+            typeof (response as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] !== "function"
+          ) {
+            this.logChatCompletionDebug(debug, {
+              timestamp: new Date().toISOString(),
+              location: debug?.location ?? "SessionManager.createChatCompletionStream",
+              requestId,
+              sessionId,
+              model: typeof request.model === "string" ? request.model : undefined,
+              baseURL: debug?.baseURL,
+              durationMs: Date.now() - startedAtMs,
+              params: attemptParams,
+              request: streamRequest,
+              response,
+            });
+            return response as { choices?: Array<{ message?: Record<string, unknown> }>; usage?: ModelUsage | null };
           }
 
-          const contentDelta = delta.content;
-          if (typeof contentDelta === "string") {
-            content += contentDelta;
-            trackText(contentDelta);
-          }
+          let content = "";
+          let reasoningContent = "";
+          let refusal: string | null = null;
+          let usage: ModelUsage | null = null;
+          responseChunks = [];
+          const toolCallsByIndex = new Map<
+            number,
+            {
+              id?: string;
+              type?: string;
+              function?: { name?: string; arguments?: string };
+            }
+          >();
 
-          const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
-          if (typeof reasoningDelta === "string") {
-            reasoningContent += reasoningDelta;
-            trackText(reasoningDelta);
-          }
+          const trackText = (value: unknown) => {
+            if (typeof value !== "string" || value.length === 0) {
+              return;
+            }
+            estimatedTokens += this.estimateStreamTokens(value);
+            this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "update", sessionId);
+          };
 
-          if (typeof delta.refusal === "string") {
-            refusal = `${refusal ?? ""}${delta.refusal}`;
-            trackText(delta.refusal);
-          }
+          locationSuffix = "stream";
+          for await (const chunk of response as AsyncIterable<Record<string, unknown>>) {
+            if (debug?.enabled) {
+              responseChunks.push(chunk);
+            }
+            if ("usage" in chunk && chunk.usage != null) {
+              usage = chunk.usage as ModelUsage;
+            }
 
-          const rawToolCalls = delta.tool_calls;
-          if (Array.isArray(rawToolCalls)) {
-            for (const rawToolCall of rawToolCalls) {
-              if (!isUsageRecord(rawToolCall)) {
+            const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
+            for (const choice of choices) {
+              const delta = isUsageRecord(choice) && isUsageRecord(choice.delta) ? choice.delta : null;
+              if (!delta) {
                 continue;
               }
-              const index = typeof rawToolCall.index === "number" ? rawToolCall.index : toolCallsByIndex.size;
-              const current = toolCallsByIndex.get(index) ?? {};
-              if (typeof rawToolCall.id === "string") {
-                current.id = rawToolCall.id;
+
+              const contentDelta = delta.content;
+              if (typeof contentDelta === "string") {
+                content += contentDelta;
+                trackText(contentDelta);
               }
-              if (typeof rawToolCall.type === "string") {
-                current.type = rawToolCall.type;
+
+              const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
+              if (typeof reasoningDelta === "string") {
+                reasoningContent += reasoningDelta;
+                trackText(reasoningDelta);
               }
-              const rawFunction = isUsageRecord(rawToolCall.function) ? rawToolCall.function : null;
-              if (rawFunction) {
-                current.function = current.function ?? {};
-                if (typeof rawFunction.name === "string") {
-                  current.function.name = `${current.function.name ?? ""}${rawFunction.name}`;
-                  trackText(rawFunction.name);
+
+              if (typeof delta.refusal === "string") {
+                refusal = `${refusal ?? ""}${delta.refusal}`;
+                trackText(delta.refusal);
+              }
+
+              const rawToolCalls = delta.tool_calls;
+              if (Array.isArray(rawToolCalls)) {
+                for (const rawToolCall of rawToolCalls) {
+                  if (!isUsageRecord(rawToolCall)) {
+                    continue;
+                  }
+                  const index = typeof rawToolCall.index === "number" ? rawToolCall.index : toolCallsByIndex.size;
+                  const current = toolCallsByIndex.get(index) ?? {};
+                  if (typeof rawToolCall.id === "string") {
+                    current.id = rawToolCall.id;
+                  }
+                  if (typeof rawToolCall.type === "string") {
+                    current.type = rawToolCall.type;
+                  }
+                  const rawFunction = isUsageRecord(rawToolCall.function) ? rawToolCall.function : null;
+                  if (rawFunction) {
+                    current.function = current.function ?? {};
+                    if (typeof rawFunction.name === "string") {
+                      current.function.name = `${current.function.name ?? ""}${rawFunction.name}`;
+                      trackText(rawFunction.name);
+                    }
+                    if (typeof rawFunction.arguments === "string") {
+                      current.function.arguments = `${current.function.arguments ?? ""}${rawFunction.arguments}`;
+                      trackText(rawFunction.arguments);
+                    }
+                  }
+                  toolCallsByIndex.set(index, current);
                 }
-                if (typeof rawFunction.arguments === "string") {
-                  current.function.arguments = `${current.function.arguments ?? ""}${rawFunction.arguments}`;
-                  trackText(rawFunction.arguments);
-                }
               }
-              toolCallsByIndex.set(index, current);
             }
           }
+
+          const toolCalls = Array.from(toolCallsByIndex.entries())
+            .sort(([left], [right]) => left - right)
+            .map(([, toolCall]) => toolCall);
+          const normalizedToolCalls = this.normalizeLlmToolCalls(toolCalls);
+          const message: Record<string, unknown> = { content };
+          if (normalizedToolCalls) {
+            message.tool_calls = normalizedToolCalls;
+          }
+          if (reasoningContent.length > 0) {
+            message.reasoning_content = reasoningContent;
+          }
+          if (refusal != null) {
+            message.refusal = refusal;
+          }
+
+          const finalResponse = {
+            choices: [{ message }],
+            usage,
+          };
+          this.logChatCompletionDebug(debug, {
+            timestamp: new Date().toISOString(),
+            location: debug?.location ?? "SessionManager.createChatCompletionStream",
+            requestId,
+            sessionId,
+            model: typeof request.model === "string" ? request.model : undefined,
+            baseURL: debug?.baseURL,
+            durationMs: Date.now() - startedAtMs,
+            params: attemptParams,
+            request: streamRequest,
+            responseChunks,
+            response: finalResponse,
+          });
+          return finalResponse;
+        } catch (rawError) {
+          const timedOut = attemptOptions.didTimeout();
+          const error = this.normalizeChatCompletionError(rawError, timedOut, requestTimeoutMs);
+          const retrying =
+            attemptIndex < maxRetries && !parentSignal?.aborted && this.isRetryableChatCompletionError(error, timedOut);
+          const normalizedError = normalizeDebugError(error);
+          const location = debug?.location ?? `SessionManager.createChatCompletionStream:${locationSuffix}`;
+          const params = {
+            ...attemptParams,
+            timedOut,
+            retrying,
+          };
+
+          this.logChatCompletionDebug(debug, {
+            timestamp: new Date().toISOString(),
+            location,
+            requestId,
+            sessionId,
+            model: typeof request.model === "string" ? request.model : undefined,
+            baseURL: debug?.baseURL,
+            durationMs: Date.now() - startedAtMs,
+            params,
+            request: streamRequest,
+            responseChunks,
+            error: normalizedError,
+          });
+          logApiError({
+            timestamp: new Date().toISOString(),
+            location,
+            requestId,
+            sessionId,
+            model: typeof request.model === "string" ? request.model : undefined,
+            baseURL: debug?.baseURL,
+            error: normalizedError,
+            request: streamRequest,
+          });
+
+          if (!retrying) {
+            throw error;
+          }
+
+          await this.waitForChatRetry(this.getChatRetryDelayMs(attemptIndex), parentSignal);
+        } finally {
+          attemptOptions.cleanup();
         }
       }
-    } catch (error) {
-      this.logChatCompletionDebug(debug, {
-        timestamp: new Date().toISOString(),
-        location: debug?.location ?? "SessionManager.createChatCompletionStream:stream",
-        requestId,
-        sessionId,
-        model: typeof request.model === "string" ? request.model : undefined,
-        baseURL: debug?.baseURL,
-        durationMs: Date.now() - startedAtMs,
-        params: { ...debug?.params, options: summarizeCompletionOptions(options) },
-        request: streamRequest,
-        responseChunks,
-        error: normalizeDebugError(error),
-      });
-      logApiError({
-        timestamp: new Date().toISOString(),
-        location: "SessionManager.createChatCompletionStream:stream",
-        requestId,
-        sessionId,
-        model: typeof request.model === "string" ? request.model : undefined,
-        error: {
-          name: error instanceof Error ? error.name : "UnknownError",
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        },
-        request: streamRequest,
-      });
-      throw error;
+
+      throw new Error("Chat completion request failed before any attempt was made.");
     } finally {
       this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
     }
-
-    const toolCalls = Array.from(toolCallsByIndex.entries())
-      .sort(([left], [right]) => left - right)
-      .map(([, toolCall]) => toolCall);
-    const normalizedToolCalls = this.normalizeLlmToolCalls(toolCalls);
-    const message: Record<string, unknown> = { content };
-    if (normalizedToolCalls) {
-      message.tool_calls = normalizedToolCalls;
-    }
-    if (reasoningContent.length > 0) {
-      message.reasoning_content = reasoningContent;
-    }
-    if (refusal != null) {
-      message.refusal = refusal;
-    }
-
-    const finalResponse = {
-      choices: [{ message }],
-      usage,
-    };
-    this.logChatCompletionDebug(debug, {
-      timestamp: new Date().toISOString(),
-      location: debug?.location ?? "SessionManager.createChatCompletionStream",
-      requestId,
-      sessionId,
-      model: typeof request.model === "string" ? request.model : undefined,
-      baseURL: debug?.baseURL,
-      durationMs: Date.now() - startedAtMs,
-      params: { ...debug?.params, options: summarizeCompletionOptions(options) },
-      request: streamRequest,
-      responseChunks,
-      response: finalResponse,
-    });
-    return finalResponse;
   }
 
   private logChatCompletionDebug(

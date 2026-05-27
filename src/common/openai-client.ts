@@ -26,6 +26,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
   thinkingEnabled: boolean;
   reasoningEffort: "high" | "max";
   debugLogEnabled: boolean;
+  requestTimeoutMs: number;
+  maxRetries: number;
   notify?: string;
   webSearchTool?: string;
   env: Record<string, string>;
@@ -40,6 +42,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
       debugLogEnabled: settings.debugLogEnabled,
+      requestTimeoutMs: settings.requestTimeoutMs,
+      maxRetries: settings.maxRetries,
       notify: settings.notify,
       webSearchTool: settings.webSearchTool,
       env: settings.env,
@@ -56,6 +60,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
       debugLogEnabled: settings.debugLogEnabled,
+      requestTimeoutMs: settings.requestTimeoutMs,
+      maxRetries: settings.maxRetries,
       notify: settings.notify,
       webSearchTool: settings.webSearchTool,
       env: settings.env,
@@ -91,6 +97,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.reasoningEffort,
     debugLogEnabled: settings.debugLogEnabled,
+    requestTimeoutMs: settings.requestTimeoutMs,
+    maxRetries: settings.maxRetries,
     notify: settings.notify,
     webSearchTool: settings.webSearchTool,
     env: settings.env,

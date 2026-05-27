@@ -31,6 +31,8 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `thinkingEnabled`  | boolean | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)|
 | `reasoningEffort`  | string  | Reasoning intensity, either `"high"` or `"max"` (default `"max"`)          |
 | `debugLogEnabled`  | boolean | Enable debug log output (default `false`)                                   |
+| `requestTimeoutMs` | number  | Main model request timeout in milliseconds. `0` disables the timeout (default `0`) |
+| `maxRetries`       | number  | Maximum retry count for transient main model request failures (default `2`, max `10`) |
 | `notify`           | string  | Full path to a task-completion notification script (e.g., Slack notification script) |
 | `webSearchTool`    | string  | Full path to a custom web search script                                     |
 | `mcpServers`       | object  | MCP server configurations (keys are service names, values are McpServerConfig objects) |
@@ -45,6 +47,8 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `THINKING_ENABLED`| string | Enable thinking mode                                            |
 | `REASONING_EFFORT`| string | Reasoning intensity                                             |
 | `DEBUG_LOG_ENABLED`| string| Enable debug log output                                         |
+| `REQUEST_TIMEOUT_MS`| string | Main model request timeout in milliseconds. `0` disables the timeout |
+| `MAX_RETRIES`     | string | Maximum retry count for transient main model request failures   |
 | `<any other KEY>` | string | Custom environment variable                                     |
 
 #### `thinkingEnabled` — Thinking Mode
@@ -128,6 +132,22 @@ For detailed MCP usage instructions, refer to [mcp.md](mcp.md).
 #### `debugLogEnabled` — Debug Log
 
 Set to `true` to enable detailed debug logging (default `false`), useful for troubleshooting API calls and tool execution.
+
+#### `requestTimeoutMs` and `maxRetries` — Request Timeout and Retries
+
+Controls timeout and automatic retries for main model Chat Completion requests:
+
+```json
+{
+  "requestTimeoutMs": 300000,
+  "maxRetries": 2
+}
+```
+
+- `requestTimeoutMs` is in milliseconds. The default `0` disables request timeout so long thinking or long outputs are not interrupted unexpectedly.
+- `maxRetries` defaults to `2` and is capped at `10`. Retries apply only to transient failures, such as network disconnects, request timeouts, HTTP `408`, `409`, `425`, `429`, and `5xx`.
+- User interrupts, permission denials, HTTP `400`, `401`, `403`, `404`, and other request/configuration errors are not retried.
+- You can also configure these through environment variables: `DEEPCODE_REQUEST_TIMEOUT_MS=300000`, `DEEPCODE_MAX_RETRIES=2`.
 
 ## Environment Variable Priority
 
