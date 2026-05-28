@@ -126,14 +126,6 @@ export async function handleEditTool(
         };
       }
 
-      if (input.old_string === "") {
-        return {
-          ok: false,
-          name: "edit",
-          error: "old_string must not be empty.",
-        };
-      }
-
       if (input.old_string === input.new_string) {
         return {
           ok: false,
@@ -195,10 +187,39 @@ export async function handleEditTool(
         const replaceAll = input.replace_all ?? false;
         const lineIndex = buildLineIndex(raw);
         const scope = buildSearchScope(filePath, raw, lineIndex, snippet);
-        let matches = findOccurrences(raw, oldString, scope);
-        let matchedVia: "exact" | "line_leading_tab_correction" | "loose_escape" | "llm_escape_correction" = "exact";
+        let matches: MatchOccurrence[] = [];
+        let matchedVia:
+          | "exact"
+          | "empty_file"
+          | "line_leading_tab_correction"
+          | "loose_escape"
+          | "llm_escape_correction" = "exact";
         let replacementOldString = oldString;
         let replacementNewString = newString;
+
+        if (oldString === "") {
+          if (raw !== "") {
+            return {
+              ok: false,
+              name: "edit",
+              error: "old_string must not be empty unless the file is empty.",
+              metadata: {
+                scope: formatScopeMetadata(scope),
+              },
+            };
+          }
+          matches = [
+            {
+              startOffset: 0,
+              endOffset: 0,
+              startLine: 1,
+              endLine: 1,
+            },
+          ];
+          matchedVia = "empty_file";
+        } else {
+          matches = findOccurrences(raw, oldString, scope);
+        }
 
         if (matches.length === 0) {
           const tabStrippedOldString = stripReadResultLineTabs(oldString);

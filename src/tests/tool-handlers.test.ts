@@ -607,6 +607,52 @@ test("Edit requires snippet_id even after Write refreshes file state", async () 
   assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\nbeta\n");
 });
 
+test("Edit allows empty old_string when the file is empty", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "empty-edit.txt");
+  fs.writeFileSync(filePath, "", "utf8");
+
+  const sessionId = "edit-empty-existing";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: "",
+      new_string: "initialized\n",
+    },
+    createContext(sessionId, workspace)
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(editResult.metadata?.matched_via, "empty_file");
+  assert.equal(editResult.metadata?.replaced_count, 1);
+  assert.match(String(editResult.metadata?.diff_preview ?? ""), /\+initialized/);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "initialized\n");
+});
+
+test("Edit rejects empty old_string when the file is not empty", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "non-empty-edit.txt");
+  fs.writeFileSync(filePath, "alpha\n", "utf8");
+
+  const sessionId = "edit-empty-old-string-non-empty-file";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: "",
+      new_string: "initialized\n",
+    },
+    createContext(sessionId, workspace)
+  );
+
+  assert.equal(editResult.ok, false);
+  assert.equal(editResult.error, "old_string must not be empty unless the file is empty.");
+  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\n");
+});
+
 test("Write requires a full read before overwriting an existing file", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "config.txt");
