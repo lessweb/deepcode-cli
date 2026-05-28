@@ -1,7 +1,9 @@
-import React from "react";
+import React, { useState } from "react";
 import { AppContext } from "../contexts";
 import App from "./App";
 import { RawModeProvider } from "../contexts";
+import { ThemeProvider, setCurrentTheme } from "../theme";
+import { resolveCurrentSettings } from "../../settings";
 
 const AppContainer: React.FC<{
   projectRoot: string;
@@ -9,11 +11,19 @@ const AppContainer: React.FC<{
   initialPrompt: string | undefined;
   onRestart: () => void;
 }> = ({ version, projectRoot, initialPrompt, onRestart }) => {
+  const settings = resolveCurrentSettings(projectRoot);
+  const [theme] = useState(settings.theme);
+
+  // 初始设置全局 chalk 主题
+  setCurrentTheme(theme);
+
   return (
     <AppContext.Provider value={{ version: version }}>
-      <RawModeProvider>
-        <App initialPrompt={initialPrompt} projectRoot={projectRoot} onRestart={onRestart} />
-      </RawModeProvider>
+      <ThemeProvider value={theme}>
+        <RawModeProvider>
+          <App initialPrompt={initialPrompt} projectRoot={projectRoot} onRestart={onRestart} />
+        </RawModeProvider>
+      </ThemeProvider>
     </AppContext.Provider>
   );
 };

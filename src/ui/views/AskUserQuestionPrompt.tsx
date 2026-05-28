@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text } from "ink";
 import type { AskUserQuestionAnswers, AskUserQuestionItem } from "../core/ask-user-question";
 import { useTerminalInput } from "../hooks";
+import { useTheme } from "../theme";
 
 type Props = {
   questions: AskUserQuestionItem[];
@@ -19,6 +20,7 @@ type OptionEntry = {
 };
 
 export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props): React.ReactElement | null {
+  const theme = useTheme();
   const [questionIndex, setQuestionIndex] = useState(0);
   const [cursorIndex, setCursorIndex] = useState(0);
   const [answers, setAnswers] = useState<AskUserQuestionAnswers>({});
@@ -163,9 +165,9 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.warning} paddingX={1} marginY={1}>
       <Box marginBottom={1}>
-        <Text color="yellow" bold>
+        <Text color={theme.warning} bold>
           Answer questions
         </Text>
         <Text dimColor>
@@ -173,7 +175,9 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
           {questionIndex + 1}/{questions.length}
         </Text>
       </Box>
-      <Text bold>{question.question}</Text>
+      <Text bold color={theme.text}>
+        {question.question}
+      </Text>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, index) => {
           const isCursor = index === cursorIndex;
@@ -183,7 +187,7 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
           const marker = question.multiSelect ? (isSelected ? "[x]" : "[ ]") : isSelected ? "●" : "○";
           return (
             <Box key={option.value} flexDirection="column">
-              <Text color={isCursor ? "cyanBright" : undefined}>
+              <Text color={isCursor ? theme.active : undefined}>
                 {isCursor ? "> " : "  "}
                 {marker} <Text bold={isCursor}>{option.label}</Text>
               </Text>
@@ -192,14 +196,14 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
                   marginLeft={4}
                   marginTop={0}
                   borderStyle="single"
-                  borderColor={isCursor ? "cyanBright" : "gray"}
+                  borderColor={isCursor ? theme.active : theme.textDim}
                   paddingX={1}
                   width={64}
                 >
                   {otherText ? (
-                    <Text color="white">
+                    <Text color={theme.text}>
                       {otherText}
-                      {isCursor ? <Text color="cyanBright">▌</Text> : null}
+                      {isCursor ? <Text color={theme.active}>▌</Text> : null}
                     </Text>
                   ) : (
                     <Text dimColor>{isCursor ? "type your answer here" : "type a custom answer"}</Text>

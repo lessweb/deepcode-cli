@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { SessionEntry, SessionStatus } from "../../session";
 import { truncate } from "../components/MessageView/utils";
+import { useTheme } from "../theme";
 
 type Props = {
   sessions: SessionEntry[];
@@ -43,6 +44,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
   const { columns, rows } = useWindowSize();
+  const theme = useTheme();
 
   // Filter sessions by search query
   const filteredSessions = useMemo(() => filterSessions(sessions, searchQuery), [sessions, searchQuery]);
@@ -180,7 +182,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
   if (sessions.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text color="yellow">No previous sessions found.</Text>
+        <Text color={theme.warning}>No previous sessions found.</Text>
         <Text dimColor>Press Esc to go back.</Text>
       </Box>
     );
@@ -198,12 +200,11 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
       <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} flexDirection="column">
-          <Box>
-            <Text bold color="cyanBright">
+          <Box gap={1}>
+            <Text bold color={theme.active}>
               Resume a session
             </Text>
-            <Text bold color="#229ac3">
-              {" "}
+            <Text color={theme.accent}>
               ({sessions.length} total
               {hasActiveSearch ? `, ${filteredSessions.length} matched` : ""})
             </Text>
@@ -230,7 +231,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
         >
           {filteredSessions.length === 0 ? (
             <Box paddingY={1}>
-              <Text color="yellow">No sessions match "{searchQuery}".</Text>
+              <Text color={theme.warning}>No sessions match "{searchQuery}".</Text>
             </Box>
           ) : (
             visibleSessions.map((session, i) => {
@@ -240,15 +241,15 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
                   <Box>
-                    <Text color="#229ac3">{isSelected ? "> " : "  "}</Text>
+                    <Text color={theme.accent}>{isSelected ? "> " : "  "}</Text>
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
                     <Box width={"100%"}>
-                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? "#229ac3" : undefined}>
+                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? theme.accent : undefined}>
                         {formatSessionTitle(session.summary || "Untitled")}
                       </Text>
                       {isConfirming ? (
-                        <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
+                        <Text color={theme.warning}> [Delete? Enter=yes, Esc=no]</Text>
                       ) : (
                         <Text dimColor> ({formatSessionStatus(session.status)})</Text>
                       )}
@@ -274,12 +275,12 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
         <Box flexDirection="column">
           {confirmDeleteSessionId ? (
             <Box>
-              <Text color="yellow">Delete this session? </Text>
-              <Text bold color="green">
+              <Text color={theme.warning}>Delete this session? </Text>
+              <Text bold color={theme.success}>
                 Enter
               </Text>
               <Text dimColor> to confirm · </Text>
-              <Text bold color="red">
+              <Text bold color={theme.error}>
                 Esc
               </Text>
               <Text dimColor> to cancel</Text>

@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { McpServerStatus } from "../../mcp/mcp-manager";
+import { useTheme } from "../theme";
 
 type Props = {
   statuses: McpServerStatus[];
@@ -10,6 +11,7 @@ type Props = {
 
 export function McpStatusList({ statuses, onCancel, onReconnect }: Props): React.ReactElement {
   const { columns, rows } = useWindowSize();
+  const theme = useTheme();
 
   // 视图模式：server-list（服务器列表） 或 server-detail（服务器详情）
   const [viewMode, setViewMode] = useState<"server-list" | "server-detail">("server-list");
@@ -40,7 +42,7 @@ export function McpStatusList({ statuses, onCancel, onReconnect }: Props): React
     return (
       <Box flexDirection="column" marginLeft={1} paddingX={1} gap={1} borderStyle="round" borderDimColor>
         <Box flexDirection="column">
-          <Text color="#229ac3" bold>
+          <Text color={theme.accent} bold>
             Manage MCP servers
           </Text>
           <Text dimColor>0 servers</Text>
@@ -100,6 +102,7 @@ function ServerListView({
 }): React.ReactElement {
   const [scrollOffset, setScrollOffset] = useState(0);
   const serverCount = statuses.length;
+  const theme = useTheme();
 
   const maxVisible = useMemo(() => {
     const reservedLines = 8; // header + footer + borders
@@ -190,15 +193,15 @@ function ServerListView({
       <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} gap={1}>
-          <Text bold color="#229ac3">
+          <Text bold color={theme.accent}>
             Manage MCP servers
           </Text>
           <Box gap={1}>
             <Text dimColor>(</Text>
-            <Text color="green">{readyCount} ready,</Text>
-            <Text color="yellow">{startingCount} starting,</Text>
-            {reconnectingCount > 0 && <Text color="#ff9900">{reconnectingCount} reconnecting,</Text>}
-            <Text color="red">{failedCount} failed</Text>
+            <Text color={theme.success}>{readyCount} ready,</Text>
+            <Text color={theme.warning}>{startingCount} starting,</Text>
+            {reconnectingCount > 0 && <Text color={theme.warning}>{reconnectingCount} reconnecting,</Text>}
+            <Text color={theme.error}>{failedCount} failed</Text>
             <Text dimColor>)</Text>
           </Box>
         </Box>
@@ -255,16 +258,17 @@ function ServerRow({
   selected: boolean;
   labelColumnWidth: number;
 }): React.ReactElement {
+  const theme = useTheme();
   const icon =
     status.status === "ready" ? "✓" : status.status === "failed" ? "✗" : status.status === "reconnecting" ? "↻" : "●";
   const color =
     status.status === "ready"
-      ? "green"
+      ? theme.success
       : status.status === "failed"
-        ? "red"
+        ? theme.error
         : status.status === "reconnecting"
-          ? "#ff9900"
-          : "yellow";
+          ? theme.warning
+          : theme.warning;
 
   // 加载动画：循环显示 (空) → . → .. → ... → (空) → ...
   const [dots, setDots] = React.useState(0);
@@ -290,7 +294,7 @@ function ServerRow({
       {/* Server row */}
       <Box gap={2}>
         <Box width={labelColumnWidth} flexShrink={0}>
-          <Text color={selected ? "#229ac3" : undefined}>
+          <Text color={selected ? theme.accent : undefined}>
             {selected ? "> " : "  "}
             <Text color={color}>{icon} </Text>
             <Text bold>{status.name}</Text>
@@ -328,6 +332,7 @@ function ServerDetailView({
   const [activeIndex, setActiveIndex] = React.useState(0);
   const hasReconnect = server.status === "failed";
   const canScroll = server.status === "ready";
+  const theme = useTheme();
 
   // 合并所有 items（tools, prompts, resources）+ Reconnect 选项
   const allItems = useMemo(() => {
@@ -415,12 +420,12 @@ function ServerDetailView({
     server.status === "ready" ? "✓" : server.status === "failed" ? "✗" : server.status === "reconnecting" ? "↻" : "●";
   const statusColor =
     server.status === "ready"
-      ? "green"
+      ? theme.success
       : server.status === "failed"
-        ? "red"
+        ? theme.error
         : server.status === "reconnecting"
-          ? "#ff9900"
-          : "yellow";
+          ? theme.warning
+          : theme.warning;
 
   return (
     <Box
@@ -435,7 +440,7 @@ function ServerDetailView({
         {/* Header row */}
         <Box paddingX={1} gap={1}>
           <Text color={statusColor}>{statusIcon} </Text>
-          <Text bold color="#229ac3" wrap="truncate-end">
+          <Text bold color={theme.accent} wrap="truncate-end">
             {server.name}
           </Text>
           <Text dimColor>— {server.status === "ready" ? "Details" : "Status"}</Text>
@@ -515,11 +520,12 @@ function ServerDetailView({
 function ItemRow({ item, selected }: { item: { type: string; name: string }; selected: boolean }): React.ReactElement {
   const isAction = item.type === "action";
   const icon = isAction ? "↻" : item.type === "tool" ? "🔧" : item.type === "prompt" ? "📝" : "📦";
-  const color = isAction && selected ? "#ff9900" : selected ? "#229ac3" : undefined;
+  const theme = useTheme();
+  const color = isAction && selected ? theme.warning : selected ? theme.accent : undefined;
 
   return (
     <Box height={1} flexDirection="row">
-      <Text color={selected ? "#229ac3" : undefined}>{selected ? "> " : "  "}</Text>
+      <Text color={selected ? theme.accent : undefined}>{selected ? "> " : "  "}</Text>
       <Text dimColor>{icon} </Text>
       <Text color={color} dimColor={!selected} bold={isAction} wrap="truncate-end">
         {isAction ? `[${item.name}]` : item.name}
@@ -529,8 +535,8 @@ function ItemRow({ item, selected }: { item: { type: string; name: string }; sel
 }
 
 function ErrorRow({ error }: { error: string }): React.ReactElement {
-  // 将错误消息按行分割，每行单独显示
   const lines = error.split("\n").filter((line) => line.trim().length > 0);
+  const theme = useTheme();
 
   return (
     <Box
@@ -539,12 +545,12 @@ function ErrorRow({ error }: { error: string }): React.ReactElement {
       marginTop={0}
       marginBottom={0}
       borderStyle="round"
-      borderColor="red"
+      borderColor={theme.error}
       borderDimColor
     >
       {lines.map((line, index) => (
         <Box key={index}>
-          <Text color="red" dimColor>
+          <Text color={theme.error} dimColor>
             {line}
           </Text>
         </Box>

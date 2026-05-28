@@ -1,5 +1,6 @@
 import React, { useMemo } from "react";
 import { Box, Text } from "ink";
+import { useTheme } from "../../theme";
 
 /**
  * Generic dropdown menu item structure
@@ -64,12 +65,15 @@ const DropdownMenu = React.memo(function DropdownMenu({
   maxVisible = 8,
   width,
   title,
-  titleColor = "#229ac3",
-  activeColor = "cyanBright",
+  titleColor,
+  activeColor,
   helpText,
   emptyText = "No items found",
   renderItem,
 }: DropdownMenuProps): React.ReactElement | null {
+  const theme = useTheme();
+  const effectiveTitleColor = titleColor ?? theme.accent;
+  const effectiveActiveColor = activeColor ?? theme.active;
   // Calculate visible window
   const visibleStart = calculateVisibleStart(activeIndex, items?.length, maxVisible);
   const visibleItems = items?.slice(visibleStart, visibleStart + maxVisible);
@@ -102,7 +106,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
     return (
       <Box flexDirection="column" marginBottom={1} width={width}>
         {title ? (
-          <Text color={titleColor} bold>
+          <Text color={effectiveTitleColor} bold>
             {title}
           </Text>
         ) : null}
@@ -125,7 +129,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
           borderLeft={false}
           paddingX={1}
         >
-          <Text color={titleColor} bold>
+          <Text color={effectiveTitleColor} bold>
             {title}
           </Text>
         </Box>
@@ -153,7 +157,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
           return (
             <Box key={item.key} flexGrow={1} flexDirection="row" gap={2} paddingX={1}>
               <Box width={labelColumnWidth} flexShrink={0}>
-                <Text color={isActive ? activeColor : undefined} wrap="truncate-end">
+                <Text color={isActive ? effectiveActiveColor : undefined} wrap="truncate-end">
                   {isActive ? "> " : "  "}
                   {item.selected !== undefined ? (item.selected ? "●" : "○") : null} <Text bold>{item.label}</Text>
                   {item.statusIndicator ? (

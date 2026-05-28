@@ -1,9 +1,11 @@
 import type React from "react";
 import { Text, type TextProps } from "ink";
 import Gradient from "ink-gradient";
+import { useTheme } from "../theme";
 
 export const ThemedGradient: React.FC<TextProps> = ({ children, ...props }) => {
-  const gradient = ["#229ac3e6", "#229ac3e6"]; // Use solid color for now
+  const theme = useTheme();
+  const gradient = theme.gradients;
 
   if (gradient && gradient.length >= 2) {
     return (
@@ -23,7 +25,7 @@ export const ThemedGradient: React.FC<TextProps> = ({ children, ...props }) => {
 
   // Fallback to accent color if no gradient
   return (
-    <Text color="yellow" {...props}>
+    <Text color={theme.accent} {...props}>
       {children}
     </Text>
   );

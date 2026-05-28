@@ -6,6 +6,7 @@ import * as path from "path";
 import { render, type Instance } from "ink";
 import chalk from "chalk";
 import { UpdatePrompt, type UpdatePromptChoice } from "../ui";
+import { DEFAULT_THEME } from "../ui/theme/presets";
 import { killProcessTree } from "./process-tree";
 
 export type PackageInfo = {
@@ -58,7 +59,7 @@ export async function promptForPendingUpdate(packageInfo: PackageInfo): Promise<
     if (ok) {
       writeUpdateState({ ...state, pending: null });
       process.stdout.write(
-        `\n${chalk.red("Deep Code has been updated. Please restart the CLI to use the new version.")}\n\n`
+        `\n${chalk.hex(DEFAULT_THEME.error)("Deep Code has been updated. Please restart the CLI to use the new version.")}\n\n`
       );
     }
     return { installed: ok };

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
-import chalk from "chalk";
+import { getCurrentThemedChalk, useTheme } from "../theme";
 import { createOpenAIClient } from "../../common/openai-client";
 import type { PermissionScope } from "../../settings";
 import { type ModelConfigSelection } from "../../settings";
@@ -59,6 +59,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
   const { mode, setMode } = useRawModeContext();
+  const theme = useTheme();
   const initialPromptSubmittedRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
   const rawModeRef = useRef<RawMode>(mode);
@@ -254,8 +255,9 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           const activeSessionId = sessionManager.getActiveSessionId();
           const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
           const summary = buildExitSummaryText({ session });
+          const tc = getCurrentThemedChalk();
           process.stdout.write("\n");
-          process.stdout.write(chalk.rgb(34, 154, 195)("> /exit "));
+          process.stdout.write(tc.accent("> /exit "));
           process.stdout.write("\n\n");
           process.stdout.write(summary);
           process.stdout.write("\n\n");
@@ -634,7 +636,9 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       return [welcomeItem, ...messages];
     }
     return messages;
-  }, [mode, showWelcome, view, messages, welcomeItem]);
+    // theme 作为依赖确保主题切换时 Static 子组件重渲染
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, showWelcome, view, messages, welcomeItem, theme]);
 
   const handleQuestionAnswers = useCallback(
     (answers: AskUserQuestionAnswers) => {
@@ -725,7 +729,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       ) : null}
       {errorLine ? (
         <Box>
-          <Text color="red">Error: {errorLine}</Text>
+          <Text color={theme.error}>Error: {errorLine}</Text>
         </Box>
       ) : null}
       {showProcessStdout ? (

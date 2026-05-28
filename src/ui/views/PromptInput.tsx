@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
 import chalk from "chalk";
+import { useTheme } from "../theme";
 import { ARGS_SEPARATOR } from "../constants";
 import {
   EMPTY_BUFFER,
@@ -95,6 +96,7 @@ const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", 
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: boolean }): React.ReactElement {
   const [spinnerIndex, setSpinnerIndex] = useState(0);
+  const theme = useTheme();
 
   useEffect(() => {
     if (!busy) {
@@ -108,7 +110,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
   }, [busy]);
 
   const prefix = busy ? `${SPINNER_FRAMES[spinnerIndex]} ` : "> ";
-  return <Text color={busy ? "yellow" : "#229ac3"}>{prefix}</Text>;
+  return <Text color={busy ? theme.warning : theme.accent}>{prefix}</Text>;
 });
 
 export const PromptInput = React.memo(function PromptInput({
@@ -131,6 +133,7 @@ export const PromptInput = React.memo(function PromptInput({
 }: Props): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
+  const theme = useTheme();
   const [buffer, setBuffer] = useState<PromptBufferState>(EMPTY_BUFFER);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<SkillInfo[]>([]);
@@ -726,13 +729,13 @@ export const PromptInput = React.memo(function PromptInput({
     <Box flexDirection="column" width={screenWidth}>
       {imageUrls.length > 0 ? (
         <Box>
-          <Text color="magenta">{formatImageAttachmentStatus(imageUrls.length)}</Text>
+          <Text color={theme.info}>{formatImageAttachmentStatus(imageUrls.length)}</Text>
           <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
         </Box>
       ) : null}
       {selectedSkills.length > 0 ? (
         <Box>
-          <Text color="magenta" wrap="truncate-end">
+          <Text color={theme.info} wrap="truncate-end">
             {formatSelectedSkillsStatus(selectedSkills)}
           </Text>
           <Text dimColor> (use /skills to edit)</Text>
@@ -748,7 +751,9 @@ export const PromptInput = React.memo(function PromptInput({
         borderDimColor
       >
         <PromptPrefixLine busy={busy} />
-        <Text>{renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder, pastesRef.current)}</Text>
+        <Text>
+          {renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder, pastesRef.current, theme.warning)}
+        </Text>
         {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
       </Box>
       <RawModelDropdown
@@ -866,11 +871,13 @@ export function renderBufferWithCursor(
   state: PromptBufferState,
   isFocused: boolean,
   placeholder?: string,
-  validPastes?: Map<number, string>
+  validPastes?: Map<number, string>,
+  highlightColor?: string
 ): string {
   const text = state.text || "";
   const cursor = Math.max(0, Math.min(state.cursor, text.length));
   const validIds = validPastes ?? new Map<number, string>();
+  const h = highlightColor ?? "#faad14";
 
   if (text.length === 0 && placeholder) {
     if (!isFocused) {
@@ -884,13 +891,13 @@ export function renderBufferWithCursor(
   }
 
   if (!isFocused) {
-    return highlightPasteMarkersInText(text, validIds);
+    return highlightPasteMarkersInText(text, validIds, h);
   }
 
-  return renderFocusedText(text, cursor, validIds);
+  return renderFocusedText(text, cursor, validIds, h);
 }
 
-function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): string {
+function highlightPasteMarkersInText(s: string, validIds: Map<number, string>, highlightColor: string): string {
   if (!s.includes("[paste #")) return s;
   PASTE_MARKER_REGEX.lastIndex = 0;
   let result = "";
@@ -899,7 +906,7 @@ function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): 
   while ((match = PASTE_MARKER_REGEX.exec(s)) !== null) {
     result += s.slice(pos, match.index);
     const id = Number.parseInt(match[1]!, 10);
-    result += validIds.has(id) ? chalk.yellow(match[0]) : match[0];
+    result += validIds.has(id) ? chalk.hex(highlightColor)(match[0]) : match[0];
     pos = match.index + match[0].length;
   }
   result += s.slice(pos);
@@ -912,7 +919,12 @@ function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): 
  * anywhere (including inside or at the boundary of a paste marker) and the
  * marker will still be highlighted correctly.
  */
-function renderFocusedText(text: string, cursor: number, validIds: Map<number, string>): string {
+function renderFocusedText(
+  text: string,
+  cursor: number,
+  validIds: Map<number, string>,
+  highlightColor: string
+): string {
   let result = "";
   let pos = 0;
   PASTE_MARKER_REGEX.lastIndex = 0;
@@ -925,16 +937,16 @@ function renderFocusedText(text: string, cursor: number, validIds: Map<number, s
     const isReal = validIds.has(id);
 
     // 1. Non-marker segment before this marker.
-    result += renderTextSegmentWithCursor(text, pos, markerStart, cursor, false);
+    result += renderTextSegmentWithCursor(text, pos, markerStart, cursor, false, highlightColor);
     pos = markerStart;
 
     // 2. Marker segment — highlighted only if it corresponds to a real paste.
-    result += renderTextSegmentWithCursor(text, pos, markerEnd, cursor, isReal);
+    result += renderTextSegmentWithCursor(text, pos, markerEnd, cursor, isReal, highlightColor);
     pos = markerEnd;
   }
 
   // 3. Remainder after the last marker.
-  result += renderTextSegmentWithCursor(text, pos, text.length, cursor, false);
+  result += renderTextSegmentWithCursor(text, pos, text.length, cursor, false, highlightColor);
 
   return result;
 }
@@ -948,7 +960,8 @@ function renderTextSegmentWithCursor(
   start: number,
   end: number,
   cursor: number,
-  highlighted: boolean
+  highlighted: boolean,
+  highlightColor: string
 ): string {
   if (start >= end) return "";
 
@@ -957,12 +970,12 @@ function renderTextSegmentWithCursor(
 
   // Cursor not in this segment – just return the text.
   if (cursorRel < 0 || cursorRel > segText.length) {
-    return highlighted ? chalk.yellow(segText) : segText;
+    return highlighted ? chalk.hex(highlightColor)(segText) : segText;
   }
 
   // Cursor is exactly at `end` (which equals `segText.length`).
   if (cursorRel === segText.length) {
-    return highlighted ? chalk.yellow(segText) + renderCursorCell(" ") : segText + renderCursorCell(" ");
+    return highlighted ? chalk.hex(highlightColor)(segText) + renderCursorCell(" ") : segText + renderCursorCell(" ");
   }
 
   // Cursor is somewhere inside the segment.
@@ -978,7 +991,7 @@ function renderTextSegmentWithCursor(
   const before = segText.slice(0, cursorRel);
   const after = segText.slice(cursorRel + 1);
   if (highlighted) {
-    return chalk.yellow(before) + renderCursorCell(at) + chalk.yellow(after);
+    return chalk.hex(highlightColor)(before) + renderCursorCell(at) + chalk.hex(highlightColor)(after);
   }
   return before + renderCursorCell(at) + after;
 }

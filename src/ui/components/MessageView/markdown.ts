@@ -1,4 +1,5 @@
 import chalk from "chalk";
+import { getCurrentThemedChalk } from "../../theme";
 
 /**
  * A rendered piece of markdown.  Consumers should use `wrap="truncate-end"` for
@@ -35,8 +36,9 @@ export function renderMarkdownSegments(text: string, maxWidth?: number): Markdow
 
   for (const seg of fenceSegments) {
     if (seg.kind === "code") {
-      const langTag = seg.lang ? chalk.dim(`[${seg.lang}]`) + "\n" : "";
-      segments.push({ kind: "code", body: langTag + chalk.cyan(seg.body), lang: seg.lang });
+      const tc = getCurrentThemedChalk();
+      const langTag = seg.lang ? tc.dim(`[${seg.lang}]`) + "\n" : "";
+      segments.push({ kind: "code", body: langTag + tc.code(seg.body), lang: seg.lang });
       continue;
     }
     const blocks = splitTableBlocks(seg.body);
@@ -366,29 +368,30 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
 // ---------------------------------------------------------------------------
 
 function renderInlineLine(line: string): string {
+  const tc = getCurrentThemedChalk();
   const headingMatch = /^(\s*)(#{1,6})\s+(.*)$/.exec(line);
   if (headingMatch) {
     const [, lead, hashes, content] = headingMatch;
-    const styled = hashes.length <= 2 ? chalk.bold.cyanBright(content) : chalk.bold.cyan(content);
-    return `${lead}${chalk.dim(hashes)} ${styled}`;
+    const styled = hashes.length <= 2 ? tc.heading1(content) : tc.heading3(content);
+    return `${lead}${tc.dim(hashes)} ${styled}`;
   }
 
   const listMatch = /^(\s*)([-*+])\s+(.*)$/.exec(line);
   if (listMatch) {
     const [, lead, bullet, content] = listMatch;
-    return `${lead}${chalk.yellow(bullet)} ${renderInlineSpans(content)}`;
+    return `${lead}${tc.listBullet(bullet)} ${renderInlineSpans(content)}`;
   }
 
   const numListMatch = /^(\s*)(\d+\.)\s+(.*)$/.exec(line);
   if (numListMatch) {
     const [, lead, marker, content] = numListMatch;
-    return `${lead}${chalk.yellow(marker)} ${renderInlineSpans(content)}`;
+    return `${lead}${tc.listBullet(marker)} ${renderInlineSpans(content)}`;
   }
 
   const quoteMatch = /^(\s*)>\s?(.*)$/.exec(line);
   if (quoteMatch) {
     const [, lead, content] = quoteMatch;
-    return `${lead}${chalk.dim("│ ")}${chalk.italic(renderInlineSpans(content))}`;
+    return `${lead}${tc.quote("│ ")}${chalk.italic(renderInlineSpans(content))}`;
   }
 
   return renderInlineSpans(line);
@@ -396,10 +399,11 @@ function renderInlineLine(line: string): string {
 
 function renderInlineSpans(text: string): string {
   if (!text) return text;
+  const tc = getCurrentThemedChalk();
   let result = text;
-  result = result.replace(/`([^`]+)`/g, (_, inner) => chalk.cyan(inner));
-  result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => chalk.bold(inner));
-  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => chalk.italic(inner));
-  result = result.replace(/_([^_\n]+)_/g, (_, inner) => chalk.italic(inner));
+  result = result.replace(/`([^`]+)`/g, (_, inner) => tc.inlineCode(inner));
+  result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => tc.bold(inner));
+  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => tc.italic(inner));
+  result = result.replace(/_([^_\n]+)_/g, (_, inner) => tc.italic(inner));
   return result;
 }

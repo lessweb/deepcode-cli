@@ -155,7 +155,6 @@ const ModelsDropdown: React.FC<Props> = ({
       helpText={step === "model" ? "Space/Enter select model · Esc to cancel" : "Space/Enter apply · Esc to cancel"}
       items={items}
       activeIndex={activeIndex}
-      activeColor="#229ac3"
       maxVisible={6}
     />
   );

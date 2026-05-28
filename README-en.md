@@ -141,6 +141,74 @@ For detailed configuration instructions, see: [docs/notify_en.md](docs/notify_en
 
 No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission.md](docs/permission.md) for details.
 
+### How do I customize the theme?
+
+Deep Code CLI includes a built-in default theme (`DEFAULT_THEME`) that works out of the box. To customize colors, set `theme.preset` to `"custom"` in `settings.json` and provide `overrides` or `tokens`.
+
+**Using the default theme (no config required)**
+
+No settings needed — the built-in theme is used automatically.
+
+**Option 1: Partial overrides (preset="custom" + overrides)**
+
+Override only the colors you want to change; the rest keep their defaults:
+
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "overrides": {
+      "accent": "#ff6600",
+      "success": "greenBright"
+    }
+  }
+}
+```
+
+**Option 2: Full customization (preset="custom" + tokens)**
+
+Provide a complete tokens object, merged on top of the default theme:
+
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "tokens": {
+      "accent": "#229ac3",
+      "accentAlpha": "#229ac3e6",
+      "active": "cyanBright",
+      "success": "green",
+      "error": "red",
+      "warning": "yellow",
+      "info": "magenta",
+      "riskLow": "#22c55e",
+      "riskMedium": "#f59e0b",
+      "riskHigh": "#ef4444",
+      "text": "white",
+      "textDim": "gray",
+      "code": "cyan",
+      "border": "gray",
+      "thinking": "gray",
+      "gradients": ["#229ac3e6", "#229ac3e6"]
+    }
+  }
+}
+```
+
+> Note: `overrides` and `tokens` only take effect when `preset` is set to `"custom"`. When `preset` is `"default"` or unset, the built-in default theme is always used.
+
+Available token descriptions:
+
+| Token | Used For |
+|-------|----------|
+| `accent`, `accentAlpha`, `active` | Logo, user messages, selected items, etc. |
+| `success`, `error`, `warning`, `info` | Tool statuses, permission prompts, skill loading; `warning` also colors list bullets |
+| `riskLow`, `riskMedium`, `riskHigh` | Permission confirmation panel |
+| `text`, `textDim`, `code`, `border`, `thinking` | Body text, secondary text/blockquotes, code, borders, thinking status |
+| `gradients` | Logo and exit panel gradient colors |
+
+Color values support hex (`"#ff6600"`), hex with alpha (`"#229ac3e6"`), and chalk named colors (`"cyanBright"`, `"green"`).
+
 ## Contributing
 
 Contributions are welcome! Here's how to get started:

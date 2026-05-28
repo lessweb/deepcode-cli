@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
 import DropdownMenu from "../DropdownMenu";
+import { useTheme } from "../../theme";
 import type { FileMentionItem, FileMentionToken } from "../../core/file-mentions";
 
 type Props = {
@@ -14,6 +15,7 @@ type Props = {
 };
 
 const FileMentionMenu: React.FC<Props> = ({ open, width, token, items, onClose, onSelect }) => {
+  const theme = useTheme();
   const [activeIndex, setActiveIndex] = useState(0);
 
   // Reset index when opened
@@ -93,13 +95,12 @@ const FileMentionMenu: React.FC<Props> = ({ open, width, token, items, onClose, 
         description: item.type === "directory" ? "directory" : "file",
       }))}
       activeIndex={activeIndex}
-      activeColor="#229ac3"
       maxVisible={8}
       renderItem={(item, isActive) => (
         <Box flexDirection="row" paddingX={1} gap={1}>
-          <Text color={isActive ? "#229ac3" : undefined}>{isActive ? "> " : "  "}</Text>
+          <Text color={isActive ? theme.active : undefined}>{isActive ? "> " : "  "}</Text>
           <Box flexGrow={1}>
-            <Text color={isActive ? "#229ac3" : undefined} wrap="truncate-end" bold={isActive}>
+            <Text color={isActive ? theme.active : undefined} wrap="truncate-end" bold={isActive}>
               {item.label}
             </Text>
           </Box>

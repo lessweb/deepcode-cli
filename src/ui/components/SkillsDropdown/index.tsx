@@ -2,6 +2,7 @@ import DropdownMenu from "../DropdownMenu";
 import React, { useEffect, useState } from "react";
 import type { SkillInfo } from "../../../session";
 import { useInput } from "ink";
+import { useTheme } from "../../theme";
 import { isSkillSelected } from "../../views/SlashCommandMenu";
 
 const SkillsDropdown: React.FC<{
@@ -12,6 +13,7 @@ const SkillsDropdown: React.FC<{
   selectedSkills: SkillInfo[];
   onSelect?: (skill: SkillInfo) => void;
 }> = ({ open, width, skills, selectedSkills, onSelect, onClose }) => {
+  const theme = useTheme();
   const [skillsDropdownIndex, setSkillsDropdownIndex] = useState(0);
   useInput(
     (input, key) => {
@@ -62,10 +64,9 @@ const SkillsDropdown: React.FC<{
         label: skill.name,
         description: skill.path,
         selected: isSkillSelected(selectedSkills, skill),
-        statusIndicator: skill.isLoaded ? { symbol: "✓", color: "green" } : undefined,
+        statusIndicator: skill.isLoaded ? { symbol: "✓", color: theme.success } : undefined,
       }))}
       activeIndex={skillsDropdownIndex}
-      activeColor="#229ac3"
       maxVisible={6}
     />
   );

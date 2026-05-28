@@ -8,6 +8,7 @@ import { buildSlashCommands, BUILTIN_SLASH_COMMANDS, formatSlashCommandDescripti
 import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../ascii-art";
 import { useAppContext } from "../contexts";
+import { useTheme } from "../theme";
 
 type WelcomeScreenProps = {
   projectRoot: string;
@@ -30,6 +31,7 @@ const SHORTCUT_TIPS = [
 
 export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeScreenProps): React.ReactElement {
   const { version } = useAppContext();
+  const theme = useTheme();
   const tips = useMemo(() => buildWelcomeTips(skills), [skills]);
   const [tipIndex] = useState(() => randomTipIndex(tips.length));
   const compact = width < TITLE_PANEL_WIDTH + 42;
@@ -49,7 +51,7 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
 
           <Box
             borderStyle={"round"}
-            borderColor={"#229ac3e6"}
+            borderColor={theme.accentAlpha}
             flexDirection="column"
             flexGrow={1}
             height={compact ? undefined : PANEL_CONTENT_HEIGHT}
@@ -57,8 +59,8 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
             paddingX={1}
           >
             <Box flexGrow={1} marginBottom={compact ? 1 : 0}>
-              <Text color={"#229ac3e6"}>{">"}_ Deep Code </Text>
-              <Text color="gray"> (v{version || "unknown"})</Text>
+              <Text color={theme.accentAlpha}>{">"}_ Deep Code </Text>
+              <Text dimColor> (v{version || "unknown"})</Text>
             </Box>
             {!compact ? <Text> </Text> : null}
             <SettingRow label="Model" value={settings.model} />
