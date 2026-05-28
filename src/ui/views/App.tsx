@@ -2,9 +2,21 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSta
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
 import { createOpenAIClient } from "../../common/openai-client";
-import type { PermissionScope } from "../../settings";
+import {
+  type LlmStreamProgress,
+  type MessageMeta,
+  type PermissionScope,
+  type PendingSupplementary,
+  type SessionEntry,
+  SessionManager,
+  type SessionMessage,
+  type SessionStatus,
+  type SkillInfo,
+  type UndoTarget,
+  type UserPromptContent,
+} from "../../session";
 import { type ModelConfigSelection } from "../../settings";
-import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
+import { PromptInput, type PromptDraft, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
@@ -34,17 +46,6 @@ import {
 import { resolveCurrentSettings, writeModelConfigSelection } from "../../settings";
 import { isCollapsedThinking } from "../core/thinking-state";
 import { ANSI_CLEAR_SCREEN } from "../constants";
-import type {
-  LlmStreamProgress,
-  MessageMeta,
-  SessionEntry,
-  SessionMessage,
-  SessionStatus,
-  SkillInfo,
-  UndoTarget,
-  UserPromptContent,
-} from "../../session";
-import { SessionManager } from "../../session";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -91,12 +92,16 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
+  const [supplementaryCount, setSupplementaryCount] = useState(0);
+  const [supplementaryList, setSupplementaryList] = useState<PendingSupplementary[]>([]);
+  const [isSummarizing, setIsSummarizing] = useState(false);
 
   rawModeRef.current = mode;
   messagesRef.current = messages;
 
+  const sessionManagerRef = useRef<SessionManager | null>(null);
   const sessionManager = useMemo(() => {
-    return new SessionManager({
+    const sm = new SessionManager({
       projectRoot,
       createOpenAIClient: () => createOpenAIClient(projectRoot),
       getResolvedSettings: () => resolveCurrentSettings(projectRoot),
@@ -138,7 +143,18 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         const available = MAX_STDOUT_BUFFER - current.length;
         buf.set(pid, current + text.slice(0, available));
       },
+      onSupplementaryStatusChanged: (sessionId, count) => {
+        setSupplementaryCount(count);
+        if (count > 0 && sessionId) {
+          const sm = sessionManagerRef.current;
+          setSupplementaryList(sm ? sm.listPendingSupplementary(sessionId) : []);
+        } else {
+          setSupplementaryList([]);
+        }
+      },
     });
+    sessionManagerRef.current = sm;
+    return sm;
   }, [projectRoot]);
 
   /**
@@ -170,11 +186,33 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
   useEffect(() => {
     if (!busy) {
+      setIsSummarizing(false);
+      // 未注入的补充信息自动回填到输入框
+      const sessionId = sessionManager.getActiveSessionId();
+      if (sessionId) {
+        const pendingList = sessionManager.listPendingSupplementary(sessionId);
+        if (pendingList.length > 0) {
+          const filledText = pendingList.map((m) => m.content).join("\n");
+          for (const item of pendingList) {
+            sessionManager.cancelSupplementaryMessage(sessionId, item.id);
+          }
+          setPromptDraft({
+            nonce: Date.now(),
+            text: filledText,
+            imageUrls: [],
+          });
+          // draft 应用后立即清除，防止 PromptInput 重挂时重复填充
+          setTimeout(() => setPromptDraft(null), 0);
+        }
+      }
       return;
     }
-    const id = setInterval(() => setNowTick((tick) => tick + 1), 500);
+    const id = setInterval(() => {
+      setNowTick((tick) => tick + 1);
+      setIsSummarizing(sessionManager.isInSummaryPhase());
+    }, 500);
     return () => clearInterval(id);
-  }, [busy]);
+  }, [busy, sessionManager]);
 
   function loadVisibleMessages(manager: SessionManager, sessionId: string): SessionMessage[] {
     return manager.listSessionMessages(sessionId).filter((m) => m.visible);
@@ -357,6 +395,29 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       navigateToSubView,
       resetToWelcome,
     ]
+  );
+
+  const handleSupplementarySubmit = useCallback(
+    (text: string) => {
+      const sessionId = sessionManager.getActiveSessionId();
+      if (!sessionId) return;
+      const msgId = sessionManager.addSupplementaryMessage(sessionId, text);
+      if (msgId === null) {
+        setErrorLine("Supplementary queue is full (max 10).");
+      }
+    },
+    [sessionManager]
+  );
+
+  const handleSupplementaryCancel = useCallback(
+    (messageId: string) => {
+      const sessionId = sessionManager.getActiveSessionId();
+      if (!sessionId) return;
+      sessionManager.cancelSupplementaryMessage(sessionId, messageId);
+      setSupplementaryCount(sessionManager.countPendingSupplementary(sessionId));
+      setSupplementaryList(sessionManager.listPendingSupplementary(sessionId));
+    },
+    [sessionManager]
   );
 
   const handleInterrupt = useCallback(() => {
@@ -780,24 +841,42 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />
-      ) : isExiting ? null : (
-        <PromptInput
-          projectRoot={projectRoot}
-          screenWidth={screenWidth}
-          skills={skills}
-          modelConfig={resolvedSettings}
-          promptHistory={promptHistory}
-          busy={busy}
-          loadingText={loadingText}
-          runningProcesses={runningProcesses}
-          promptDraft={promptDraft}
-          onSubmit={handleSubmit}
-          onModelConfigChange={handleModelConfigChange}
-          onRawModeChange={handleRawModeChange}
-          onInterrupt={handleInterrupt}
-          onToggleProcessStdout={handleToggleProcessStdout}
-          placeholder="Type your message..."
-        />
+      ) : null}
+      {/* PromptInput 始终保持挂载（防止 buffer 丢失），全屏视图时高度折叠隐藏 */}
+      {!isExiting && (
+        <Box
+          flexShrink={0}
+          height={
+            showProcessStdout || view !== "chat" || (shouldShowQuestionPrompt && pendingQuestion && !busy)
+              ? 0
+              : undefined
+          }
+          overflow="hidden"
+          minHeight={0}
+        >
+          <PromptInput
+            projectRoot={projectRoot}
+            screenWidth={screenWidth}
+            skills={skills}
+            modelConfig={resolvedSettings}
+            promptHistory={promptHistory}
+            busy={busy}
+            loadingText={loadingText}
+            runningProcesses={runningProcesses}
+            isSummarizing={isSummarizing}
+            pendingSupplementaryCount={supplementaryCount}
+            pendingSupplementaryList={supplementaryList}
+            promptDraft={promptDraft}
+            onSubmit={handleSubmit}
+            onSupplementarySubmit={handleSupplementarySubmit}
+            onSupplementaryCancel={handleSupplementaryCancel}
+            onModelConfigChange={handleModelConfigChange}
+            onRawModeChange={handleRawModeChange}
+            onInterrupt={handleInterrupt}
+            onToggleProcessStdout={handleToggleProcessStdout}
+            placeholder="Type your message..."
+          />
+        </Box>
       )}
     </Box>
   );

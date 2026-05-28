@@ -54,7 +54,7 @@ import {
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "../../settings";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
-import type { SessionEntry, SkillInfo } from "../../session";
+import type { PendingSupplementary, SessionEntry, SkillInfo } from "../../session";
 import type { UserToolPermission } from "../../common/permissions";
 
 export type PromptSubmission = {
@@ -84,6 +84,16 @@ type Props = {
   placeholder?: string;
   runningProcesses?: SessionEntry["processes"];
   promptDraft?: PromptDraft | null;
+  /** 是否处于总结阶段（LLM 返回无 tool_calls 的 final response） */
+  isSummarizing?: boolean;
+  /** 待处理的补充信息数量 */
+  pendingSupplementaryCount?: number;
+  /** 待处理的补充信息列表（展示内容和取消用） */
+  pendingSupplementaryList?: PendingSupplementary[];
+  /** 提交补充信息 */
+  onSupplementarySubmit?: (text: string) => void;
+  /** 取消某条补充信息 */
+  onSupplementaryCancel?: (messageId: string) => void;
   onSubmit: (submission: PromptSubmission) => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
   onRawModeChange?: (mode: string) => void;
@@ -123,6 +133,11 @@ export const PromptInput = React.memo(function PromptInput({
   placeholder,
   runningProcesses,
   promptDraft,
+  isSummarizing,
+  pendingSupplementaryCount: _pendingSupplementaryCount,
+  pendingSupplementaryList,
+  onSupplementarySubmit,
+  onSupplementaryCancel,
   onSubmit,
   onModelConfigChange,
   onInterrupt,
@@ -143,6 +158,11 @@ export const PromptInput = React.memo(function PromptInput({
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
   const [hasTerminalFocus, setHasTerminalFocus] = useState(true);
+  const [supplementaryFocusIndex, setSupplementaryFocusIndex] = useState(0);
+  const hasSuppList = pendingSupplementaryList != null && pendingSupplementaryList.length > 0;
+  useEffect(() => {
+    if (!hasSuppList) setSupplementaryFocusIndex(0);
+  }, [hasSuppList]);
   const lastCtrlDAt = React.useRef<number>(0);
   const undoRedoRef = React.useRef(createPromptUndoRedoState());
   const wasBusyRef = React.useRef(busy);
@@ -191,12 +211,15 @@ export const PromptInput = React.memo(function PromptInput({
       : hasExpandedRegions
         ? " · ctrl+o collapse"
         : "";
+  const supplementaryHint = busy && !isSummarizing ? " · enter send supplementary" : "";
   const footerText = statusMessage
     ? statusMessage
     : busy
-      ? loadingText && loadingText.trim()
-        ? `${loadingText}${processOrPasteHint}`
-        : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`
+      ? isSummarizing
+        ? `esc to interrupt · waiting for summary to complete${processOrPasteHint}`
+        : loadingText && loadingText.trim()
+          ? `${loadingText}${supplementaryHint}${processOrPasteHint}`
+          : `esc to interrupt · ctrl+c to cancel input${supplementaryHint}${processOrPasteHint}`
       : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
   useTerminalFocusReporting(stdout, !disabled);
   useTerminalExtendedKeys(stdout, !disabled);
@@ -254,7 +277,16 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
     appliedDraftNonceRef.current = promptDraft.nonce;
-    setBuffer({ text: promptDraft.text, cursor: promptDraft.text.length });
+    // 合并补充信息回填 + 用户已输入的内容
+    setBuffer((prev) => {
+      const draftText = promptDraft.text;
+      const existingText = prev.text.trim();
+      if (!existingText) {
+        return { text: draftText, cursor: draftText.length };
+      }
+      const merged = existingText.includes(draftText.trim()) ? existingText : `${draftText}\n${existingText}`;
+      return { text: merged, cursor: merged.length };
+    });
     setImageUrls(promptDraft.imageUrls);
     setSelectedSkills([]);
     setShowSkillsDropdown(false);
@@ -295,9 +327,9 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.ctrl && (input === "o" || input === "O")) {
-        if (runningProcesses && runningProcesses.size > 0 && onToggleProcessStdout) {
+        if (hasRunningProcess && onToggleProcessStdout) {
           onToggleProcessStdout();
-        } else {
+        } else if (!hasRunningProcess) {
           expandPasteMarkerAtCursor();
         }
         return;
@@ -406,7 +438,12 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (busy && isPlainReturn) {
-        setStatusMessage("wait for the current response or press esc to interrupt");
+        if (isSummarizing) {
+          setStatusMessage("Agent is generating final response, please wait...");
+          return;
+        }
+        // 非总结阶段：允许进入 submitCurrentBuffer（切换为补充模式）
+        submitCurrentBuffer();
         return;
       }
 
@@ -426,6 +463,16 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.backspace) {
+        // 有待处理的补充信息且输入框为空时，取消焦点所在的条目
+        if (hasSuppList && isEmpty(buffer)) {
+          const target = pendingSupplementaryList![supplementaryFocusIndex];
+          if (target) {
+            onSupplementaryCancel?.(target.id);
+            setSupplementaryFocusIndex((i) => Math.max(0, i - 1));
+            setStatusMessage("Cancelled supplementary message");
+          }
+          return;
+        }
         updateBuffer((s) => deletePasteMarkerBackward(s, pastesRef.current) ?? backspace(s));
         return;
       }
@@ -461,6 +508,10 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.upArrow) {
+        if (hasSuppList && noModifier) {
+          setSupplementaryFocusIndex((i) => Math.max(0, i - 1));
+          return;
+        }
         if (noModifier && (historyCursor !== -1 || buffer.cursor === 0) && promptHistory.length > 0) {
           navigateHistory(-1);
           return;
@@ -470,6 +521,10 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.downArrow) {
+        if (hasSuppList && noModifier) {
+          setSupplementaryFocusIndex((i) => Math.min(pendingSupplementaryList!.length - 1, i + 1));
+          return;
+        }
         if (noModifier && (historyCursor !== -1 || buffer.cursor === buffer.text.length)) {
           navigateHistory(1);
           return;
@@ -674,13 +729,25 @@ export const PromptInput = React.memo(function PromptInput({
   }
 
   function submitCurrentBuffer(): void {
-    if (busy) {
-      setStatusMessage("wait for the current response or press esc to interrupt");
+    const trimmed = buffer.text.trim();
+    const hasContent = trimmed || imageUrls.length > 0 || selectedSkills.length > 0;
+
+    if (!hasContent) {
       return;
     }
 
-    const trimmed = buffer.text.trim();
-    if (!trimmed && imageUrls.length === 0 && selectedSkills.length === 0) {
+    if (busy) {
+      if (isSummarizing) {
+        setStatusMessage("Agent is generating final response, please wait...");
+        return;
+      }
+      // 补充模式：提交为补充信息
+      if (trimmed) {
+        onSupplementarySubmit?.(expandPasteMarkers(buffer.text, pastesRef.current));
+        resetPromptInput();
+      } else {
+        setStatusMessage("Supplementary guidance requires text.");
+      }
       return;
     }
 
@@ -736,6 +803,27 @@ export const PromptInput = React.memo(function PromptInput({
             {formatSelectedSkillsStatus(selectedSkills)}
           </Text>
           <Text dimColor> (use /skills to edit)</Text>
+        </Box>
+      ) : null}
+      {pendingSupplementaryList != null && pendingSupplementaryList.length > 0 ? (
+        <Box flexDirection="column">
+          <Box>
+            <Text color="yellow">── Supplementary Messages ──</Text>
+          </Box>
+          {pendingSupplementaryList.map((item, idx) => (
+            <Box key={item.id} flexDirection="row" gap={1}>
+              <Text color={idx === supplementaryFocusIndex ? "cyan" : "yellow"}>
+                {idx === supplementaryFocusIndex ? "▸" : " "}
+              </Text>
+              <Text color="yellow" wrap="truncate-end" bold={idx === supplementaryFocusIndex}>
+                {item.content.length > 55 ? `${item.content.slice(0, 55)}...` : item.content}
+              </Text>
+              <Text color="red">{idx === supplementaryFocusIndex ? " [x]" : ""}</Text>
+            </Box>
+          ))}
+          <Box>
+            <Text dimColor>↑↓ navigate · backspace cancel · enter send</Text>
+          </Box>
         </Box>
       ) : null}
       {/* Input */}

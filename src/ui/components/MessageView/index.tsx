@@ -137,6 +137,21 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
         </Box>
       );
     }
+    if (message.meta?.isSupplementary) {
+      const text = (message.content || "").replace(/^\[User Supplementary Guidance\]\n?/, "");
+      return (
+        <Box marginLeft={1} marginBottom={1} flexDirection="column" marginY={0}>
+          <Box flexDirection="row" gap={1}>
+            <Text color="yellow">┌─ [Supplementary Guidance]</Text>
+          </Box>
+          <Box flexDirection="row" gap={1} marginLeft={2}>
+            <Text color="yellow" wrap="wrap">
+              {text}
+            </Text>
+          </Box>
+        </Box>
+      );
+    }
     return null;
   }
 

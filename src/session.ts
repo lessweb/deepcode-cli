@@ -57,6 +57,7 @@ export type {
 } from "./common/permissions";
 
 const MAX_SESSION_ENTRIES = 50;
+const MAX_SUPPLEMENTARY_QUEUE = 10;
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
 const NEW_PROMPT_REPORT_TIMEOUT_MS = 3000;
 const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
@@ -213,6 +214,7 @@ export type MessageMeta = {
   asThinking?: boolean;
   isSummary?: boolean;
   isModelChange?: boolean;
+  isSupplementary?: boolean;
   skill?: SkillInfo;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;
@@ -255,6 +257,13 @@ export type SkillInfo = {
   isLoaded?: boolean;
 };
 
+export type PendingSupplementary = {
+  id: string;
+  sessionId: string;
+  content: string;
+  createdAt: Date;
+};
+
 type SessionManagerOptions = {
   projectRoot: string;
   createOpenAIClient: CreateOpenAIClient;
@@ -270,6 +279,7 @@ type SessionManagerOptions = {
   onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   onMcpStatusChanged?: () => void;
   onProcessStdout?: (pid: number, chunk: string) => void;
+  onSupplementaryStatusChanged?: (sessionId: string, count: number) => void;
 };
 
 export type LlmStreamProgress = {
@@ -295,7 +305,10 @@ export class SessionManager {
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   private readonly onMcpStatusChanged?: () => void;
   private readonly onProcessStdout?: (pid: number, chunk: string) => void;
+  private readonly onSupplementaryStatusChanged?: (sessionId: string, count: number) => void;
   private activeSessionId: string | null = null;
+  private isSummarizing = false;
+  private readonly pendingSupplementaryBySession = new Map<string, PendingSupplementary[]>();
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
@@ -312,6 +325,7 @@ export class SessionManager {
     this.onLlmStreamProgress = options.onLlmStreamProgress;
     this.onMcpStatusChanged = options.onMcpStatusChanged;
     this.onProcessStdout = options.onProcessStdout;
+    this.onSupplementaryStatusChanged = options.onSupplementaryStatusChanged;
     this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
     this.mcpManager.prepare(this.getResolvedSettings().mcpServers);
   }
@@ -917,6 +931,73 @@ The candidate skills are as follows:\n\n`;
     this.activeSessionId = sessionId;
   }
 
+  /** 队列中待处理补充信息的数量 */
+  countPendingSupplementary(sessionId: string): number {
+    return this.pendingSupplementaryBySession.get(sessionId)?.length ?? 0;
+  }
+
+  /** 获取待处理补充信息列表（给 UI 展示和取消用） */
+  listPendingSupplementary(sessionId: string): PendingSupplementary[] {
+    return [...(this.pendingSupplementaryBySession.get(sessionId) ?? [])];
+  }
+
+  /** 新增补充信息到队列，返回消息 ID；队列满时返回 null */
+  addSupplementaryMessage(sessionId: string, content: string): string | null {
+    const list = this.pendingSupplementaryBySession.get(sessionId) ?? [];
+    if (list.length >= MAX_SUPPLEMENTARY_QUEUE) {
+      return null;
+    }
+    const id = crypto.randomUUID();
+    list.push({ id, sessionId, content, createdAt: new Date() });
+    this.pendingSupplementaryBySession.set(sessionId, list);
+    this.onSupplementaryStatusChanged?.(sessionId, list.length);
+    return id;
+  }
+
+  /** 取消某条待处理的补充信息，返回是否成功 */
+  cancelSupplementaryMessage(sessionId: string, messageId: string): boolean {
+    const list = this.pendingSupplementaryBySession.get(sessionId);
+    if (!list) return false;
+    const idx = list.findIndex((e) => e.id === messageId);
+    if (idx === -1) return false;
+    list.splice(idx, 1);
+    if (list.length === 0) {
+      this.pendingSupplementaryBySession.delete(sessionId);
+    } else {
+      this.pendingSupplementaryBySession.set(sessionId, list);
+    }
+    this.onSupplementaryStatusChanged?.(sessionId, list.length);
+    return true;
+  }
+
+  /** 清空并返回待注入的补充信息（构建为 system 消息） */
+  private flushSupplementaryMessages(sessionId: string): SessionMessage[] {
+    const list = this.pendingSupplementaryBySession.get(sessionId);
+    if (!list || list.length === 0) return [];
+    this.pendingSupplementaryBySession.delete(sessionId);
+    const now = new Date().toISOString();
+    const messages = list.map((entry) => ({
+      id: crypto.randomUUID(),
+      sessionId,
+      role: "system" as const,
+      content: `[User Supplementary Guidance]\n${entry.content}`,
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+      meta: { isSupplementary: true } as MessageMeta,
+    }));
+    this.onSupplementaryStatusChanged?.(sessionId, 0);
+    return messages;
+  }
+
+  /** UI 查询是否处于总结阶段 */
+  isInSummaryPhase(): boolean {
+    return this.isSummarizing;
+  }
+
   addSessionSystemMessage(sessionId: string, content: string, visible?: boolean, meta?: MessageMeta): void {
     const message = this.buildSystemMessage(sessionId, content, null, visible, meta);
     if (sessionId) this.appendSessionMessage(sessionId, message);
@@ -988,6 +1069,7 @@ The candidate skills are as follows:\n\n`;
         removeMessages: true,
         processIds: this.getProcessIds(dropped.processes ?? null),
       });
+      this.pendingSupplementaryBySession.delete(dropped.id);
     }
 
     const promptToolOptions = this.getPromptToolOptions();
@@ -1186,6 +1268,7 @@ ${skillMd}
     try {
       const maxIterations = 80000; // about 1K RMB cost
       let toolCalls: unknown[] | null = null;
+      this.isSummarizing = false;
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         if (this.isInterrupted(sessionId)) {
@@ -1215,6 +1298,15 @@ ${skillMd}
               updateTime: new Date().toISOString(),
             }));
             return;
+          }
+        }
+
+        // 按时机注入待处理的补充信息（在 LLM 调用前）
+        if (!this.isSummarizing) {
+          const supplementaryMsgs = this.flushSupplementaryMessages(sessionId);
+          for (const msg of supplementaryMsgs) {
+            this.appendSessionMessage(sessionId, msg);
+            this.onAssistantMessage(msg, true);
           }
         }
 
@@ -1259,6 +1351,11 @@ ${skillMd}
         const thinking = typeof rawThinking === "string" ? rawThinking : null;
         const refusal = (message as { refusal?: string } | undefined)?.refusal ?? null;
         // const html = content ? this.renderMarkdown(content) : "";
+
+        // 如果 LLM 返回无 tool_calls，标记为总结阶段
+        if (!toolCalls) {
+          this.isSummarizing = true;
+        }
 
         if (this.isInterrupted(sessionId)) {
           return;
