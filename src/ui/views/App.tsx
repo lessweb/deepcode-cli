@@ -257,7 +257,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           const summary = buildExitSummaryText({ session });
           const tc = getCurrentThemedChalk();
           process.stdout.write("\n");
-          process.stdout.write(tc.accent("> /exit "));
+          process.stdout.write(tc.primary("> /exit "));
           process.stdout.write("\n\n");
           process.stdout.write(summary);
           process.stdout.write("\n\n");

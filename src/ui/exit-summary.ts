@@ -75,7 +75,7 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
 
   const theme = getCurrentThemeTokens();
   const tc = getCurrentThemedChalk();
-  const borderColor = chalk.hex(theme.accentAlpha);
+  const borderColor = chalk.hex(theme.secondary);
   const titleColor = gradientString(...theme.gradients);
   const line = (text: string) => `${borderColor("│")}  ${padRight(text, contentWidth)}  ${borderColor("│")}`;
 

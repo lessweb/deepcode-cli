@@ -72,8 +72,8 @@ const DropdownMenu = React.memo(function DropdownMenu({
   renderItem,
 }: DropdownMenuProps): React.ReactElement | null {
   const theme = useTheme();
-  const effectiveTitleColor = titleColor ?? theme.accent;
-  const effectiveActiveColor = activeColor ?? theme.active;
+  const effectiveTitleColor = titleColor ?? theme.primary;
+  const effectiveActiveColor = activeColor ?? theme.primary;
   // Calculate visible window
   const visibleStart = calculateVisibleStart(activeIndex, items?.length, maxVisible);
   const visibleItems = items?.slice(visibleStart, visibleStart + maxVisible);
@@ -117,18 +117,20 @@ const DropdownMenu = React.memo(function DropdownMenu({
   }
 
   return (
-    <Box flexDirection="column" marginBottom={1} borderStyle={"round"} borderDimColor width={width}>
+    <Box
+      flexDirection="column"
+      marginBottom={1}
+      borderStyle={"round"}
+      borderBottom={true}
+      borderTop={true}
+      borderLeft={false}
+      borderRight={false}
+      borderColor={theme.border}
+      width={width}
+    >
       {/* Title */}
       {title ? (
-        <Box
-          borderStyle={"single"}
-          borderDimColor
-          borderBottom={true}
-          borderRight={false}
-          borderTop={false}
-          borderLeft={false}
-          paddingX={1}
-        >
+        <Box paddingX={1} marginBottom={1}>
           <Text color={effectiveTitleColor} bold>
             {title}
           </Text>
@@ -159,7 +161,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
               <Box width={labelColumnWidth} flexShrink={0}>
                 <Text color={isActive ? effectiveActiveColor : undefined} wrap="truncate-end">
                   {isActive ? "> " : "  "}
-                  {item.selected !== undefined ? (item.selected ? "●" : "○") : null} <Text bold>{item.label}</Text>
+                  {item.selected !== undefined ? (item.selected ? "●" : "○") : null} <Text>{item.label}</Text>
                   {item.statusIndicator ? (
                     <Text color={item.statusIndicator.color}> {item.statusIndicator.symbol}</Text>
                   ) : null}
@@ -180,15 +182,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
 
       {/* Help text */}
       {helpText ? (
-        <Box
-          borderStyle={"single"}
-          borderDimColor
-          borderBottom={false}
-          borderRight={false}
-          borderTop={true}
-          borderLeft={false}
-          paddingX={1}
-        >
+        <Box paddingX={1} marginLeft={2} marginTop={1}>
           <Text dimColor>{helpText}</Text>
         </Box>
       ) : null}

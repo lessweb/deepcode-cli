@@ -25,10 +25,10 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     return (
       <Box marginLeft={1} marginBottom={1} flexDirection="row" marginY={0} flexGrow={1} gap={1}>
         <Box>
-          <Text color={theme.accent}>{`>`}</Text>
+          <Text color={theme.primary}>{`>`}</Text>
         </Box>
         <Box flexGrow={1}>
-          <Text color={theme.accent}>{text}</Text>
+          <Text color={theme.primary}>{text}</Text>
           {Array.isArray(message.contentParams) && message.contentParams.length > 0 ? (
             <Text color={theme.info}>{`  📎 ${message.contentParams.length} image attachment(s)`}</Text>
           ) : null}
@@ -66,7 +66,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     return (
       <Box marginLeft={1} marginBottom={1} width={containerWidth} gap={1} marginY={0} flexDirection="row">
         <Box alignSelf="stretch">
-          <Text color={theme.accent}>✦</Text>
+          <Text color={theme.primary}>✦</Text>
         </Box>
         <Box flexGrow={1} width={contentWidth} flexDirection="column">
           {content
@@ -114,10 +114,10 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
       return (
         <Box marginY={0} marginLeft={1} marginBottom={1} flexGrow={1} flexDirection="row" gap={1}>
           <Box>
-            <Text color={theme.accent}>{`>`}</Text>
+            <Text color={theme.primary}>{`>`}</Text>
           </Box>
           <Box flexGrow={1} flexDirection="column">
-            <Text color={theme.accent}>{message.content}</Text>
+            <Text color={theme.primary}>{message.content}</Text>
           </Box>
         </Box>
       );

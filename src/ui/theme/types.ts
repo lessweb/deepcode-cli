@@ -2,11 +2,9 @@
 export interface ThemeTokens {
   // ——— 品牌色 ———
   /** 主品牌色：Logo、用户消息、选中项，及 Markdown H1-H6 标题 */
-  accent: string;
-  /** 品牌色（含透明度）：边框、渐变 */
-  accentAlpha: string;
-  /** 强调/活跃态颜色：下拉菜单的当前项 */
-  active: string;
+  primary: string;
+  /** 辅助品牌色：边框、渐变 */
+  secondary: string;
 
   // ——— 语义颜色 ———
   /** 成功：工具执行成功、MCP ready */

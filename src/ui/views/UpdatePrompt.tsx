@@ -69,7 +69,7 @@ export function UpdatePrompt({ currentVersion, latestVersion, installCommand, on
         {options.map((option, index) => {
           const selected = index === selectedIndex;
           return (
-            <Text key={option.value} color={selected ? theme.active : undefined}>
+            <Text key={option.value} color={selected ? theme.primary : undefined}>
               {selected ? "> " : "  "}
               {index + 1}. {option.label}
             </Text>

@@ -212,7 +212,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
 
   if (message.role === "user") {
     const text = message.content || "(no content)";
-    return tc.accent(`> ${text}`);
+    return tc.primary(`> ${text}`);
   }
 
   if (message.role === "assistant") {
@@ -258,7 +258,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
 
   if (message.role === "system") {
     if (message.meta?.isModelChange) {
-      return tc.accent(`> ${message.content}`);
+      return tc.primary(`> ${message.content}`);
     }
     if (message.meta?.skill && typeof message.meta.skill === "object") {
       const skillName = (message.meta.skill as { name?: unknown }).name;

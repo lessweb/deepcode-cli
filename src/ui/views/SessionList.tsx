@@ -197,14 +197,14 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
       paddingX={1}
       marginTop={1}
     >
-      <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.border} flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} flexDirection="column">
           <Box gap={1}>
-            <Text bold color={theme.active}>
+            <Text bold color={theme.primary}>
               Resume a session
             </Text>
-            <Text color={theme.accent}>
+            <Text color={theme.primary}>
               ({sessions.length} total
               {hasActiveSearch ? `, ${filteredSessions.length} matched` : ""})
             </Text>
@@ -223,7 +223,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
           borderLeft={false}
           borderRight={false}
           borderStyle="round"
-          borderDimColor
+          borderColor={theme.border}
           flexDirection="column"
           flexGrow={1}
           paddingX={1}
@@ -241,11 +241,11 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
                   <Box>
-                    <Text color={theme.accent}>{isSelected ? "> " : "  "}</Text>
+                    <Text color={theme.primary}>{isSelected ? "> " : "  "}</Text>
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
                     <Box width={"100%"}>
-                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? theme.accent : undefined}>
+                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? theme.primary : undefined}>
                         {formatSessionTitle(session.summary || "Untitled")}
                       </Text>
                       {isConfirming ? (

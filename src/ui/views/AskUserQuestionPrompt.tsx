@@ -187,7 +187,7 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
           const marker = question.multiSelect ? (isSelected ? "[x]" : "[ ]") : isSelected ? "●" : "○";
           return (
             <Box key={option.value} flexDirection="column">
-              <Text color={isCursor ? theme.active : undefined}>
+              <Text color={isCursor ? theme.primary : undefined}>
                 {isCursor ? "> " : "  "}
                 {marker} <Text bold={isCursor}>{option.label}</Text>
               </Text>
@@ -196,14 +196,14 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
                   marginLeft={4}
                   marginTop={0}
                   borderStyle="single"
-                  borderColor={isCursor ? theme.active : theme.textDim}
+                  borderColor={isCursor ? theme.primary : theme.textDim}
                   paddingX={1}
                   width={64}
                 >
                   {otherText ? (
                     <Text color={theme.text}>
                       {otherText}
-                      {isCursor ? <Text color={theme.active}>▌</Text> : null}
+                      {isCursor ? <Text color={theme.primary}>▌</Text> : null}
                     </Text>
                   ) : (
                     <Text dimColor>{isCursor ? "type your answer here" : "type a custom answer"}</Text>

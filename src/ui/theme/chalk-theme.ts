@@ -35,8 +35,8 @@ export interface ThemedChalk {
   bold: (text: string) => string;
   italic: (text: string) => string;
   dim: (text: string) => string;
-  accent: (text: string) => string;
-  accentAlpha: (text: string) => string;
+  primary: (text: string) => string;
+  secondary: (text: string) => string;
   text: (text: string) => string;
   textDim: (text: string) => string;
   success: (text: string) => string;
@@ -46,8 +46,8 @@ export interface ThemedChalk {
 }
 
 export function createThemedChalk(theme: ThemeTokens): ThemedChalk {
-  const ac = chalkColor(theme.accent);
-  const aa = chalkColor(theme.accentAlpha);
+  const pr = chalkColor(theme.primary);
+  const se = chalkColor(theme.secondary);
   const tx = chalkColor(theme.text);
   const td = chalkColor(theme.textDim);
   const cd = chalkColor(theme.code);
@@ -58,9 +58,9 @@ export function createThemedChalk(theme: ThemeTokens): ThemedChalk {
 
   return {
     // Markdown 渲染 — 直接复用顶层 token
-    heading1: (text: string) => chalk.bold(ac(text)),
-    heading2: (text: string) => chalk.bold(ac(text)),
-    heading3: (text: string) => chalk.bold(ac(text)),
+    heading1: (text: string) => chalk.bold(pr(text)),
+    heading2: (text: string) => chalk.bold(pr(text)),
+    heading3: (text: string) => chalk.bold(pr(text)),
     listBullet: (text: string) => wr(text),
     quote: (text: string) => chalk.italic(td(text)),
     inlineCode: (text: string) => cd(text),
@@ -70,8 +70,8 @@ export function createThemedChalk(theme: ThemeTokens): ThemedChalk {
     italic: (text: string) => chalk.italic(text),
     dim: (text: string) => chalk.dim(text),
     // 语义色
-    accent: (text: string) => ac(text),
-    accentAlpha: (text: string) => aa(text),
+    primary: (text: string) => pr(text),
+    secondary: (text: string) => se(text),
     text: (text: string) => tx(text),
     textDim: (text: string) => td(text),
     success: (text: string) => sc(text),

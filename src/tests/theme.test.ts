@@ -20,9 +20,8 @@ chalk.level = 1;
 
 /** All token keys that every ThemeTokens must define. */
 const REQUIRED_TOKEN_KEYS: Array<keyof ThemeTokens> = [
-  "accent",
-  "accentAlpha",
-  "active",
+  "primary",
+  "secondary",
   "success",
   "error",
   "warning",
@@ -53,23 +52,22 @@ test("DEFAULT_THEME has all required token keys", () => {
   }
 });
 
-test("DEFAULT_THEME accent matches expected brand color", () => {
-  assert.equal(DEFAULT_THEME.accent, "#229ac3");
-  assert.equal(DEFAULT_THEME.accentAlpha, "#229ac3e6");
+test("DEFAULT_THEME primary matches expected brand color", () => {
+  assert.equal(DEFAULT_THEME.primary, "#229ac3");
+  assert.equal(DEFAULT_THEME.secondary, "#229ac3e6");
 });
 
 test("DEFAULT_THEME semantic colors match expected values", () => {
   assert.equal(DEFAULT_THEME.success, "#52c41a");
-  assert.equal(DEFAULT_THEME.error, "#ff4d4f");
-  assert.equal(DEFAULT_THEME.warning, "#faad14");
-  assert.equal(DEFAULT_THEME.info, "#1677ff");
-  assert.equal(DEFAULT_THEME.active, "#89B4FA");
-  assert.equal(DEFAULT_THEME.thinking, "#CCCFD3");
+  assert.equal(DEFAULT_THEME.error, "#f5222d");
+  assert.equal(DEFAULT_THEME.warning, "#fa8c16");
+  assert.equal(DEFAULT_THEME.info, "#2f54eb");
+  assert.equal(DEFAULT_THEME.thinking, "#ff4400");
 });
 
 test("DEFAULT_THEME base colors match expected values", () => {
-  assert.equal(DEFAULT_THEME.text, "#6C7086");
-  assert.equal(DEFAULT_THEME.textDim, "#6C7086");
+  assert.equal(DEFAULT_THEME.text, "#3D4149");
+  assert.equal(DEFAULT_THEME.textDim, "#646A71");
   assert.equal(DEFAULT_THEME.code, "#787f8a");
 });
 
@@ -91,27 +89,27 @@ test("PRESETS map contains default", () => {
 
 test("resolveTheme returns DEFAULT_THEME when settings is undefined", () => {
   const result = resolveTheme(undefined);
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
   assert.equal(result.success, DEFAULT_THEME.success);
 });
 
 test("resolveTheme returns DEFAULT_THEME for explicit 'default' preset", () => {
   const result = resolveTheme({ preset: "default" });
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
 });
 
 test("resolveTheme returns DEFAULT_THEME when preset is not 'custom'", () => {
   const result = resolveTheme({ preset: "default" });
   assert.equal(result.text, DEFAULT_THEME.text);
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
 });
 
 test("resolveTheme applies overrides when preset is 'custom'", () => {
   const result = resolveTheme({
     preset: "custom",
-    overrides: { accent: "#ff0000" },
+    overrides: { primary: "#ff0000" },
   });
-  assert.equal(result.accent, "#ff0000");
+  assert.equal(result.primary, "#ff0000");
   assert.equal(result.success, DEFAULT_THEME.success);
 });
 
@@ -119,12 +117,12 @@ test("resolveTheme applies multiple overrides with custom preset", () => {
   const result = resolveTheme({
     preset: "custom",
     overrides: {
-      accent: "#ff6600",
+      primary: "#ff6600",
       success: "greenBright",
       warning: "yellowBright",
     },
   });
-  assert.equal(result.accent, "#ff6600");
+  assert.equal(result.primary, "#ff6600");
   assert.equal(result.success, "greenBright");
   assert.equal(result.warning, "yellowBright");
   assert.equal(result.error, DEFAULT_THEME.error);
@@ -132,9 +130,8 @@ test("resolveTheme applies multiple overrides with custom preset", () => {
 
 test("resolveTheme full custom tokens with custom preset", () => {
   const customTokens: ThemeTokens = {
-    accent: "#aaaaaa",
-    accentAlpha: "#aaaaaacc",
-    active: "blue",
+    primary: "#aaaaaa",
+    secondary: "#aaaaaacc",
     success: "blue",
     error: "blue",
     warning: "blue",
@@ -150,7 +147,7 @@ test("resolveTheme full custom tokens with custom preset", () => {
     gradients: ["#aaaaaa", "#bbbbbb"],
   };
   const result = resolveTheme({ preset: "custom", tokens: customTokens });
-  assert.equal(result.accent, "#aaaaaa");
+  assert.equal(result.primary, "#aaaaaa");
   assert.equal(result.code, "blue");
   assert.deepEqual(result.gradients, ["#aaaaaa", "#bbbbbb"]);
 });
@@ -158,43 +155,43 @@ test("resolveTheme full custom tokens with custom preset", () => {
 test("resolveTheme handles override with undefined fields gracefully", () => {
   const result = resolveTheme({
     preset: "custom",
-    overrides: { accent: undefined, success: undefined } as Partial<ThemeTokens>,
+    overrides: { primary: undefined, success: undefined } as Partial<ThemeTokens>,
   });
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
   assert.equal(result.success, DEFAULT_THEME.success);
 });
 
 test("resolveTheme ignores overrides when preset is not custom", () => {
   const result = resolveTheme({
     preset: "default",
-    overrides: { accent: "#ff0000" },
+    overrides: { primary: "#ff0000" },
   });
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
 });
 
 test("resolveTheme ignores tokens when preset is not custom", () => {
   const result = resolveTheme({
-    tokens: { accent: "#ff0000" } as ThemeTokens,
+    tokens: { primary: "#ff0000" } as ThemeTokens,
   });
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
 });
 
 test("resolveTheme returns DEFAULT_THEME for custom preset without token/overrides", () => {
   const result = resolveTheme({ preset: "custom" });
-  assert.equal(result.accent, DEFAULT_THEME.accent);
+  assert.equal(result.primary, DEFAULT_THEME.primary);
 });
 
 // ---------------------------------------------------------------------------
 // createThemedChalk — markdown 方法直接复用顶层 token
 // ---------------------------------------------------------------------------
 
-test("createThemedChalk heading1 produces styled output via accent", () => {
+test("createThemedChalk heading1 produces styled output via primary", () => {
   const tc = createThemedChalk(DEFAULT_THEME);
   assert.notEqual(tc.heading1("Hello"), "Hello");
 });
 
-test("createThemedChalk heading1 changes when accent changes", () => {
-  const custom: ThemeTokens = { ...DEFAULT_THEME, accent: "#ff0000" };
+test("createThemedChalk heading1 changes when primary changes", () => {
+  const custom: ThemeTokens = { ...DEFAULT_THEME, primary: "#ff0000" };
   assert.notEqual(createThemedChalk(DEFAULT_THEME).heading1("test"), createThemedChalk(custom).heading1("test"));
 });
 
@@ -220,16 +217,16 @@ test("createThemedChalk bold / italic / dim produce styled output", () => {
   assert.notEqual(tc.dim("dim"), "dim");
 });
 
-test("createThemedChalk produces different output for different accent values", () => {
-  const custom1: ThemeTokens = { ...DEFAULT_THEME, accent: "#ff0000" };
-  const custom2: ThemeTokens = { ...DEFAULT_THEME, accent: "#00ff00" };
-  assert.notEqual(createThemedChalk(custom1).accent("test"), createThemedChalk(custom2).accent("test"));
+test("createThemedChalk produces different output for different primary values", () => {
+  const custom1: ThemeTokens = { ...DEFAULT_THEME, primary: "#ff0000" };
+  const custom2: ThemeTokens = { ...DEFAULT_THEME, primary: "#00ff00" };
+  assert.notEqual(createThemedChalk(custom1).primary("test"), createThemedChalk(custom2).primary("test"));
 });
 
 test("createThemedChalk handles hex colors correctly", () => {
   const hexTheme: ThemeTokens = {
     ...DEFAULT_THEME,
-    accent: "#ff6600",
+    primary: "#ff6600",
     warning: "#ffcc00",
     code: "#00ccff",
   };
@@ -244,16 +241,16 @@ test("createThemedChalk handles hex colors correctly", () => {
 
 test("getCurrentThemedChalk returns DEFAULT_THEME chalk by default", () => {
   setCurrentTheme(DEFAULT_THEME);
-  assert.notEqual(getCurrentThemedChalk().accent("test"), "test");
+  assert.notEqual(getCurrentThemedChalk().primary("test"), "test");
 });
 
 test("setCurrentTheme changes getCurrentThemedChalk output", () => {
   setCurrentTheme(DEFAULT_THEME);
-  const first = getCurrentThemedChalk().accent("test");
+  const first = getCurrentThemedChalk().primary("test");
 
-  const custom: ThemeTokens = { ...DEFAULT_THEME, accent: "#ff0000" };
+  const custom: ThemeTokens = { ...DEFAULT_THEME, primary: "#ff0000" };
   setCurrentTheme(custom);
-  const second = getCurrentThemedChalk().accent("test");
+  const second = getCurrentThemedChalk().primary("test");
 
   assert.notEqual(first, second);
 
@@ -262,11 +259,11 @@ test("setCurrentTheme changes getCurrentThemedChalk output", () => {
 
 test("setCurrentTheme changes getCurrentThemeTokens output", () => {
   setCurrentTheme(DEFAULT_THEME);
-  assert.equal(getCurrentThemeTokens().accent, DEFAULT_THEME.accent);
+  assert.equal(getCurrentThemeTokens().primary, DEFAULT_THEME.primary);
 
-  const custom: ThemeTokens = { ...DEFAULT_THEME, accent: "#ff0000" };
+  const custom: ThemeTokens = { ...DEFAULT_THEME, primary: "#ff0000" };
   setCurrentTheme(custom);
-  assert.equal(getCurrentThemeTokens().accent, "#ff0000");
+  assert.equal(getCurrentThemeTokens().primary, "#ff0000");
 
   setCurrentTheme(DEFAULT_THEME);
 });
@@ -278,37 +275,37 @@ test("setCurrentTheme changes getCurrentThemeTokens output", () => {
 test("resolveSettingsSources includes theme field in resolved settings", () => {
   const result = resolveSettingsSources(null, null, DEFAULTS, {});
   assert.ok("theme" in result);
-  assert.equal(result.theme.accent, DEFAULT_THEME.accent);
+  assert.equal(result.theme.primary, DEFAULT_THEME.primary);
 });
 
 test("resolveSettingsSources resolves custom theme from user settings", () => {
   const result = resolveSettingsSources(
-    { theme: { preset: "custom", overrides: { accent: "#abcdef" } } },
+    { theme: { preset: "custom", overrides: { primary: "#abcdef" } } },
     null,
     DEFAULTS,
     {}
   );
-  assert.equal(result.theme.accent, "#abcdef");
+  assert.equal(result.theme.primary, "#abcdef");
 });
 
 test("resolveSettingsSources resolves custom theme from project settings", () => {
   const result = resolveSettingsSources(
     null,
-    { theme: { preset: "custom", overrides: { accent: "#123456" } } },
+    { theme: { preset: "custom", overrides: { primary: "#123456" } } },
     DEFAULTS,
     {}
   );
-  assert.equal(result.theme.accent, "#123456");
+  assert.equal(result.theme.primary, "#123456");
 });
 
 test("resolveSettingsSources uses default theme when preset is not custom", () => {
   const result = resolveSettingsSources(
-    { theme: { preset: "default", overrides: { accent: "#abcdef" } } },
+    { theme: { preset: "default", overrides: { primary: "#abcdef" } } },
     null,
     DEFAULTS,
     {}
   );
-  assert.equal(result.theme.accent, DEFAULT_THEME.accent);
+  assert.equal(result.theme.primary, DEFAULT_THEME.primary);
 });
 
 // ---------------------------------------------------------------------------

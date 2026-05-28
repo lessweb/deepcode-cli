@@ -110,7 +110,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
   }, [busy]);
 
   const prefix = busy ? `${SPINNER_FRAMES[spinnerIndex]} ` : "> ";
-  return <Text color={busy ? theme.warning : theme.accent}>{prefix}</Text>;
+  return <Text color={busy ? theme.warning : theme.primary}>{prefix}</Text>;
 });
 
 export const PromptInput = React.memo(function PromptInput({
@@ -748,7 +748,7 @@ export const PromptInput = React.memo(function PromptInput({
         borderBottom={true}
         borderLeft={false}
         borderRight={false}
-        borderDimColor
+        borderColor={theme.border}
       >
         <PromptPrefixLine busy={busy} />
         <Text>

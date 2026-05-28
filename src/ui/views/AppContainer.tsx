@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { AppContext } from "../contexts";
 import App from "./App";
 import { RawModeProvider } from "../contexts";
@@ -14,8 +14,10 @@ const AppContainer: React.FC<{
   const settings = resolveCurrentSettings(projectRoot);
   const [theme] = useState(settings.theme);
 
-  // 初始设置全局 chalk 主题
-  setCurrentTheme(theme);
+  useEffect(() => {
+    // 初始设置全局 chalk 主题
+    setCurrentTheme(theme);
+  }, [theme]);
 
   return (
     <AppContext.Provider value={{ version: version }}>

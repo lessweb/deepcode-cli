@@ -149,7 +149,7 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, optionIndex) => (
-          <Text key={option.kind} color={optionIndex === cursor ? theme.active : undefined}>
+          <Text key={option.kind} color={optionIndex === cursor ? theme.primary : undefined}>
             {optionIndex === cursor ? "> " : "  "}
             {optionIndex + 1}. {renderOptionLabel(option)}
           </Text>

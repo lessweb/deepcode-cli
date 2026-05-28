@@ -40,9 +40,9 @@ export function McpStatusList({ statuses, onCancel, onReconnect }: Props): React
 
   if (statuses.length === 0) {
     return (
-      <Box flexDirection="column" marginLeft={1} paddingX={1} gap={1} borderStyle="round" borderDimColor>
+      <Box flexDirection="column" marginLeft={1} paddingX={1} gap={1} borderStyle="round" borderColor={theme.border}>
         <Box flexDirection="column">
-          <Text color={theme.accent} bold>
+          <Text color={theme.primary} bold>
             Manage MCP servers
           </Text>
           <Text dimColor>0 servers</Text>
@@ -190,10 +190,10 @@ function ServerListView({
       paddingX={1}
       marginTop={1}
     >
-      <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.border} flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} gap={1}>
-          <Text bold color={theme.accent}>
+          <Text bold color={theme.primary}>
             Manage MCP servers
           </Text>
           <Box gap={1}>
@@ -212,7 +212,7 @@ function ServerListView({
           borderLeft={false}
           borderRight={false}
           borderStyle="round"
-          borderDimColor
+          borderColor={theme.border}
           flexDirection="column"
           flexGrow={1}
           paddingX={1}
@@ -294,7 +294,7 @@ function ServerRow({
       {/* Server row */}
       <Box gap={2}>
         <Box width={labelColumnWidth} flexShrink={0}>
-          <Text color={selected ? theme.accent : undefined}>
+          <Text color={selected ? theme.primary : undefined}>
             {selected ? "> " : "  "}
             <Text color={color}>{icon} </Text>
             <Text bold>{status.name}</Text>
@@ -436,11 +436,11 @@ function ServerDetailView({
       paddingX={1}
       marginTop={1}
     >
-      <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.border} flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} gap={1}>
           <Text color={statusColor}>{statusIcon} </Text>
-          <Text bold color={theme.accent} wrap="truncate-end">
+          <Text bold color={theme.primary} wrap="truncate-end">
             {server.name}
           </Text>
           <Text dimColor>— {server.status === "ready" ? "Details" : "Status"}</Text>
@@ -466,7 +466,7 @@ function ServerDetailView({
           borderLeft={false}
           borderRight={false}
           borderStyle="round"
-          borderDimColor
+          borderColor={theme.border}
           flexDirection="column"
           flexGrow={1}
           paddingX={1}
@@ -521,11 +521,11 @@ function ItemRow({ item, selected }: { item: { type: string; name: string }; sel
   const isAction = item.type === "action";
   const icon = isAction ? "↻" : item.type === "tool" ? "🔧" : item.type === "prompt" ? "📝" : "📦";
   const theme = useTheme();
-  const color = isAction && selected ? theme.warning : selected ? theme.accent : undefined;
+  const color = isAction && selected ? theme.warning : selected ? theme.primary : undefined;
 
   return (
     <Box height={1} flexDirection="row">
-      <Text color={selected ? theme.accent : undefined}>{selected ? "> " : "  "}</Text>
+      <Text color={selected ? theme.primary : undefined}>{selected ? "> " : "  "}</Text>
       <Text dimColor>{icon} </Text>
       <Text color={color} dimColor={!selected} bold={isAction} wrap="truncate-end">
         {isAction ? `[${item.name}]` : item.name}
@@ -546,7 +546,6 @@ function ErrorRow({ error }: { error: string }): React.ReactElement {
       marginBottom={0}
       borderStyle="round"
       borderColor={theme.error}
-      borderDimColor
     >
       {lines.map((line, index) => (
         <Box key={index}>
