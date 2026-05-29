@@ -21,6 +21,8 @@ export interface ThemeTokens {
   text: string;
   /** 次要文字：暗化提示，及 Markdown 引用块 */
   textDim: string;
+  /** 亮色文字：强调提示 */
+  textBright: string;
   /** 代码块/内联代码 */
   code: string;
   /** 边框 */

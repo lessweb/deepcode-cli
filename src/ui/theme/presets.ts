@@ -10,6 +10,7 @@ export const DEFAULT_THEME: ThemeTokens = {
   info: "#0969da",
   text: "#3D4149",
   textDim: "#646A71",
+  textBright: "#646A71",
   code: "#787f8a",
   border: "#999",
   gradients: ["#229ac3", "#8250df"],
