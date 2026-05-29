@@ -3,7 +3,13 @@ import * as path from "path";
 import ignore from "ignore";
 import type { ToolExecutionContext, ToolExecutionFollowUpMessage, ToolExecutionResult } from "./executor";
 import { readTextFileWithMetadata } from "../common/file-utils";
-import { createSnippet, isAbsoluteFilePath, markFileRead, normalizeFilePath } from "../common/state";
+import {
+  createFullFileSnippet,
+  createSnippet,
+  isAbsoluteFilePath,
+  markFileRead,
+  normalizeFilePath,
+} from "../common/state";
 
 const DEFAULT_LINE_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
@@ -249,13 +255,9 @@ export async function handleReadTool(
       encoding: textResult.encoding,
       lineEndings: textResult.lineEndings,
     });
-    const snippet = createSnippet(
-      context.sessionId,
-      filePath,
-      textResult.startLine,
-      textResult.endLine,
-      textResult.output
-    );
+    const snippet = textResult.isPartialView
+      ? createSnippet(context.sessionId, filePath, textResult.startLine, textResult.endLine, textResult.output)
+      : createFullFileSnippet(context.sessionId, filePath, textResult.startLine, textResult.endLine, textResult.output);
     return {
       ok: true,
       name: "read",

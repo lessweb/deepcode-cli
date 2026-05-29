@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import { useInput } from "ink";
-import DropdownMenu from "../../DropdownMenu";
-import type { FileMentionItem, FileMentionToken } from "../../fileMentions";
+import DropdownMenu from "../DropdownMenu";
+import type { FileMentionItem, FileMentionToken } from "../../core/file-mentions";
 
 type Props = {
   open: boolean;

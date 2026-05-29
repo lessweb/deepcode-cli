@@ -137,6 +137,10 @@ When the AI assistant completes a task, Deep Code can automatically execute a no
 
 For detailed configuration instructions, see: [docs/notify_en.md](docs/notify_en.md)
 
+### Does Deep Code only support YOLO mode?
+
+No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission.md](docs/permission.md) for details.
+
 ## Contributing
 
 Contributions are welcome! Here's how to get started:

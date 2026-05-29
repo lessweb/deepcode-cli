@@ -83,6 +83,36 @@ test("resolveSettings reads THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_EN
   assert.equal(resolved.baseURL, "https://default.example.com");
 });
 
+test("resolveSettings defaults telemetryEnabled to true", () => {
+  const resolved = resolveSettings(
+    {},
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.telemetryEnabled, true);
+});
+
+test("resolveSettings reads TELEMETRY_ENABLED from env", () => {
+  const resolved = resolveSettings(
+    { env: { TELEMETRY_ENABLED: "0" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.telemetryEnabled, false);
+});
+
+test("resolveSettings gives top-level telemetryEnabled priority over env TELEMETRY_ENABLED", () => {
+  const resolved = resolveSettings(
+    {
+      telemetryEnabled: false,
+      env: { TELEMETRY_ENABLED: "true" },
+    },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.telemetryEnabled, false);
+});
+
 test("resolveSettings ignores removed legacy env.THINKING", () => {
   const resolved = resolveSettings(
     {
@@ -115,6 +145,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
       thinkingEnabled: true,
       reasoningEffort: "max",
       debugLogEnabled: true,
+      telemetryEnabled: false,
     },
     {
       env: {
@@ -125,6 +156,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
       },
       model: "project-top-model",
       thinkingEnabled: true,
+      telemetryEnabled: true,
     },
     {
       model: "default-model",
@@ -135,6 +167,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
       DEEPCODE_THINKING_ENABLED: "false",
       DEEPCODE_REASONING_EFFORT: "high",
       DEEPCODE_DEBUG_LOG_ENABLED: "true",
+      DEEPCODE_TELEMETRY_ENABLED: "false",
       DEEPCODE_WEBHOOK: "system-webhook",
     }
   );
@@ -144,7 +177,37 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
   assert.equal(resolved.thinkingEnabled, false);
   assert.equal(resolved.reasoningEffort, "high");
   assert.equal(resolved.debugLogEnabled, true);
+  assert.equal(resolved.telemetryEnabled, false);
   assert.equal(resolved.env.WEBHOOK, "system-webhook");
+});
+
+test("resolveSettingsSources merges permission settings", () => {
+  const resolved = resolveSettingsSources(
+    {
+      permissions: {
+        allow: ["read-in-cwd", "network"],
+        ask: ["write-out-cwd"],
+        defaultMode: "askAll",
+      },
+    },
+    {
+      permissions: {
+        allow: ["write-in-cwd", "read-in-cwd"],
+        deny: ["delete-out-cwd"],
+        defaultMode: "allowAll",
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    TEST_PROCESS_ENV
+  );
+
+  assert.deepEqual(resolved.permissions.allow, ["read-in-cwd", "network", "write-in-cwd"]);
+  assert.deepEqual(resolved.permissions.ask, ["write-out-cwd"]);
+  assert.deepEqual(resolved.permissions.deny, ["delete-out-cwd"]);
+  assert.equal(resolved.permissions.defaultMode, "allowAll");
 });
 
 test("resolveSettingsSources merges MCP env with documented priority", () => {

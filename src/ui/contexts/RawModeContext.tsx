@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from "react";
-import type { DropdownMenuItem } from "../DropdownMenu";
+import type { DropdownMenuItem } from "../components/DropdownMenu";
 
 export enum RawMode {
   None = "Normal mode",

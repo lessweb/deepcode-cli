@@ -19,6 +19,19 @@ test("getTools includes UpdatePlan with string plan schema", () => {
   assert.equal((tool.function.parameters.properties.plan as { type?: unknown }).type, "string");
 });
 
+test("getTools requires bash sideEffects permission scopes", () => {
+  const tool = getTools().find((candidate) => candidate.function.name === "bash");
+  assert.ok(tool);
+  assert.deepEqual(tool.function.parameters.required, ["command", "sideEffects"]);
+  const sideEffects = tool.function.parameters.properties.sideEffects as {
+    type?: unknown;
+    items?: { enum?: unknown[] };
+  };
+  assert.equal(sideEffects.type, "array");
+  assert.equal(sideEffects.items?.enum?.includes("write-out-cwd"), true);
+  assert.equal(sideEffects.items?.enum?.includes("unknown"), true);
+});
+
 test("getSystemPrompt always includes WebSearch docs", () => {
   const prompt = getSystemPrompt("/tmp/project");
   assert.equal(prompt.includes("## WebSearch"), true);

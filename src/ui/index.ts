@@ -4,18 +4,11 @@ import {
   MODEL_COMMAND_THINKING_OPTIONS,
 } from "./components/ModelsDropdown";
 
-export {
-  readSettings,
-  readProjectSettings,
-  writeSettings,
-  writeProjectSettings,
-  writeModelConfigSelection,
-  resolveCurrentSettings,
-  buildPromptDraftFromSessionMessage,
-} from "./App";
-export { createOpenAIClient } from "../common/openai-client";
-export { default as AppContainer } from "./AppContainer";
-export { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
+export { getThinkingOptionIndex, MODEL_COMMAND_MODELS, MODEL_COMMAND_THINKING_OPTIONS };
+export { buildPromptDraftFromSessionMessage } from "./utils";
+export { disableTerminalExtendedKeys, enableTerminalExtendedKeys, getPromptCursorPlacement } from "./hooks/cursor";
+export { default as AppContainer } from "./views/AppContainer";
+export { AskUserQuestionPrompt } from "./views/AskUserQuestionPrompt";
 export { MessageView } from "./components";
 export { parseDiffPreview } from "./components/MessageView/utils";
 export {
@@ -30,19 +23,13 @@ export {
   getPromptReturnKeyAction,
   renderBufferWithCursor,
   buildInitPromptSubmission,
-  useTerminalInput,
-  parseTerminalInput,
-  dispatchTerminalInput,
   type PromptSubmission,
   type PromptDraft,
-  type InputKey,
-} from "./PromptInput";
-export { getThinkingOptionIndex, MODEL_COMMAND_MODELS, MODEL_COMMAND_THINKING_OPTIONS };
-export { disableTerminalExtendedKeys, enableTerminalExtendedKeys, getPromptCursorPlacement } from "./prompt/cursor";
-export { SessionList, formatSessionTitle, filterSessions, formatSessionStatus } from "./SessionList";
-export { ThemedGradient } from "./ThemedGradient";
-export { UpdatePrompt, type UpdatePromptChoice } from "./UpdatePrompt";
-export { WelcomeScreen, formatHomeRelativePath, buildWelcomeTips } from "./WelcomeScreen";
+} from "./views/PromptInput";
+export { SessionList, formatSessionTitle, filterSessions, formatSessionStatus } from "./views/SessionList";
+export { ThemedGradient } from "./views/ThemedGradient";
+export { UpdatePrompt, type UpdatePromptChoice } from "./views/UpdatePrompt";
+export { WelcomeScreen, formatHomeRelativePath, buildWelcomeTips } from "./views/WelcomeScreen";
 export {
   findPendingAskUserQuestion,
   formatAskUserQuestionAnswers,
@@ -51,10 +38,10 @@ export {
   type AskUserQuestionItem,
   type PendingAskUserQuestion,
   type AskUserQuestionAnswers,
-} from "./askUserQuestion";
-export { readClipboardImage, type ClipboardImage } from "./clipboard";
-export { buildLoadingText, type LoadingTextInput } from "./loadingText";
-export { renderMarkdown } from "./components/MessageView/markdown";
+} from "./core/ask-user-question";
+export { readClipboardImage, type ClipboardImage } from "./core/clipboard";
+export { buildLoadingText, type LoadingTextInput } from "./core/loading-text";
+export { renderMarkdown, renderMarkdownSegments, type MarkdownSegment } from "./components/MessageView/markdown";
 export {
   EMPTY_BUFFER,
   insertText,
@@ -75,7 +62,7 @@ export {
   isEmpty,
   getCurrentSlashToken,
   type PromptBufferState,
-} from "./promptBuffer";
+} from "./core/prompt-buffer";
 export {
   BUILTIN_SLASH_COMMANDS,
   buildSlashCommands,
@@ -85,7 +72,7 @@ export {
   formatSlashCommandLabel,
   type SlashCommandKind,
   type SlashCommandItem,
-} from "./slashCommands";
+} from "./core/slash-commands";
 export {
   filterFileMentionItems,
   formatFileMentionPath,
@@ -94,6 +81,6 @@ export {
   scanFileMentionItems,
   type FileMentionItem,
   type FileMentionToken,
-} from "./fileMentions";
-export { findExpandedThinkingId } from "./thinkingState";
-export { buildExitSummaryText } from "./exitSummary";
+} from "./core/file-mentions";
+export { findExpandedThinkingId, isCollapsedThinking } from "./core/thinking-state";
+export { buildExitSummaryText } from "./exit-summary";

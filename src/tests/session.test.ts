@@ -5,7 +5,8 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { GitFileHistory } from "../common/file-history";
-import { SessionManager, type SessionMessage } from "../session";
+import { clearSessionState } from "../common/state";
+import { getProjectCode, SessionManager, type SessionMessage } from "../session";
 
 const originalFetch = globalThis.fetch;
 const originalConsoleWarn = console.warn;
@@ -41,6 +42,21 @@ afterEach(() => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   }
+});
+
+test("getProjectCode shortens long project roots for Windows-compatible storage paths", () => {
+  const shortRoot = "short-project";
+  assert.equal(getProjectCode(shortRoot), shortRoot.replace(/[\\/]/g, "-").replace(/:/g, ""));
+
+  const longRoot = path.join(
+    os.tmpdir(),
+    "deepcode-project-code-workspace-with-a-long-name-that-would-create-long-git-internal-paths"
+  );
+  const projectCode = getProjectCode(longRoot);
+
+  assert.ok(projectCode.length <= 64);
+  assert.match(projectCode, /^[A-Za-z0-9._-]+$/);
+  assert.notEqual(projectCode, longRoot.replace(/[\\/]/g, "-").replace(/:/g, ""));
 });
 
 test("SessionManager preserves structured system content when building OpenAI messages", () => {
@@ -269,7 +285,7 @@ test("SessionManager normalizes legacy sessions without activeTokens to zero", (
   const home = createTempDir("deepcode-legacy-active-tokens-home-");
   setHomeDir(home);
 
-  const projectCode = workspace.replace(/[\\/]/g, "-").replace(/:/g, "");
+  const projectCode = getProjectCode(workspace);
   const projectDir = path.join(home, ".deepcode", "projects", projectCode);
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(
@@ -322,7 +338,7 @@ test("SessionManager marks skills loaded from existing session messages", async 
     "utf8"
   );
 
-  const projectCode = workspace.replace(/[\\/]/g, "-").replace(/:/g, "");
+  const projectCode = getProjectCode(workspace);
   const projectDir = path.join(home, ".deepcode", "projects", projectCode);
   fs.mkdirSync(projectDir, { recursive: true });
   fs.writeFileSync(
@@ -980,14 +996,7 @@ test("createSession initializes file-history repo and session branch", async (t)
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
-  const gitDir = path.join(
-    home,
-    ".deepcode",
-    "projects",
-    workspace.replace(/[\\/]/g, "-").replace(/:/g, ""),
-    "file-history",
-    ".git"
-  );
+  const gitDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "file-history", ".git");
 
   assert.ok(fs.existsSync(gitDir));
   assert.ok(userMessage?.checkpointHash);
@@ -995,6 +1004,281 @@ test("createSession initializes file-history repo and session branch", async (t)
     runFileHistoryGit(gitDir, workspace, ["rev-parse", "--verify", `refs/heads/${sessionId}^{commit}`]).trim(),
     userMessage.checkpointHash
   );
+});
+
+test("createSession initializes an empty file-history manifest without scanning existing files", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-file-history-empty-init-workspace-");
+  const home = createTempDir("deepcode-file-history-empty-init-home-");
+  setHomeDir(home);
+  fs.writeFileSync(path.join(workspace, "unrelated.txt"), "keep me\n", "utf8");
+  fs.mkdirSync(path.join(workspace, "nested"));
+  fs.writeFileSync(path.join(workspace, "nested", "another.txt"), "also keep me\n", "utf8");
+
+  const manager = createSessionManager(workspace, "machine-id-file-history-empty-init");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  assert.ok(userMessage?.checkpointHash);
+
+  const manifest = readFileHistoryManifest(home, workspace, userMessage.checkpointHash);
+  assert.deepEqual(manifest.files, {});
+});
+
+test("replySession snapshots manual edits to tracked files before appending the user prompt", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-prompt-checkpoint-manual-edit-workspace-");
+  const home = createTempDir("deepcode-prompt-checkpoint-manual-edit-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "hello_world.py");
+  const manager = createSessionManager(workspace, "machine-id-prompt-checkpoint-manual-edit");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "create hello world" });
+  const gitDir = getFileHistoryGitDir(home, workspace);
+  const fileHistory = new GitFileHistory(workspace, gitDir);
+
+  fs.writeFileSync(filePath, 'print("Hello, World!")\n', "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [filePath], "created hello world"));
+
+  const manualEdit = 'if name == main:\n  print("Hello, World!")\n';
+  fs.writeFileSync(filePath, manualEdit, "utf8");
+  await manager.replySession(sessionId, { text: "I manually edited @hello_world.py, note it" });
+  const manualEditUserMessage = manager
+    .listSessionMessages(sessionId)
+    .filter((message) => message.role === "user")
+    .at(-1);
+  assert.ok(manualEditUserMessage?.checkpointHash);
+
+  fs.writeFileSync(filePath, 'if __name__ == "__main__":\n  print("Hello, World!")\n', "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [filePath], "fixed hello world"));
+
+  manager.restoreSessionCode(sessionId, manualEditUserMessage.id);
+
+  assert.equal(fs.readFileSync(filePath, "utf8"), manualEdit);
+});
+
+test("replySession inserts hidden system notice for manually changed tracked files", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-manual-change-notice-workspace-");
+  const home = createTempDir("deepcode-manual-change-notice-home-");
+  setHomeDir(home);
+
+  const firstPath = path.join(workspace, "a.txt");
+  const secondPath = path.join(workspace, "b.txt");
+  const manager = createSessionManager(workspace, "machine-id-manual-change-notice");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fs.writeFileSync(firstPath, "one\n", "utf8");
+  fs.writeFileSync(secondPath, "two\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [secondPath, firstPath], "track files"));
+
+  fs.writeFileSync(secondPath, "two changed\n", "utf8");
+  fs.writeFileSync(firstPath, "one changed\n", "utf8");
+  await manager.replySession(sessionId, { text: "check manual changes" });
+
+  const messages = manager.listSessionMessages(sessionId);
+  const userIndex = messages.findIndex(
+    (message) => message.role === "user" && message.content === "check manual changes"
+  );
+  assert.ok(userIndex > 0);
+  const notice = messages[userIndex - 1];
+  assert.equal(notice?.role, "system");
+  assert.equal(notice?.visible, false);
+  assert.equal(notice?.content, `Note that the user manually modified these files:\n${firstPath}\n${secondPath}`);
+});
+
+test("replySession does not insert manual-change notice when tracked files are unchanged", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-no-manual-change-notice-workspace-");
+  const home = createTempDir("deepcode-no-manual-change-notice-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "tracked.txt");
+  const manager = createSessionManager(workspace, "machine-id-no-manual-change-notice");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fs.writeFileSync(filePath, "same\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [filePath], "track file"));
+
+  await manager.replySession(sessionId, { text: "second prompt" });
+
+  const notices = manager
+    .listSessionMessages(sessionId)
+    .filter(
+      (message) =>
+        message.role === "system" &&
+        typeof message.content === "string" &&
+        message.content.startsWith("Note that the user manually modified these files:")
+    );
+  assert.equal(notices.length, 0);
+});
+
+test("replySession reports manual deletion of a tracked file", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-manual-delete-notice-workspace-");
+  const home = createTempDir("deepcode-manual-delete-notice-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "deleted.txt");
+  const manager = createSessionManager(workspace, "machine-id-manual-delete-notice");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fs.writeFileSync(filePath, "delete me\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [filePath], "track file"));
+
+  fs.unlinkSync(filePath);
+  await manager.replySession(sessionId, { text: "check deletion" });
+
+  const notice = manager
+    .listSessionMessages(sessionId)
+    .find(
+      (message) =>
+        message.role === "system" &&
+        message.content === `Note that the user manually modified these files:\n${filePath}`
+    );
+  assert.ok(notice);
+});
+
+test("replySession ignores manually created untracked files", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-untracked-manual-file-workspace-");
+  const home = createTempDir("deepcode-untracked-manual-file-home-");
+  setHomeDir(home);
+
+  const trackedPath = path.join(workspace, "tracked.txt");
+  const untrackedPath = path.join(workspace, "untracked.txt");
+  const manager = createSessionManager(workspace, "machine-id-untracked-manual-file");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fs.writeFileSync(trackedPath, "tracked\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [trackedPath], "track file"));
+
+  fs.writeFileSync(untrackedPath, "new manual file\n", "utf8");
+  await manager.replySession(sessionId, { text: "second prompt" });
+
+  const notices = manager
+    .listSessionMessages(sessionId)
+    .filter(
+      (message) =>
+        message.role === "system" &&
+        typeof message.content === "string" &&
+        message.content.startsWith("Note that the user manually modified these files:")
+    );
+  assert.equal(notices.length, 0);
+});
+
+test("replySession does not insert manual-change notice for /continue", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-continue-no-manual-change-notice-workspace-");
+  const home = createTempDir("deepcode-continue-no-manual-change-notice-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "tracked.txt");
+  const manager = createSessionManager(workspace, "machine-id-continue-no-manual-change-notice");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fs.writeFileSync(filePath, "before\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [filePath], "track file"));
+
+  fs.writeFileSync(filePath, "manual change\n", "utf8");
+  await manager.replySession(sessionId, { text: "/continue" });
+
+  const notices = manager
+    .listSessionMessages(sessionId)
+    .filter(
+      (message) =>
+        message.role === "system" &&
+        typeof message.content === "string" &&
+        message.content.startsWith("Note that the user manually modified these files:")
+    );
+  assert.equal(notices.length, 0);
+});
+
+test("replySession does not insert manual-change notice for permission-only replies", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-permission-no-manual-change-notice-workspace-");
+  const home = createTempDir("deepcode-permission-no-manual-change-notice-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "tracked.txt");
+  const manager = createSessionManager(workspace, "machine-id-permission-no-manual-change-notice");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fs.writeFileSync(filePath, "before\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [filePath], "track file"));
+  const assistant = (manager as any).buildAssistantMessage(
+    sessionId,
+    "Need permission",
+    [
+      {
+        id: "call-read",
+        type: "function",
+        function: { name: "read", arguments: JSON.stringify({ file_path: filePath }) },
+      },
+    ],
+    null
+  ) as SessionMessage;
+  (manager as any).appendSessionMessage(sessionId, assistant);
+
+  fs.writeFileSync(filePath, "manual change\n", "utf8");
+  await manager.replySession(sessionId, { permissions: [{ toolCallId: "call-read", permission: "allow" }] });
+
+  const notices = manager
+    .listSessionMessages(sessionId)
+    .filter(
+      (message) =>
+        message.role === "system" &&
+        typeof message.content === "string" &&
+        message.content.startsWith("Note that the user manually modified these files:")
+    );
+  assert.equal(notices.length, 0);
 });
 
 test("Write tool advances file-history while preserving the user prompt checkpoint", async (t) => {
@@ -1189,6 +1473,8 @@ test("restoreSessionCode restores project files from the recorded Git checkpoint
   const manager = createSessionManager(workspace, "machine-id-undo-code");
   const sessionId = "session-code-restore";
   const checkpointHash = createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "before\n" });
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [path.join(workspace, "new.txt")], "pre-create new.txt"));
   createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "after\n", "new.txt": "remove me\n" });
   fs.writeFileSync(path.join(workspace, "tracked.txt"), "after\n", "utf8");
   fs.writeFileSync(path.join(workspace, "new.txt"), "remove me\n", "utf8");
@@ -1202,6 +1488,91 @@ test("restoreSessionCode restores project files from the recorded Git checkpoint
 
   assert.equal(fs.readFileSync(path.join(workspace, "tracked.txt"), "utf8"), "before\n");
   assert.equal(fs.existsSync(path.join(workspace, "new.txt")), false);
+});
+
+test("restoreSessionCode preserves files that predate their first tracked mutation", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-undo-preexisting-files-workspace-");
+  const home = createTempDir("deepcode-undo-preexisting-files-home-");
+  setHomeDir(home);
+
+  const readmePath = path.join(workspace, "README.md");
+  const readmeEnPath = path.join(workspace, "README-en.md");
+  const readmeZhPath = path.join(workspace, "README-zh_CN.md");
+  fs.writeFileSync(readmePath, "这是一个hello world演示项目\n", "utf8");
+  fs.writeFileSync(readmeEnPath, "This is a hello world demo project.\n", "utf8");
+  fs.writeFileSync(readmeZhPath, "", "utf8");
+
+  const manager = createSessionManager(workspace, "machine-id-undo-preexisting-files");
+  const sessionId = "session-undo-preexisting-files";
+  const gitDir = getFileHistoryGitDir(home, workspace);
+  const fileHistory = new GitFileHistory(workspace, gitDir);
+  fileHistory.ensureSession(sessionId);
+
+  const targetCheckpoint = fileHistory.recordCheckpoint(
+    sessionId,
+    [readmePath, readmeEnPath],
+    "checkpoint before syncing all readmes"
+  );
+  assert.ok(targetCheckpoint);
+
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [readmeZhPath], "pre-sync zh readme"));
+  fs.writeFileSync(readmePath, "Synced readme\n", "utf8");
+  fs.writeFileSync(readmeEnPath, "Synced readme\n", "utf8");
+  fs.writeFileSync(readmeZhPath, "Synced readme\n", "utf8");
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [readmePath, readmeEnPath, readmeZhPath], "synced readmes"));
+
+  (manager as any).appendSessionMessage(sessionId, {
+    ...buildTestMessage("user-with-readme-checkpoint", sessionId, "user", "sync README*.md"),
+    checkpointHash: targetCheckpoint,
+  });
+
+  manager.restoreSessionCode(sessionId, "user-with-readme-checkpoint");
+
+  assert.equal(fs.readFileSync(readmePath, "utf8"), "这是一个hello world演示项目\n");
+  assert.equal(fs.readFileSync(readmeEnPath, "utf8"), "This is a hello world demo project.\n");
+  assert.equal(fs.readFileSync(readmeZhPath, "utf8"), "");
+});
+
+test("restoreSessionCode restores deleted tracked files and leaves unrelated files alone", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-undo-deleted-files-workspace-");
+  const home = createTempDir("deepcode-undo-deleted-files-home-");
+  setHomeDir(home);
+
+  const trackedPath = path.join(workspace, "tracked.txt");
+  const unrelatedPath = path.join(workspace, "unrelated.txt");
+  fs.writeFileSync(trackedPath, "before delete\n", "utf8");
+  fs.writeFileSync(unrelatedPath, "do not touch\n", "utf8");
+
+  const manager = createSessionManager(workspace, "machine-id-undo-deleted-files");
+  const sessionId = "session-undo-deleted-files";
+  const gitDir = getFileHistoryGitDir(home, workspace);
+  const fileHistory = new GitFileHistory(workspace, gitDir);
+  fileHistory.ensureSession(sessionId);
+  const targetCheckpoint = fileHistory.recordCheckpoint(sessionId, [trackedPath], "before delete");
+  assert.ok(targetCheckpoint);
+
+  fs.unlinkSync(trackedPath);
+  assert.ok(fileHistory.recordCheckpoint(sessionId, [trackedPath], "after delete"));
+
+  (manager as any).appendSessionMessage(sessionId, {
+    ...buildTestMessage("user-before-delete", sessionId, "user", "restore deleted file"),
+    checkpointHash: targetCheckpoint,
+  });
+
+  manager.restoreSessionCode(sessionId, "user-before-delete");
+
+  assert.equal(fs.readFileSync(trackedPath, "utf8"), "before delete\n");
+  assert.equal(fs.readFileSync(unrelatedPath, "utf8"), "do not touch\n");
 });
 
 test("replySession /continue runs trailing pending tool calls before requesting another response", async () => {
@@ -1254,6 +1625,282 @@ test("replySession /continue runs trailing pending tool calls before requesting 
     userMessages.some((message) => message.content === "/continue"),
     false
   );
+});
+
+test("replySession rebuilds snippet state from persisted read history before editing", async () => {
+  const workspace = createTempDir("deepcode-rebuild-snippet-workspace-");
+  const home = createTempDir("deepcode-rebuild-snippet-home-");
+  setHomeDir(home);
+
+  const filePath = path.join(workspace, "note.txt");
+  fs.writeFileSync(filePath, "alpha\nbeta\n", "utf8");
+
+  const responses = [
+    createToolCallResponse(
+      [
+        {
+          id: "call-edit",
+          type: "function",
+          function: {
+            name: "edit",
+            arguments: JSON.stringify({
+              snippet_id: "full_file_5",
+              file_path: filePath,
+              old_string: "beta",
+              new_string: "gamma",
+            }),
+          },
+        },
+      ],
+      { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }
+    ),
+    createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+  ];
+  const manager = createMockedClientSessionManager(workspace, responses);
+  const originalActivateSession = manager.activateSession.bind(manager);
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const readToolMessage = (manager as any).buildToolMessage(
+    sessionId,
+    "call-read",
+    JSON.stringify({
+      ok: true,
+      name: "read",
+      output: "     1\talpha\n     2\tbeta\n",
+      metadata: {
+        snippet: {
+          id: "full_file_5",
+          filePath,
+          startLine: 1,
+          endLine: 3,
+        },
+      },
+    }),
+    { name: "read", arguments: JSON.stringify({ file_path: filePath }) }
+  ) as SessionMessage;
+  (manager as any).appendSessionMessage(sessionId, readToolMessage);
+
+  clearSessionState(sessionId);
+  (manager as any).activateSession = originalActivateSession;
+
+  await manager.replySession(sessionId, { text: "change beta" });
+
+  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\ngamma\n");
+  const editToolMessage = manager.listSessionMessages(sessionId).find((message) => {
+    const params = message.messageParams as { tool_call_id?: string } | null;
+    return message.role === "tool" && params?.tool_call_id === "call-edit";
+  });
+  assert.ok(editToolMessage);
+  assert.match(editToolMessage.content ?? "", /"ok":true|"ok": true/);
+  assert.doesNotMatch(editToolMessage.content ?? "", /Unknown snippet_id/);
+});
+
+test("activateSession pauses for permission when a tool call requires ask", async () => {
+  const workspace = createTempDir("deepcode-permission-ask-workspace-");
+  const home = createTempDir("deepcode-permission-ask-home-");
+  setHomeDir(home);
+
+  const manager = createPermissionSessionManager(
+    workspace,
+    [
+      {
+        choices: [
+          {
+            message: {
+              content: "",
+              tool_calls: [
+                {
+                  id: "call-bash",
+                  type: "function",
+                  function: {
+                    name: "bash",
+                    arguments: JSON.stringify({
+                      command: "rg TODO src",
+                      description: "Search TODO markers",
+                      sideEffects: ["read-in-cwd"],
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      },
+    ],
+    {
+      allow: [],
+      deny: [],
+      ask: [],
+      defaultMode: "askAll",
+    }
+  );
+
+  const sessionId = await manager.createSession({ text: "search todos" });
+  const session = manager.getSession(sessionId);
+  const assistant = manager
+    .listSessionMessages(sessionId)
+    .find((message) => message.role === "assistant" && (message.messageParams as any)?.tool_calls);
+
+  assert.equal(session?.status, "ask_permission");
+  assert.equal(session?.askPermissions?.[0]?.toolCallId, "call-bash");
+  assert.deepEqual(session?.askPermissions?.[0]?.scopes, ["read-in-cwd"]);
+  assert.deepEqual(assistant?.meta?.permissions, [{ toolCallId: "call-bash", permission: "ask" }]);
+  assert.equal(
+    manager.listSessionMessages(sessionId).some((message) => message.role === "tool"),
+    false
+  );
+});
+
+test("SessionManager preserves permission_denied status when sessions are reloaded", async () => {
+  const workspace = createTempDir("deepcode-permission-denied-workspace-");
+  const home = createTempDir("deepcode-permission-denied-home-");
+  setHomeDir(home);
+
+  const permissions = {
+    allow: [],
+    deny: [],
+    ask: [],
+    defaultMode: "askAll" as const,
+  };
+  const manager = createPermissionSessionManager(
+    workspace,
+    [
+      {
+        choices: [
+          {
+            message: {
+              content: "",
+              tool_calls: [
+                {
+                  id: "call-bash",
+                  type: "function",
+                  function: {
+                    name: "bash",
+                    arguments: JSON.stringify({
+                      command: "rg TODO src",
+                      description: "Search TODO markers",
+                      sideEffects: ["read-in-cwd"],
+                    }),
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    ],
+    permissions
+  );
+
+  const sessionId = await manager.createSession({ text: "search todos" });
+  manager.denySessionPermission(sessionId);
+
+  const reloadedManager = createPermissionSessionManager(workspace, [], permissions);
+  const reloadedSession = reloadedManager.getSession(sessionId);
+
+  assert.equal(reloadedSession?.status, "permission_denied");
+  assert.equal(reloadedSession?.failReason, "Permission denied by user");
+});
+
+test("replySession applies permission replies, runs pending tools, and stores always allow scopes", async () => {
+  const workspace = createTempDir("deepcode-permission-allow-workspace-");
+  const home = createTempDir("deepcode-permission-allow-home-");
+  setHomeDir(home);
+  fs.writeFileSync(path.join(workspace, "note.txt"), "allowed content\n", "utf8");
+
+  const manager = createPermissionSessionManager(
+    workspace,
+    [createChatResponse("continued", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 })],
+    {
+      allow: [],
+      deny: [],
+      ask: ["read-in-cwd"],
+      defaultMode: "allowAll",
+    }
+  );
+  const originalActivateSession = manager.activateSession.bind(manager);
+  (manager as any).activateSession = async () => {};
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const assistant = (manager as any).buildAssistantMessage(
+    sessionId,
+    "Need to read",
+    [
+      {
+        id: "call-read",
+        type: "function",
+        function: { name: "read", arguments: JSON.stringify({ file_path: path.join(workspace, "note.txt") }) },
+      },
+    ],
+    null
+  ) as SessionMessage;
+  assistant.meta = { ...(assistant.meta ?? {}), permissions: [{ toolCallId: "call-read", permission: "ask" }] };
+  (manager as any).appendSessionMessage(sessionId, assistant);
+  (manager as any).activateSession = originalActivateSession;
+
+  await manager.replySession(sessionId, {
+    text: "/continue",
+    permissions: [{ toolCallId: "call-read", permission: "allow" }],
+    alwaysAllows: ["read-in-cwd"],
+  });
+
+  const toolMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "tool");
+  const settings = JSON.parse(fs.readFileSync(path.join(workspace, ".deepcode", "settings.json"), "utf8"));
+
+  assert.match(toolMessage?.content ?? "", /allowed content/);
+  assert.deepEqual(settings.permissions.allow, ["read-in-cwd"]);
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+});
+
+test("replySession turns denied permission replies into tool errors before appending user text", async () => {
+  const workspace = createTempDir("deepcode-permission-deny-workspace-");
+  const home = createTempDir("deepcode-permission-deny-home-");
+  setHomeDir(home);
+
+  const manager = createPermissionSessionManager(
+    workspace,
+    [createChatResponse("handled denial", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 })],
+    {
+      allow: [],
+      deny: [],
+      ask: ["write-out-cwd"],
+      defaultMode: "allowAll",
+    }
+  );
+  const originalActivateSession = manager.activateSession.bind(manager);
+  (manager as any).activateSession = async () => {};
+  const sessionId = await manager.createSession({ text: "first prompt" });
+  const assistant = (manager as any).buildAssistantMessage(
+    sessionId,
+    "Need to write",
+    [
+      {
+        id: "call-write",
+        type: "function",
+        function: { name: "write", arguments: JSON.stringify({ file_path: "/tmp/outside.txt", content: "x" }) },
+      },
+    ],
+    null
+  ) as SessionMessage;
+  assistant.meta = { ...(assistant.meta ?? {}), permissions: [{ toolCallId: "call-write", permission: "ask" }] };
+  (manager as any).appendSessionMessage(sessionId, assistant);
+  (manager as any).activateSession = originalActivateSession;
+
+  await manager.replySession(sessionId, {
+    text: "Do not write outside the workspace.",
+    permissions: [{ toolCallId: "call-write", permission: "deny" }],
+  });
+
+  const messages = manager.listSessionMessages(sessionId);
+  const assistantIndex = messages.findIndex((message) => message.id === assistant.id);
+  const toolMessage = messages[assistantIndex + 1];
+  const userMessage = messages[assistantIndex + 2];
+
+  assert.equal(toolMessage?.role, "tool");
+  assert.match(toolMessage?.content ?? "", /User denied the required permission/);
+  assert.equal(userMessage?.role, "user");
+  assert.equal(userMessage?.content, "Do not write outside the workspace.");
 });
 
 test("replySession preserves raw session messages when a previous tool call is pending", async () => {
@@ -2178,6 +2825,129 @@ test("SessionManager adjusts the active Bash timeout control and session metadat
   assert.equal(processInfo?.deadlineAt, new Date(timeoutInfo.deadlineAtMs).toISOString());
 });
 
+test("SessionManager.deleteSession removes session entry from the index", () => {
+  const workspace = createTempDir("deepcode-delete-workspace-");
+  const home = createTempDir("deepcode-delete-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-delete");
+  (manager as any).activateSession = async () => {};
+
+  // Create two sessions
+  const session1 = createSessionAndMessages(manager, "session-delete-1", "First session");
+  const session2 = createSessionAndMessages(manager, "session-delete-2", "Second session");
+
+  assert.equal(manager.listSessions().length, 2);
+
+  // Delete the first session
+  const result = manager.deleteSession(session1);
+  assert.equal(result, true);
+
+  const remaining = manager.listSessions();
+  assert.equal(remaining.length, 1);
+  assert.equal(remaining[0]?.id, session2);
+});
+
+test("SessionManager.deleteSession removes the messages file", () => {
+  const workspace = createTempDir("deepcode-delete-msg-workspace-");
+  const home = createTempDir("deepcode-delete-msg-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-delete-msg");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = createSessionAndMessages(manager, "session-delete-msg", "Test session");
+  const messagePath = path.join(home, ".deepcode", "projects", getProjectCode(workspace), `${sessionId}.jsonl`);
+
+  // Verify messages file exists
+  assert.ok(fs.existsSync(messagePath));
+
+  manager.deleteSession(sessionId);
+
+  // Verify messages file is removed
+  assert.equal(fs.existsSync(messagePath), false);
+});
+
+test("SessionManager.deleteSession returns false when session does not exist", () => {
+  const workspace = createTempDir("deepcode-delete-nonexist-workspace-");
+  const home = createTempDir("deepcode-delete-nonexist-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-delete-nonexist");
+
+  const result = manager.deleteSession("nonexistent-session-id");
+  assert.equal(result, false);
+  assert.equal(manager.listSessions().length, 0);
+});
+
+test("SessionManager.deleteSession does not affect other sessions", () => {
+  const workspace = createTempDir("deepcode-delete-others-workspace-");
+  const home = createTempDir("deepcode-delete-others-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-delete-others");
+  (manager as any).activateSession = async () => {};
+
+  const session1 = createSessionAndMessages(manager, "session-keep-1", "Keep session 1");
+  const session2 = createSessionAndMessages(manager, "session-keep-2", "Keep session 2");
+
+  // Delete non-existent session
+  const result = manager.deleteSession("non-existent");
+  assert.equal(result, false);
+  assert.equal(manager.listSessions().length, 2);
+
+  // Delete one session
+  assert.equal(manager.deleteSession(session1), true);
+  assert.equal(manager.listSessions().length, 1);
+  assert.equal(manager.listSessions()[0]?.id, session2);
+
+  // The remaining session should still have its messages accessible
+  const messages = manager.listSessionMessages(session2);
+  assert.ok(messages.length > 0);
+});
+
+/**
+ * Helper: creates a session and writes a few messages to it so we can test
+ * that deleteSession removes both the index entry and the messages file.
+ */
+function createSessionAndMessages(manager: SessionManager, sessionId: string, summary: string): string {
+  const now = new Date().toISOString();
+  const index = (manager as any).loadSessionsIndex();
+  index.entries.push({
+    id: sessionId,
+    summary,
+    assistantReply: null,
+    assistantThinking: null,
+    assistantRefusal: null,
+    toolCalls: null,
+    status: "completed",
+    failReason: null,
+    usage: null,
+    usagePerModel: null,
+    activeTokens: 0,
+    createTime: now,
+    updateTime: now,
+    processes: null,
+  });
+  (manager as any).saveSessionsIndex(index);
+
+  // Write a couple of message lines to the messages file
+  const projectDir = (manager as any).getProjectStorage().projectDir;
+  const messagePath = path.join(projectDir, `${sessionId}.jsonl`);
+  const msg = JSON.stringify({
+    id: "msg-1",
+    sessionId,
+    role: "user",
+    content: summary,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  });
+  fs.writeFileSync(messagePath, `${msg}\n`, "utf8");
+
+  return sessionId;
+}
+
 function hasGit(): boolean {
   try {
     execFileSync("git", ["--version"], { stdio: "ignore" });
@@ -2193,7 +2963,7 @@ function createFileHistoryCommit(
   sessionId: string,
   files: Record<string, string>
 ): string {
-  const projectCode = workspace.replace(/[\\/]/g, "-").replace(/:/g, "");
+  const projectCode = getProjectCode(workspace);
   const gitDir = path.join(home, ".deepcode", "projects", projectCode, "file-history", ".git");
   const fileHistory = new GitFileHistory(workspace, gitDir);
   fileHistory.ensureSession(sessionId);
@@ -2208,6 +2978,18 @@ function createFileHistoryCommit(
   const commitHash = fileHistory.recordCheckpoint(sessionId, filePaths, "checkpoint");
   assert.ok(commitHash);
   return commitHash;
+}
+
+function getFileHistoryGitDir(home: string, workspace: string): string {
+  const projectCode = getProjectCode(workspace);
+  return path.join(home, ".deepcode", "projects", projectCode, "file-history", ".git");
+}
+
+function readFileHistoryManifest(home: string, workspace: string, checkpointHash: string): any {
+  const gitDir = getFileHistoryGitDir(home, workspace);
+  return JSON.parse(
+    runFileHistoryGit(gitDir, workspace, ["cat-file", "blob", `${checkpointHash}:.deepcode-file-history.json`])
+  );
 }
 
 function runFileHistoryGit(
@@ -2315,6 +3097,42 @@ function createMockedClientSessionManager(projectRoot: string, responses: unknow
   });
 }
 
+function createPermissionSessionManager(
+  projectRoot: string,
+  responses: unknown[],
+  permissions: {
+    allow: any[];
+    deny: any[];
+    ask: any[];
+    defaultMode: "allowAll" | "askAll";
+  }
+): SessionManager {
+  const client = {
+    chat: {
+      completions: {
+        create: async () => {
+          const response = responses.shift();
+          assert.ok(response, "expected a queued chat response");
+          return response;
+        },
+      },
+    },
+  };
+
+  return new SessionManager({
+    projectRoot,
+    createOpenAIClient: () => ({
+      client: client as any,
+      model: "test-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model", permissions }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+}
+
 function createMockedClientSessionManagerWithClient(projectRoot: string, client: unknown): SessionManager {
   return new SessionManager({
     projectRoot,
@@ -2335,6 +3153,13 @@ class APIUserAbortError extends Error {}
 function createChatResponse(content: string, usage: Record<string, unknown>): unknown {
   return {
     choices: [{ message: { content } }],
+    usage,
+  };
+}
+
+function createToolCallResponse(toolCalls: unknown[], usage: Record<string, unknown>): unknown {
+  return {
+    choices: [{ message: { content: "", tool_calls: toolCalls } }],
     usage,
   };
 }

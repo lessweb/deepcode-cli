@@ -2,8 +2,8 @@ import { execFileSync, execSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { fileURLToPath } from "url";
 import ejs from "ejs";
+import { fileURLToPath } from "url";
 import type { SessionMessage } from "./session";
 import { findGitBashPath, resolveShellPath } from "./common/shell-utils";
 import { supportsMultimodal } from "./common/model-capabilities";
@@ -167,8 +167,7 @@ function getCurrentDateAndModelPrompt(model?: string): string {
 
 export function getSystemPrompt(_projectRoot: string, options: PromptToolOptions = {}): string {
   const toolDocs = readToolDocs(getExtensionRoot(), options);
-  const basePrompt = toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
-  return basePrompt;
+  return toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
 }
 
 export function getCompactPrompt(sessionMessages: SessionMessage[]): string {
@@ -332,8 +331,29 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
               description:
                 'Clear, concise description of what this command does in active voice. Never use words like "complex" or "risk" in the description - just describe what it does.',
             },
+            sideEffects: {
+              description:
+                'Permission scopes required by this bash command. Use [] only for commands that do not read, write, delete, or access the network. Use ["unknown"] when the effects cannot be classified safely.',
+              type: "array",
+              items: {
+                type: "string",
+                enum: [
+                  "read-in-cwd",
+                  "read-out-cwd",
+                  "write-in-cwd",
+                  "write-out-cwd",
+                  "delete-in-cwd",
+                  "delete-out-cwd",
+                  "query-git-log",
+                  "mutate-git-log",
+                  "network",
+                  "unknown",
+                ],
+              },
+              uniqueItems: true,
+            },
           },
-          required: ["command"],
+          required: ["command", "sideEffects"],
           additionalProperties: false,
         },
       },
@@ -474,18 +494,17 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
         parameters: {
           type: "object",
           properties: {
-            file_path: {
-              type: "string",
-              description: "Absolute path to file. Optional when snippet_id is provided.",
-            },
             snippet_id: {
               type: "string",
-              description:
-                "Snippet id returned by the Read or Edit tool to scope the search range after a partial read.",
+              description: "Required Read/Edit snippet_id.",
+            },
+            file_path: {
+              type: "string",
+              description: "Optional absolute path guard; must match snippet_id's file.",
             },
             old_string: {
               type: "string",
-              description: "Exact text to replace inside the file or snippet scope",
+              description: "Exact text to replace inside snippet_id's scope",
             },
             new_string: {
               type: "string",
@@ -501,7 +520,7 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
               description: "Expected number of matches, especially useful as a safety check with replace_all",
             },
           },
-          required: ["old_string", "new_string"],
+          required: ["snippet_id", "old_string", "new_string"],
           additionalProperties: false,
         },
       },

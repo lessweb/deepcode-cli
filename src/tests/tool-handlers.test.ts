@@ -167,17 +167,29 @@ test("Read returns snippet metadata and Edit can scope replacements by snippet_i
   );
 });
 
+test("Read returns full-file snippet ids with a semantic prefix", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "full.txt");
+  fs.writeFileSync(filePath, "alpha\nbeta\n", "utf8");
+
+  const firstSnippet = await readSnippet(filePath, "full-file-snippet", workspace);
+  const secondSnippet = await readSnippet(filePath, "full-file-snippet", workspace);
+
+  assert.equal(firstSnippet.id, "full_file_0");
+  assert.equal(secondSnippet.id, "full_file_1");
+});
+
 test("Edit returns candidate match snippets when old_string is not unique", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "duplicate.txt");
   fs.writeFileSync(filePath, ["city", "city", "salary"].join("\n"), "utf8");
 
   const sessionId = "candidate-matches";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   const editResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: "city",
       new_string: "location",
     },
@@ -214,11 +226,11 @@ test("Edit returns closest matches only above threshold with surrounding context
   );
 
   const sessionId = "closest-match-context";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const fullSnippet = await readSnippet(filePath, sessionId, workspace);
 
   const closeResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: fullSnippet.id,
       old_string: "function computeTotal(value: number) {",
       new_string: "function computeTotal(input: number) {",
     },
@@ -239,7 +251,7 @@ test("Edit returns closest matches only above threshold with surrounding context
 
   const lowResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: fullSnippet.id,
       old_string: 'query: string = Field(description="search query")',
       new_string: "query: string",
     },
@@ -383,11 +395,11 @@ test("replace_all requires expected_occurrences for broad short-fragment replace
   fs.writeFileSync(filePath, [fragment, fragment, fragment].join("\n---\n"), "utf8");
 
   const sessionId = "replace-all-guard";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   const blockedResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: fragment,
       new_string: "        schema:\n          type: array",
       replace_all: true,
@@ -400,7 +412,7 @@ test("replace_all requires expected_occurrences for broad short-fragment replace
 
   const allowedResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: fragment,
       new_string: "        schema:\n          type: array",
       replace_all: true,
@@ -426,11 +438,11 @@ test("Edit accepts a unique loose-escape match when only escaping differs", asyn
   fs.writeFileSync(filePath, "params['city_json'] = f'\"{city}\"'\n", "utf8");
 
   const sessionId = "closest-match";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   const editResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: "params['city_json'] = f'\\\\\"{city}\\\\\"'",
       new_string: "params['city_json'] = city",
     },
@@ -472,12 +484,12 @@ test("Edit accepts a unique loose-escape match for over-escaped unicode sequence
   fs.writeFileSync(filePath, 'const sequence = "\\u001B[13;2~";\n', "utf8");
 
   const sessionId = "unicode-loose-escape";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   let llmCalls = 0;
   const editResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: 'const sequence = "\\\\u001B[13;2~";',
       new_string: 'const sequence = "\\\\u001B[13;130u";',
     },
@@ -524,11 +536,11 @@ test("Edit strips accidental read-result tabs after newlines when that creates a
   fs.writeFileSync(filePath, ["function demo() {", "  return 1;", "}"].join("\n") + "\n", "utf8");
 
   const sessionId = "line-leading-tab-correction";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   const editResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: "function demo() {\n\t  return 1;\n\t}",
       new_string: "function demo() {\n\t  return 2;\n\t}",
     },
@@ -565,7 +577,7 @@ test("Write repairs JSON object content for .json files", async () => {
   assert.equal(fs.readFileSync(filePath, "utf8"), '{\n  "name": "demo",\n  "private": true\n}');
 });
 
-test("Write updates file state so a follow-up Edit can succeed without another Read", async () => {
+test("Edit requires snippet_id even after Write refreshes file state", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "note.txt");
 
@@ -590,11 +602,55 @@ test("Write updates file state so a follow-up Edit can succeed without another R
     createContext("write-then-edit", workspace)
   );
 
+  assert.equal(editResult.ok, false);
+  assert.match(editResult.error ?? "", /snippet_id/);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\nbeta\n");
+});
+
+test("Edit allows empty old_string when the file is empty", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "empty-edit.txt");
+  fs.writeFileSync(filePath, "", "utf8");
+
+  const sessionId = "edit-empty-existing";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: "",
+      new_string: "initialized\n",
+    },
+    createContext(sessionId, workspace)
+  );
+
   assert.equal(editResult.ok, true);
-  assert.equal(editResult.metadata?.read_scope_type, "full");
-  assert.match(String(editResult.metadata?.diff_preview ?? ""), /-beta/);
-  assert.match(String(editResult.metadata?.diff_preview ?? ""), /\+gamma/);
-  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\ngamma\n");
+  assert.equal(editResult.metadata?.matched_via, "empty_file");
+  assert.equal(editResult.metadata?.replaced_count, 1);
+  assert.match(String(editResult.metadata?.diff_preview ?? ""), /\+initialized/);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "initialized\n");
+});
+
+test("Edit rejects empty old_string when the file is not empty", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "non-empty-edit.txt");
+  fs.writeFileSync(filePath, "alpha\n", "utf8");
+
+  const sessionId = "edit-empty-old-string-non-empty-file";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: "",
+      new_string: "initialized\n",
+    },
+    createContext(sessionId, workspace)
+  );
+
+  assert.equal(editResult.ok, false);
+  assert.equal(editResult.error, "old_string must not be empty unless the file is empty.");
+  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\n");
 });
 
 test("Write requires a full read before overwriting an existing file", async () => {
@@ -643,7 +699,7 @@ test("Edit rejects stale reads after the file changes on disk", async () => {
   fs.writeFileSync(filePath, "before\n", "utf8");
 
   const sessionId = "stale-edit";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   fs.writeFileSync(filePath, "after\n", "utf8");
   const futureTime = new Date(Date.now() + 2000);
@@ -651,7 +707,7 @@ test("Edit rejects stale reads after the file changes on disk", async () => {
 
   const editResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: "after",
       new_string: "final",
     },
@@ -685,11 +741,11 @@ test("Edit preserves CRLF line endings for existing files", async () => {
   fs.writeFileSync(filePath, "alpha\r\nbeta\r\n", "utf8");
 
   const sessionId = "crlf-edit";
-  await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  const snippet = await readSnippet(filePath, sessionId, workspace);
 
   const editResult = await handleEditTool(
     {
-      file_path: filePath,
+      snippet_id: snippet.id,
       old_string: "beta",
       new_string: "gamma",
     },
@@ -756,6 +812,22 @@ function createTempWorkspace(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-tools-"));
   tempDirs.push(dir);
   return dir;
+}
+
+async function readSnippet(
+  filePath: string,
+  sessionId: string,
+  workspace: string
+): Promise<{ id: string; startLine: number; endLine: number }> {
+  const readResult = await handleReadTool({ file_path: filePath }, createContext(sessionId, workspace));
+  assert.equal(readResult.ok, true);
+  const snippet = (readResult.metadata?.snippet ?? null) as {
+    id: string;
+    startLine: number;
+    endLine: number;
+  } | null;
+  assert.ok(snippet);
+  return snippet;
 }
 
 async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<void> {

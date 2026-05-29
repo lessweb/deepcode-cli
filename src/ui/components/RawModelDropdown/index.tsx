@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useInput } from "ink";
-import DropdownMenu from "../../DropdownMenu";
+import DropdownMenu from "../DropdownMenu";
 import type { RawMode } from "../../contexts";
 import { RAW_COMMAND_MODELS, useRawModeContext } from "../../contexts";
 

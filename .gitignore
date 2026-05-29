@@ -7,3 +7,4 @@ dist/
 *.log
 .claude/
 .mcp.json
+.deepcode/settings.json

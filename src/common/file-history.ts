@@ -9,13 +9,18 @@ const MANIFEST_PATH = ".deepcode-file-history.json";
 
 type FileHistoryEntry = {
   path: string;
-  blob: string;
+  blob: string | null;
   mode: "100644";
 };
 
 type FileHistoryManifest = {
-  version: 1;
+  version: 1 | 2;
   files: Record<string, FileHistoryEntry>;
+};
+
+export type FileHistoryCheckpointResult = {
+  checkpointHash: string | undefined;
+  changedFilePaths: string[];
 };
 
 export class GitFileHistory {
@@ -85,7 +90,11 @@ export class GitFileHistory {
       for (const filePath of absolutePaths) {
         const key = this.getFileKey(filePath);
         if (!fs.existsSync(filePath) || !fs.statSync(filePath).isFile()) {
-          delete manifest.files[key];
+          manifest.files[key] = {
+            path: filePath,
+            blob: null,
+            mode: "100644",
+          };
           continue;
         }
 
@@ -107,6 +116,36 @@ export class GitFileHistory {
       return commitHash;
     } catch {
       return undefined;
+    }
+  }
+
+  recordTrackedFilesCheckpoint(sessionId: string, message: string): FileHistoryCheckpointResult {
+    const currentHash = this.ensureSession(sessionId);
+    if (!currentHash) {
+      return { checkpointHash: undefined, changedFilePaths: [] };
+    }
+
+    try {
+      const manifest = this.readManifest(currentHash);
+      const trackedPaths = Object.values(manifest.files)
+        .map((entry) => entry.path)
+        .sort((left, right) => left.localeCompare(right));
+      if (trackedPaths.length === 0) {
+        return { checkpointHash: currentHash, changedFilePaths: [] };
+      }
+      const nextHash = this.recordCheckpoint(sessionId, trackedPaths, message);
+      if (!nextHash) {
+        return { checkpointHash: undefined, changedFilePaths: [] };
+      }
+
+      const nextManifest = this.readManifest(nextHash);
+      const changedFilePaths = Object.entries(manifest.files)
+        .filter(([key, entry]) => !isSameFileHistoryEntry(entry, nextManifest.files[key]))
+        .map(([key, entry]) => nextManifest.files[key]?.path ?? entry.path)
+        .sort((left, right) => left.localeCompare(right));
+      return { checkpointHash: nextHash, changedFilePaths };
+    } catch {
+      return { checkpointHash: undefined, changedFilePaths: [] };
     }
   }
 
@@ -146,16 +185,47 @@ export class GitFileHistory {
 
     for (const [key, entry] of Object.entries(currentManifest.files)) {
       if (!targetManifest.files[key]) {
-        removeTrackedFile(entry.path);
+        this.restoreFirstKnownEntry(currentHash, key, entry.path);
       }
     }
 
     for (const entry of Object.values(targetManifest.files)) {
+      if (!entry.blob) {
+        removeTrackedFile(entry.path);
+        continue;
+      }
       fs.mkdirSync(path.dirname(entry.path), { recursive: true });
       fs.writeFileSync(entry.path, this.readBlob(entry.blob));
     }
 
     this.runGit(["update-ref", branchRef, checkpointHash]);
+  }
+
+  private restoreFirstKnownEntry(currentHash: string | undefined, key: string, fallbackPath: string): void {
+    const firstEntry = currentHash ? this.findFirstKnownEntry(currentHash, key) : undefined;
+    const entry = firstEntry ?? { path: fallbackPath, blob: null, mode: "100644" as const };
+    if (!entry.blob) {
+      removeTrackedFile(entry.path);
+      return;
+    }
+
+    fs.mkdirSync(path.dirname(entry.path), { recursive: true });
+    fs.writeFileSync(entry.path, this.readBlob(entry.blob));
+  }
+
+  private findFirstKnownEntry(currentHash: string, key: string): FileHistoryEntry | undefined {
+    const commitHashes = this.runGit(["rev-list", "--reverse", currentHash])
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(isCommitHash);
+
+    for (const commitHash of commitHashes) {
+      const entry = this.readManifest(commitHash).files[key];
+      if (entry) {
+        return entry;
+      }
+    }
+    return undefined;
   }
 
   private getSessionBranchRef(sessionId: string): string | null {
@@ -182,6 +252,9 @@ export class GitFileHistory {
     const entries: string[] = [`100644 blob ${manifestBlob}\t${MANIFEST_PATH}\0`];
 
     for (const [key, entry] of Object.entries(normalizedManifest.files)) {
+      if (!entry.blob) {
+        continue;
+      }
       entries.push(`${entry.mode} blob ${entry.blob}\t${key}\0`);
     }
 
@@ -191,7 +264,12 @@ export class GitFileHistory {
   private readManifest(commitHash: string): FileHistoryManifest {
     const buffer = this.runGitBuffer(["cat-file", "blob", `${commitHash}:${MANIFEST_PATH}`]);
     const parsed = JSON.parse(buffer.toString("utf8")) as FileHistoryManifest;
-    if (!parsed || parsed.version !== 1 || !parsed.files || typeof parsed.files !== "object") {
+    if (
+      !parsed ||
+      (parsed.version !== 1 && parsed.version !== 2) ||
+      !parsed.files ||
+      typeof parsed.files !== "object"
+    ) {
       throw new Error("Invalid file history manifest.");
     }
     return normalizeManifest(parsed);
@@ -256,13 +334,18 @@ export class GitFileHistory {
 }
 
 function emptyManifest(): FileHistoryManifest {
-  return { version: 1, files: {} };
+  return { version: 2, files: {} };
 }
 
 function normalizeManifest(manifest: FileHistoryManifest): FileHistoryManifest {
   const files: Record<string, FileHistoryEntry> = {};
   for (const [key, entry] of Object.entries(manifest.files).sort(([left], [right]) => left.localeCompare(right))) {
-    if (!isValidStoredPath(key) || !entry || entry.mode !== "100644" || !isCommitHash(entry.blob)) {
+    if (
+      !isValidStoredPath(key) ||
+      !entry ||
+      entry.mode !== "100644" ||
+      (entry.blob !== null && !isCommitHash(entry.blob))
+    ) {
       throw new Error("Invalid file history manifest.");
     }
     files[key] = {
@@ -271,7 +354,14 @@ function normalizeManifest(manifest: FileHistoryManifest): FileHistoryManifest {
       mode: "100644",
     };
   }
-  return { version: 1, files };
+  return { version: 2, files };
+}
+
+function isSameFileHistoryEntry(left: FileHistoryEntry, right: FileHistoryEntry | undefined): boolean {
+  if (!right) {
+    return false;
+  }
+  return left.path === right.path && left.blob === right.blob && left.mode === right.mode;
 }
 
 function uniqueAbsolutePaths(filePaths: string[]): string[] {

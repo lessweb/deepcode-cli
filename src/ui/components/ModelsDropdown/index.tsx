@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useInput } from "ink";
-import DropdownMenu from "../../DropdownMenu";
+import DropdownMenu from "../DropdownMenu";
 import type { ModelConfigSelection, ReasoningEffort } from "../../../settings";
 
 type ModelStep = "model" | "thinking";

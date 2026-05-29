@@ -31,6 +31,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `thinkingEnabled`  | boolean | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)|
 | `reasoningEffort`  | string  | Reasoning intensity, either `"high"` or `"max"` (default `"max"`)          |
 | `debugLogEnabled`  | boolean | Enable debug log output (default `false`)                                   |
+| `telemetryEnabled` | boolean | Enable anonymous usage reporting (default `true`)                           |
 | `notify`           | string  | Full path to a task-completion notification script (e.g., Slack notification script) |
 | `webSearchTool`    | string  | Full path to a custom web search script                                     |
 | `mcpServers`       | object  | MCP server configurations (keys are service names, values are McpServerConfig objects) |
@@ -45,6 +46,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `THINKING_ENABLED`| string | Enable thinking mode                                            |
 | `REASONING_EFFORT`| string | Reasoning intensity                                             |
 | `DEBUG_LOG_ENABLED`| string| Enable debug log output                                         |
+| `TELEMETRY_ENABLED`| string| Enable anonymous usage reporting                                |
 | `<any other KEY>` | string | Custom environment variable                                     |
 
 #### `thinkingEnabled` — Thinking Mode
@@ -128,6 +130,16 @@ For detailed MCP usage instructions, refer to [mcp.md](mcp.md).
 #### `debugLogEnabled` — Debug Log
 
 Set to `true` to enable detailed debug logging (default `false`), useful for troubleshooting API calls and tool execution.
+
+#### `telemetryEnabled` — Anonymous Usage Reporting
+
+Set to `false` to disable anonymous usage reporting (default `true`). The report only includes an anonymous machine identifier and does not contain conversation content, code, or API keys.
+
+You can also disable it via environment variable:
+
+```bash
+DEEPCODE_TELEMETRY_ENABLED=0 deepcode
+```
 
 ## Environment Variable Priority
 

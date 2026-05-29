@@ -28,6 +28,11 @@ Before executing the command, please follow these steps:
 
 Usage notes:
   - The command argument is required.
+  - The sideEffects argument is required. Declare the minimum permission scopes the command may need.
+  - Use `sideEffects: []` only for commands that do not read, write, delete, query Git history, mutate Git history, or access the network, such as `date` or `node --version`.
+  - Use `*-out-cwd` when the command accesses paths outside the current workspace. For example, `cat /etc/hosts` requires `["read-out-cwd"]`.
+  - Use `query-git-log` for commands such as `git log`, `git show HEAD`, `git blame`, or history diffs. Use `mutate-git-log` for commands such as `git commit`, `git reset`, `git rebase`, `git merge`, `git cherry-pick`, or `git tag`.
+  - Use `["unknown"]` when you cannot classify the command safely.
   - It is very helpful if you write a clear, concise description of what this command does. For simple commands, keep it brief (5-10 words). For complex commands (piped commands, obscure flags, or anything hard to understand at a glance), add enough context to clarify what it does.
   - If the output exceeds 30000 characters, output will be truncated before being returned to you.
   - Always prefer using the dedicated tools for these commands:
@@ -60,10 +65,31 @@ Usage notes:
     "description": {
       "description": "Clear, concise description of what this command does in active voice. Never use words like \"complex\" or \"risk\" in the description - just describe what it does.\n\nFor simple commands (git, npm, standard CLI tools), keep it brief (5-10 words):\n- ls → \"List files in current directory\"\n- git status → \"Show working tree status\"\n- npm install → \"Install package dependencies\"\n\nFor commands that are harder to parse at a glance (piped commands, obscure flags, etc.), add enough context to clarify what it does:\n- find . -name \"*.tmp\" -exec rm {} \\; → \"Find and delete all .tmp files recursively\"\n- git reset --hard origin/main → \"Discard all local changes and match remote main\"\n- curl -s url | jq '.data[]' → \"Fetch JSON from URL and extract data array elements\"",
       "type": "string"
+    },
+    "sideEffects": {
+      "description": "Permission scopes required by this bash command. Use [] only for commands that do not read, write, delete, or access the network. Use [\"unknown\"] when the effects cannot be classified safely.",
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "read-in-cwd",
+          "read-out-cwd",
+          "write-in-cwd",
+          "write-out-cwd",
+          "delete-in-cwd",
+          "delete-out-cwd",
+          "query-git-log",
+          "mutate-git-log",
+          "network",
+          "unknown"
+        ]
+      },
+      "uniqueItems": true
     }
   },
   "required": [
-    "command"
+    "command",
+    "sideEffects"
   ],
   "additionalProperties": false
 }
