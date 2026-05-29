@@ -4,15 +4,15 @@ import type { ThemeTokens } from "./types";
 export const DEFAULT_THEME: ThemeTokens = {
   primary: "#229ac3",
   secondary: "#229ac3e6",
-  success: "#52c41a",
-  error: "#f5222d",
+  success: "#1a7f37",
+  error: "#d1242f",
   warning: "#fa8c16",
-  info: "#2f54eb",
+  info: "#0969da",
   text: "#3D4149",
   textDim: "#646A71",
   code: "#787f8a",
-  border: "#ABADB1",
-  gradients: ["#229ac3", "#7c3aed"],
+  border: "#999",
+  gradients: ["#229ac3", "#8250df"],
 };
 
 /** 预设主题映射表 */

@@ -211,7 +211,9 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
           </Box>
           {/* Search bar */}
           <Box marginTop={hasActiveSearch || searchQuery ? 0 : 0}>
-            <Text dimColor>{searchQuery ? `Search: ${searchQuery}` : "Type to search\u2026"}</Text>
+            <Text dimColor color={searchQuery ? theme.primary : theme.textDim}>
+              {searchQuery ? `Search: ${searchQuery}` : "Type to search\u2026"}
+            </Text>
             {searchQuery ? <Text bold>|</Text> : null}
           </Box>
         </Box>

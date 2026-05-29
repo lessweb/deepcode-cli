@@ -161,7 +161,7 @@ const DropdownMenu = React.memo(function DropdownMenu({
               <Box width={labelColumnWidth} flexShrink={0}>
                 <Text color={isActive ? effectiveActiveColor : undefined} wrap="truncate-end">
                   {isActive ? "> " : "  "}
-                  {item.selected !== undefined ? (item.selected ? "●" : "○") : null} <Text bold>{item.label}</Text>
+                  {item.selected !== undefined ? (item.selected ? "●" : "○") : null} <Text>{item.label}</Text>
                   {item.statusIndicator ? (
                     <Text color={item.statusIndicator.color}> {item.statusIndicator.symbol}</Text>
                   ) : null}

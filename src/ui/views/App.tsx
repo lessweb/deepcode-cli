@@ -636,9 +636,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       return [welcomeItem, ...messages];
     }
     return messages;
-    // theme 作为依赖确保主题切换时 Static 子组件重渲染
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, showWelcome, view, messages, welcomeItem, theme]);
+  }, [mode, showWelcome, view, messages, welcomeItem]);
 
   const handleQuestionAnswers = useCallback(
     (answers: AskUserQuestionAnswers) => {
@@ -723,12 +721,12 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         }}
       </Static>
       {statusLine ? (
-        <Box>
+        <Box marginLeft={2}>
           <Text dimColor>{statusLine}</Text>
         </Box>
       ) : null}
       {errorLine ? (
-        <Box>
+        <Box marginLeft={2}>
           <Text color={theme.error}>Error: {errorLine}</Text>
         </Box>
       ) : null}

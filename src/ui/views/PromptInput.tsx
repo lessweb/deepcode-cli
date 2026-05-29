@@ -722,19 +722,21 @@ export const PromptInput = React.memo(function PromptInput({
     [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
   );
 
+  const isFocused = useMemo(() => !disabled && hasTerminalFocus, [disabled, hasTerminalFocus]);
+
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
   const inlineHint = matchedCommand?.args ? ` ${matchedCommand.args.join(ARGS_SEPARATOR)}` : "";
 
   return (
     <Box flexDirection="column" width={screenWidth}>
       {imageUrls.length > 0 ? (
-        <Box>
+        <Box marginLeft={2}>
           <Text color={theme.info}>{formatImageAttachmentStatus(imageUrls.length)}</Text>
           <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
         </Box>
       ) : null}
       {selectedSkills.length > 0 ? (
-        <Box>
+        <Box marginLeft={2}>
           <Text color={theme.info} wrap="truncate-end">
             {formatSelectedSkillsStatus(selectedSkills)}
           </Text>
@@ -748,12 +750,10 @@ export const PromptInput = React.memo(function PromptInput({
         borderBottom={true}
         borderLeft={false}
         borderRight={false}
-        borderColor={theme.border}
+        borderColor={isFocused ? theme.primary : theme.border}
       >
         <PromptPrefixLine busy={busy} />
-        <Text>
-          {renderBufferWithCursor(buffer, !disabled && hasTerminalFocus, placeholder, pastesRef.current, theme.warning)}
-        </Text>
+        <Text>{renderBufferWithCursor(buffer, isFocused, placeholder, pastesRef.current, theme.warning)}</Text>
         {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
       </Box>
       <RawModelDropdown
@@ -792,7 +792,7 @@ export const PromptInput = React.memo(function PromptInput({
       />
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showFooterText && (
-        <Box>
+        <Box marginLeft={2}>
           <Text dimColor>{footerText}</Text>
         </Box>
       )}
