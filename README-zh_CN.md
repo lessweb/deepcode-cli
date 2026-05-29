@@ -192,16 +192,25 @@ Deep Code CLI 内置一套默认主题（`DEFAULT_THEME`），无需配置即可
 
 > 注意：`preset` 必须设为 `"custom"` 时 `overrides` 和 `tokens` 才会生效。`preset` 为 `"default"` 或不配置时始终使用系统默认主题。
 
-可覆盖的 token 说明：
+默认主题色值（`DEFAULT_THEME`）：
 
-| Token                                       | 用途                               |
-|---------------------------------------------|----------------------------------|
-| `primary`、`secondary`             | Logo、用户消息、选中项等                   |
-| `success`、`error`、`warning`、`info`          | 工具状态、权限提示（风险等级）、技能加载，`warning` 也是列表标记色 |
-| `text`、`textDim`、`code`、`border` | 正文、副文/引用块、代码、边框 |
-| `gradients`                                 | Logo 与退出面板的渐变色数组                 |
+| Token | 默认值 | 用途 |
+|-------|--------|------|
+| `primary` | `#229ac3` | 主品牌色：用户消息、选中项、状态行 bullet、Markdown 标题 |
+| `secondary` | `#229ac3e6` | 辅助品牌色：欢迎屏 Logo 文字与边框、退出面板边框 |
+| `success` | `#1a7f37` | 成功：工具执行成功、MCP ready、diff 新增行、低风险权限色 |
+| `error` | `#d1242f` | 失败/错误：工具执行失败、Error 行、diff 删除行、高风险权限色 |
+| `warning` | `#fa8c16` | 警告/进行中：忙时 spinner、权限提示边框、列表标记色、MCP 启动中 |
+| `info` | `#0969da` | 特殊指示：技能加载提示、图片附件状态 |
+| `text` | `#3D4149` | 主文字色：权限提示正文、问题文字、ProcessStdout 标题 |
+| `textDim` | `#646A71` | 次要文字：状态行参数、搜索占位符、diff 上下文行、Markdown 引用块 |
+| `code` | `#787f8a` | 代码块/内联代码 |
+| `border` | `#999` | 所有组件的边框色 |
+| `gradients` | `["#229ac3", "#8250df"]` | Logo 与退出面板的渐变色数组 |
 
 颜色值支持 hex（`"#ff6600"`）、hex 含透明度（`"#229ac3e6"`）、chalk 命名色（`"cyanBright"`、`"green"`）。
+
+> 注意：`tokens` 优先级高于 `overrides`——如果同时指定两者，仅 `tokens` 生效。主题配置可放在全局 `~/.deepcode/settings.json` 或项目根 `.deepcode/settings.json` 中。
 
 ## 贡献
 

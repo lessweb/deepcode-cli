@@ -192,16 +192,25 @@ Provide a complete tokens object, merged on top of the default theme:
 
 > Note: `overrides` and `tokens` only take effect when `preset` is set to `"custom"`. When `preset` is `"default"` or unset, the built-in default theme is always used.
 
-Available token descriptions:
+Default theme color values (`DEFAULT_THEME`):
 
-| Token | Used For |
-|-------|----------|
-| `primary`, `secondary` | Logo, user messages, selected items, etc. |
-| `success`, `error`, `warning`, `info` | Tool statuses, permission prompts (risk levels), skill loading; `warning` also colors list bullets |
-| `text`, `textDim`, `code`, `border` | Body text, secondary text/blockquotes, code, borders |
-| `gradients` | Logo and exit panel gradient colors |
+| Token | Default | Used For |
+|-------|---------|----------|
+| `primary` | `#229ac3` | Primary brand: user messages, selected items, status line bullets, Markdown headings |
+| `secondary` | `#229ac3e6` | Secondary brand: welcome screen logo text/border, exit panel border |
+| `success` | `#1a7f37` | Success: tool execution success, MCP ready, diff additions, low-risk permissions |
+| `error` | `#d1242f` | Error: tool execution failure, error lines, diff deletions, high-risk permissions |
+| `warning` | `#fa8c16` | Warning/in-progress: busy spinner, permission prompt border, list bullets, MCP starting |
+| `info` | `#0969da` | Info: skill loading tips, image attachment status |
+| `text` | `#3D4149` | Body text: permission prompt text, question text, ProcessStdout title |
+| `textDim` | `#646A71` | Secondary text: status line params, search placeholder, diff context, Markdown blockquotes |
+| `code` | `#787f8a` | Code blocks and inline code |
+| `border` | `#999` | All component borders |
+| `gradients` | `["#229ac3", "#8250df"]` | Logo and exit panel gradient colors |
 
 Color values support hex (`"#ff6600"`), hex with alpha (`"#229ac3e6"`), and chalk named colors (`"cyanBright"`, `"green"`).
+
+> Note: `tokens` takes priority over `overrides` — if both are specified, only `tokens` is used. Theme settings can be placed in the global `~/.deepcode/settings.json` or the project-root `.deepcode/settings.json`.
 
 ## Contributing
 
