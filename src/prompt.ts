@@ -99,7 +99,8 @@ type PromptToolOptions = {
   webSearchEnabled?: boolean;
 };
 
-const DEFAULT_SKILL_TEMPLATES = ["agent-drift-guard.md", "plan-and-execute.md"];
+// const DEFAULT_SKILL_TEMPLATES = ["agent-drift-guard.md", "plan-and-execute.md"];
+const DEFAULT_SKILL_TEMPLATES = ["karpathy-guidelines.md", "plan-and-execute.md"];
 
 function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): string {
   const toolsDir = path.join(extensionRoot, "templates", "tools");
