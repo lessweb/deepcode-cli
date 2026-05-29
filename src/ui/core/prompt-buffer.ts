@@ -155,20 +155,10 @@ export function isEmpty(state: PromptBufferState): boolean {
 
 export function getCurrentSlashToken(state: PromptBufferState): string | null {
   const text = state.text;
-  if (text.length === 0) {
+  if (text.length === 0 || !text.startsWith("/")) {
     return null;
   }
-  const beforeCursor = text.slice(0, state.cursor);
-  const lastNewline = beforeCursor.lastIndexOf("\n");
-  const lineStart = lastNewline + 1;
-  const line = beforeCursor.slice(lineStart);
-  if (!line.startsWith("/")) {
-    return null;
-  }
-  if (/\s/.test(line)) {
-    return null;
-  }
-  return line;
+  return text;
 }
 
 /**

@@ -106,14 +106,14 @@ test("getCurrentSlashToken returns the slash word at the cursor", () => {
   assert.equal(getCurrentSlashToken(buffer), "/skill");
 });
 
-test("getCurrentSlashToken returns null when token contains whitespace", () => {
+test("getCurrentSlashToken returns full text when it starts with /", () => {
   const buffer = { text: "/skill foo", cursor: 10 };
-  assert.equal(getCurrentSlashToken(buffer), null);
+  assert.equal(getCurrentSlashToken(buffer), "/skill foo");
 });
 
-test("getCurrentSlashToken supports slash on a new line", () => {
+test("getCurrentSlashToken returns null when text starts on a new line with /", () => {
   const buffer = { text: "do this\n/n", cursor: 10 };
-  assert.equal(getCurrentSlashToken(buffer), "/n");
+  assert.equal(getCurrentSlashToken(buffer), null);
 });
 
 test("getCurrentSlashToken returns null when no slash prefix", () => {

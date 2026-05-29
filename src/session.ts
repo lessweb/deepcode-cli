@@ -30,7 +30,7 @@ import type { McpServerConfig, PermissionScope, PermissionSettings } from "./set
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { killProcessTree } from "./common/process-tree";
-import { GitFileHistory } from "./common/file-history";
+import { GitFileHistory, type FileHistoryCheckpointResult } from "./common/file-history";
 import { clearSessionState, getSnippet, rebuildSessionStateFromHistory } from "./common/state";
 import {
   appendProjectPermissionAllows,
@@ -57,6 +57,8 @@ export type {
 } from "./common/permissions";
 
 const MAX_SESSION_ENTRIES = 50;
+const MAX_PROJECT_CODE_LENGTH = 64;
+const PROJECT_CODE_HASH_LENGTH = 16;
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
 const NEW_PROMPT_REPORT_TIMEOUT_MS = 3000;
 const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
@@ -73,6 +75,36 @@ export function getCompactPromptTokenThreshold(model: string): number {
   return DEEPSEEK_V4_MODELS.has(model)
     ? DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD
     : DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD;
+}
+
+// Keep project storage paths short enough for Git's internal files on Windows.
+export function getProjectCode(projectRoot: string): string {
+  const legacyCode = getLegacyProjectCode(projectRoot);
+  if (legacyCode.length <= MAX_PROJECT_CODE_LENGTH) {
+    return legacyCode;
+  }
+
+  const normalizedRoot = path.resolve(projectRoot);
+  const hashInput = process.platform === "win32" ? normalizedRoot.toLowerCase() : normalizedRoot;
+  const hash = crypto.createHash("sha256").update(hashInput).digest("hex").slice(0, PROJECT_CODE_HASH_LENGTH);
+  const prefixLimit = MAX_PROJECT_CODE_LENGTH - PROJECT_CODE_HASH_LENGTH - 1;
+  const basename = path.basename(normalizedRoot);
+  const prefix =
+    sanitizeProjectCodePart(basename)
+      .slice(0, prefixLimit)
+      .replace(/[-.]+$/g, "") || "project";
+  return `${prefix}-${hash}`;
+}
+
+function getLegacyProjectCode(projectRoot: string): string {
+  return projectRoot.replace(/[\\/]/g, "-").replace(/:/g, "");
+}
+
+function sanitizeProjectCodePart(value: string): string {
+  return value
+    .replace(/[^A-Za-z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-.]+|[-.]+$/g, "");
 }
 
 function isUsageRecord(value: unknown): value is Record<string, unknown> {
@@ -1013,6 +1045,7 @@ The candidate skills are as follows:\n\n`;
       this.appendSessionMessage(sessionId, instructionsMessage);
     }
 
+    this.recordUserPromptCheckpoint(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
@@ -1087,6 +1120,11 @@ ${skillMd}
     this.reportNewPrompt();
 
     this.ensureFileHistorySession(sessionId);
+    const checkpoint = this.recordUserPromptCheckpoint(sessionId);
+    if (checkpoint.changedFilePaths.length) {
+      const content = `Note that the user manually modified these files:\n${checkpoint.changedFilePaths.join("\n")}`;
+      this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, content));
+    }
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
@@ -1720,16 +1758,12 @@ ${skillMd}
     };
   }
 
-  private getProjectCode(projectRoot: string): string {
-    return projectRoot.replace(/[\\/]/g, "-").replace(/:/g, "");
-  }
-
   private getProjectStorage(): {
     projectCode: string;
     projectDir: string;
     sessionsIndexPath: string;
   } {
-    const projectCode = this.getProjectCode(this.projectRoot);
+    const projectCode = getProjectCode(this.projectRoot);
     const projectDir = path.join(os.homedir(), ".deepcode", "projects", projectCode);
     const sessionsIndexPath = path.join(projectDir, "sessions-index.json");
     return { projectCode, projectDir, sessionsIndexPath };
@@ -1750,6 +1784,10 @@ ${skillMd}
 
   private getCurrentCheckpointHash(sessionId: string): string | undefined {
     return this.getFileHistory().getCurrentCheckpointHash(sessionId);
+  }
+
+  private recordUserPromptCheckpoint(sessionId: string): FileHistoryCheckpointResult {
+    return this.getFileHistory().recordTrackedFilesCheckpoint(sessionId, "User prompt checkpoint");
   }
 
   private prepareFileMutationCheckpoint(sessionId: string, filePath: string): void {
