@@ -143,11 +143,23 @@ No. Deep Code has a built-in fine-grained permission control mechanism that lets
 
 ### How do I customize the theme?
 
-Deep Code CLI includes a built-in default theme (`DEFAULT_THEME`) that works out of the box. To customize colors, set `theme.preset` to `"custom"` in `settings.json` and provide `overrides` or `tokens`.
+Deep Code CLI includes multiple built-in preset themes, defaulting to the light theme (`light`). You can switch presets by setting `theme.preset` in `settings.json`, or set it to `"custom"` for full customization.
 
-**Using the default theme (no config required)**
+**Using preset themes**
 
-No settings needed — the built-in theme is used automatically.
+Set `theme.preset` in `settings.json` to switch:
+
+```json
+{
+  "theme": {
+    "preset": "dark"
+  }
+}
+```
+
+Available presets: `light` (default), `dark`, `github-light`, `github-dark`, `gitlab-light`, `gitlab-dark`, `monokai`, `dracula`.
+
+You can also use the `/theme` command at runtime to open the theme picker with live preview.
 
 **Option 1: Partial overrides (preset="custom" + overrides)**
 
@@ -167,7 +179,7 @@ Override only the colors you want to change; the rest keep their defaults:
 
 **Option 2: Full customization (preset="custom" + tokens)**
 
-Provide a complete tokens object, merged on top of the default theme:
+Provide a complete tokens object, merged on top of the light theme:
 
 ```json
 {
@@ -182,6 +194,7 @@ Provide a complete tokens object, merged on top of the default theme:
       "info": "magenta",
       "text": "white",
       "textDim": "gray",
+      "textBright": "white",
       "code": "cyan",
       "border": "gray",
       "gradients": ["#229ac3e6", "#229ac3e6"]
@@ -190,9 +203,9 @@ Provide a complete tokens object, merged on top of the default theme:
 }
 ```
 
-> Note: `overrides` and `tokens` only take effect when `preset` is set to `"custom"`. When `preset` is `"default"` or unset, the built-in default theme is always used.
+> Note: `overrides` and `tokens` only take effect when `preset` is set to `"custom"`. When `preset` is unset, the `light` theme is used by default.
 
-Default theme color values (`DEFAULT_THEME`):
+Default light theme (`light`) color values:
 
 | Token | Default | Used For |
 |-------|---------|----------|
@@ -204,6 +217,7 @@ Default theme color values (`DEFAULT_THEME`):
 | `info` | `#0969da` | Info: skill loading tips, image attachment status |
 | `text` | `#3D4149` | Body text: permission prompt text, question text, ProcessStdout title |
 | `textDim` | `#646A71` | Secondary text: status line params, search placeholder, diff context, Markdown blockquotes |
+| `textBright` | `#1F2329` | Bright text: emphasized hints |
 | `code` | `#787f8a` | Code blocks and inline code |
 | `border` | `#999` | All component borders |
 | `gradients` | `["#229ac3", "#8250df"]` | Logo and exit panel gradient colors |

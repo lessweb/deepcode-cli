@@ -37,7 +37,7 @@ export function renderMarkdownSegments(text: string, maxWidth?: number): Markdow
   for (const seg of fenceSegments) {
     if (seg.kind === "code") {
       const tc = getCurrentThemedChalk();
-      const langTag = seg.lang ? tc.dim(`[${seg.lang}]`) + "\n" : "";
+      const langTag = seg.lang ? tc.textBright(`[${seg.lang}]`) + "\n" : "";
       segments.push({ kind: "code", body: langTag + tc.code(seg.body), lang: seg.lang });
       continue;
     }

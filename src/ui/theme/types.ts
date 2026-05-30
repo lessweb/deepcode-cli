@@ -47,7 +47,7 @@ export type ThemePreset =
 
 /** 主题配置（用户可配置部分） */
 export type ThemeSettings = {
-  /** 选择预设主题："default" 使用系统默认，"custom" 使用用户自定义 */
+  /** 选择预设主题，如 "light"、"dark" 等；"custom" 使用用户自定义 */
   preset?: ThemePreset;
   /** 覆盖部分 token（仅 preset="custom" 时生效） */
   overrides?: Partial<ThemeTokens>;

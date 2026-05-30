@@ -193,18 +193,13 @@ Color values support the following formats:
 
 **Runtime Theme Switching**
 
-Use the `/theme` command in the CLI to quickly switch preset themes:
+Use the `/theme` command in the CLI to open the theme picker. Browse with arrow keys and confirm with Space or Enter:
 
 ```
-/theme                # Show theme picker
-/theme dark           # Switch to dark theme
-/theme light          # Switch back to light theme
-/theme github-dark    # Switch to GitHub Dark theme
-/theme gitlab-light   # Switch to GitLab Light theme
-/theme monokai        # Switch to Monokai theme
+/theme    # Open theme picker
 ```
 
-The switch is automatically saved to `settings.json` and will take effect on the next launch.
+Available themes in the picker match the table above. The theme is previewed in real-time as you browse. Press Esc to cancel and revert to the original theme. Once confirmed, the selection is automatically saved to `settings.json` and will take effect on the next launch.
 
 #### `debugLogEnabled` — Debug Log
 
