@@ -629,6 +629,54 @@ test("Edit accepts a unique loose-escape match for over-escaped unicode sequence
   assert.equal(fs.readFileSync(filePath, "utf8"), 'const sequence = "\\u001B[13;130u";\n');
 });
 
+test("Edit corrects newString escaping in loose_escape fallback when LLM correction is unavailable", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "latex.tex");
+  // LaTeX file with single-backslash commands
+  fs.writeFileSync(filePath, String.raw`\alpha + \beta = \gamma` + "\n", "utf8");
+
+  const sessionId = "loose-escape-newstring-fix";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  // Simulate LLM over-escaping (doubled backslashes), no LLM client available for correction
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: String.raw`\\alpha + \\beta`,
+      new_string: String.raw`\\delta + \\epsilon`,
+    },
+    createContext(sessionId, workspace)
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(editResult.metadata?.matched_via, "loose_escape");
+  assert.equal(fs.readFileSync(filePath, "utf8"), String.raw`\delta + \epsilon = \gamma` + "\n");
+});
+
+test("Edit corrects newString escaping in loose_escape fallback for over-escaped LaTeX accent", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "latex2.tex");
+  // LaTeX accent command: H\"{o}tel — backslash before double-quote
+  fs.writeFileSync(filePath, String.raw`H\"{o}tel is nice` + "\n", "utf8");
+
+  const sessionId = "loose-escape-accent";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  // LLM over-escaped both the backslash AND the quote: H\\\"{o}tel
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: String.raw`H\\\"{o}tel`,
+      new_string: String.raw`M\\\"{u}nchen`,
+    },
+    createContext(sessionId, workspace)
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(editResult.metadata?.matched_via, "loose_escape");
+  assert.equal(fs.readFileSync(filePath, "utf8"), String.raw`M\"{u}nchen is nice` + "\n");
+});
+
 test("Edit strips accidental read-result tabs after newlines when that creates a unique match", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "tabs.ts");
