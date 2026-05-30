@@ -604,12 +604,12 @@ function fixNewStringEscaping(oldString: string, matchedText: string, newString:
 
   // Apply ratios to newString; reuse the last ratio only when the observed escaping error is uniform.
   let result = "";
-  let ri = 0;
+  let slashRatioIndex = 0;
   let lastRatio: number | null = null;
   for (const tok of newTokens) {
     if (tok.type === "slash") {
-      const ratio = ri < ratios.length ? ratios[ri] : lastRatio;
-      if (ri >= ratios.length && !canReuseLastRatio) {
+      const ratio = slashRatioIndex < ratios.length ? ratios[slashRatioIndex] : lastRatio;
+      if (slashRatioIndex >= ratios.length && !canReuseLastRatio) {
         return { ok: false };
       }
       if (ratio !== null) {
@@ -618,10 +618,10 @@ function fixNewStringEscaping(oldString: string, matchedText: string, newString:
       } else {
         result += "\\".repeat(tok.length);
       }
-      if (ri < ratios.length) {
-        lastRatio = ratios[ri];
+      if (slashRatioIndex < ratios.length) {
+        lastRatio = ratios[slashRatioIndex];
       }
-      ri += 1;
+      slashRatioIndex += 1;
     } else {
       result += tok.value;
     }
@@ -636,31 +636,31 @@ function fixNewStringEscaping(oldString: string, matchedText: string, newString:
 
 function collectLooseEscapeRatios(oldString: string, matchedText: string): number[] | null {
   const ratios: number[] = [];
-  let oi = 0;
-  let mi = 0;
+  let oldCursor = 0;
+  let matchedCursor = 0;
 
-  while (oi < oldString.length) {
-    if (oldString[oi] !== "\\") {
-      if (mi >= matchedText.length || matchedText[mi] !== oldString[oi]) {
+  while (oldCursor < oldString.length) {
+    if (oldString[oldCursor] !== "\\") {
+      if (matchedCursor >= matchedText.length || matchedText[matchedCursor] !== oldString[oldCursor]) {
         return null;
       }
-      oi += 1;
-      mi += 1;
+      oldCursor += 1;
+      matchedCursor += 1;
       continue;
     }
 
-    const oldSlashStart = oi;
-    while (oi < oldString.length && oldString[oi] === "\\") {
-      oi += 1;
+    const oldSlashStart = oldCursor;
+    while (oldCursor < oldString.length && oldString[oldCursor] === "\\") {
+      oldCursor += 1;
     }
-    const oldSlashCount = oi - oldSlashStart;
+    const oldSlashCount = oldCursor - oldSlashStart;
 
-    if (oi >= oldString.length) {
-      const matchedSlashStart = mi;
-      while (mi < matchedText.length && matchedText[mi] === "\\") {
-        mi += 1;
+    if (oldCursor >= oldString.length) {
+      const matchedSlashStart = matchedCursor;
+      while (matchedCursor < matchedText.length && matchedText[matchedCursor] === "\\") {
+        matchedCursor += 1;
       }
-      const matchedSlashCount = mi - matchedSlashStart;
+      const matchedSlashCount = matchedCursor - matchedSlashStart;
       if (matchedSlashCount !== oldSlashCount) {
         return null;
       }
@@ -668,21 +668,21 @@ function collectLooseEscapeRatios(oldString: string, matchedText: string): numbe
       continue;
     }
 
-    const anchor = oldString[oi];
-    const matchedSlashStart = mi;
-    while (mi < matchedText.length && matchedText[mi] === "\\") {
-      mi += 1;
+    const anchor = oldString[oldCursor];
+    const matchedSlashStart = matchedCursor;
+    while (matchedCursor < matchedText.length && matchedText[matchedCursor] === "\\") {
+      matchedCursor += 1;
     }
-    const matchedSlashCount = mi - matchedSlashStart;
-    if (mi >= matchedText.length || matchedText[mi] !== anchor) {
+    const matchedSlashCount = matchedCursor - matchedSlashStart;
+    if (matchedCursor >= matchedText.length || matchedText[matchedCursor] !== anchor) {
       return null;
     }
     ratios.push(matchedSlashCount / oldSlashCount);
-    oi += 1;
-    mi += 1;
+    oldCursor += 1;
+    matchedCursor += 1;
   }
 
-  return mi === matchedText.length ? ratios : null;
+  return matchedCursor === matchedText.length ? ratios : null;
 }
 
 function tokenizeLooseEscaping(value: string): TokenSegment[] {
