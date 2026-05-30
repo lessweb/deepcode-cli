@@ -22,6 +22,7 @@ src/
 │   ├── process-tree.ts  # Process tree construction and orphan detection
 │   ├── shell-utils.ts   # Shell path resolution (Git Bash, zsh, bash)
 │   ├── state.ts         # In-memory file state and snippet tracking
+│   ├── telemetry.ts     # Usage telemetry collection and reporting
 │   ├── update-check.ts  # Latest-version check against npm registry
 │   └── validate.ts      # Tool validation runtime helpers (was runtime.ts)
 ├── mcp/
@@ -37,20 +38,23 @@ src/
 │   ├── web-search-handler.ts  # Web search via natural language queries
 │   └── ask-user-question-handler.ts # Interactive user prompts with options
 ├── ui/
-│   ├── components/      # Reusable Ink components (MessageView, DropdownMenu, ModelsDropdown, SkillsDropdown, etc.)
+│   ├── components/      # Reusable Ink components (MessageView, DropdownMenu, ModelsDropdown, SkillsDropdown, FileMentionMenu, RawModelDropdown, etc.)
 │   ├── contexts/        # React contexts (AppContext, RawModeContext)
 │   ├── hooks/           # Custom hooks (cursor, useHistoryNavigation, usePasteHandling, useTerminalInput)
-│   ├── views/           # Top-level screen components (App, PromptInput, SessionList, PermissionPrompt, ProcessStdoutView, etc.)
-│   ├── core/            # Core UI logic (file-mentions, slash-commands, prompt-buffer, thinking-state, etc.)
+│   ├── views/           # Top-level screen components (App, PromptInput, SessionList, PermissionPrompt, ProcessStdoutView, WelcomeScreen, UndoSelector, etc.)
+│   ├── core/            # Core UI logic (file-mentions, slash-commands, prompt-buffer, thinking-state, clipboard, prompt-undo-redo, etc.)
 │   ├── utils/           # Shared utility helpers
+│   ├── ascii-art.ts     # ASCII art banner for welcome screen
+│   ├── exit-summary.ts  # Session exit summary and cost reporting
 │   ├── index.ts         # UI module barrel exports
 │   └── constants.ts     # UI-wide constants
-├── tests/               # One *.test.ts per source module, plus run-tests.mjs
+├── tests/               # Test files per source module, plus run-tests.mjs
 templates/
 ├── tools/               # Tool descriptions fed to the LLM
-├── skills/              # Built-in skill definitions (agent-drift-guard, plan-and-execute)
+├── skills/              # Built-in skill definitions (agent-drift-guard, plan-and-execute, karpathy-guidelines)
 └── prompts/             # EJS templates (e.g., init_command.md.ejs)
 docs/                    # User-facing documentation (configuration, MCP, notify, permissions)
+resources/               # Static assets (intro screenshots)
 dist/                    # Bundled CLI output (gitignored)
 ```
 
@@ -66,8 +70,8 @@ dist/                    # Bundled CLI output (gitignored)
 | `npm run check` | Runs typecheck + lint + format:check together |
 | `npm run bundle` | esbuild bundles `src/cli.tsx` → `dist/cli.js` (ESM, Node 18) |
 | `npm run build` | `check` + `bundle` + chmod 755 — full CI gate before publish |
-| `npm test` | Runs all tests via `tsx --test src/tests/*.test.ts` |
-| `npm run test:single -- <file>` | Run a single test file (e.g., `npm run test:single -- src/tests/session.test.ts`) |
+| `npm test` | Runs all tests via `node src/tests/run-tests.mjs` |
+| `npm run test:single -- <file>` | Run a single test file via `tsx --test` (e.g., `npm run test:single -- src/tests/session.test.ts`) |
 
 Run the CLI locally for manual testing: `node dist/cli.js` (after `npm run bundle`).
 
@@ -90,7 +94,7 @@ Run the CLI locally for manual testing: `node dist/cli.js` (after `npm run bundl
 
 - **Framework**: Node.js native test runner (`node:test`) with `tsx` for TypeScript
 - **Assertions**: `node:assert/strict`
-- **Coverage**: Target meaningful unit tests for core logic (session management, tool handlers, settings resolution, prompt buffer, permissions, MCP client). Test files are in `src/tests/` matching the source module name.
+- **Coverage**: Target meaningful unit tests for core logic (session management, tool handlers, settings resolution, prompt buffer, permissions, MCP client, telemetry). Test files are in `src/tests/` matching the source module name.
 - **Test naming**: `describe`/`test` blocks with descriptive names. Example: `test("SessionManager preserves structured system content when building OpenAI messages", ...)`
 - **Relaxed lint rules**: Test files allow `any` and unused vars.
 - Run all tests with `npm test` before submitting a PR. A cross-platform test runner is available at `src/tests/run-tests.mjs`.
@@ -104,6 +108,7 @@ Run the CLI locally for manual testing: `node dist/cli.js` (after `npm run bundl
 - `chore:` — tooling, deps, hooks (e.g., `chore: add husky + lint-staged`)
 - `refactor:` — code restructuring (e.g., `refactor(ui): optimize App hooks`)
 - `style:` — formatting-only changes (e.g., `style: adjust the tree structure symbols`)
+- `test:` — adding or updating tests (e.g., `test: add telemetry module unit tests`)
 - `docs:` — documentation (e.g., `docs: add MCP configuration guide`)
 
 **Pull requests** should include:
@@ -133,4 +138,4 @@ A **file history system** (`src/common/file-history.ts`) provides undo/checkpoin
 
 - **AGENTS.md loading**: The CLI loads agent instructions from `./AGENTS.md`, `./.deepcode/AGENTS.md`, or `~/.deepcode/AGENTS.md` (first found wins). Write project-specific guidance for the LLM in any of these.
 - **Skills**: Place skill definitions in `~/.agents/skills/<name>/SKILL.md` (user-level) or `./.agents/skills/<name>/SKILL.md` (project-level). Legacy path `./.deepcode/skills/` is also supported. Each SKILL.md uses YAML frontmatter with `name` and `description` fields.
-- **Built-in skills**: `agent-drift-guard` (detects and corrects execution drift) and `plan-and-execute` (structured task planning with progress tracking). Both are defined in `templates/skills/` and always injected into every session.
+- **Built-in skills**: `agent-drift-guard` (detects and corrects execution drift), `plan-and-execute` (structured task planning with progress tracking), and `karpathy-guidelines` (behavioral guidelines to reduce common LLM coding mistakes). All three are defined in `templates/skills/` and always injected into every session.

@@ -702,8 +702,8 @@ test("createSession appends default system prompts in prefix-cache-friendly orde
   assert.match(systemContents[0] ?? "", /# Available Tools/);
   assert.doesNotMatch(systemContents[0] ?? "", /# Local Workspace Environment/);
   assert.doesNotMatch(systemContents[0] ?? "", /当前LLM模型为test-model/);
-  assert.match(systemContents[1] ?? "", /<agent-drift-guard-skill>/);
-  assert.match(systemContents[1] ?? "", /<plan-and-execute-skill>/);
+  assert.match(systemContents[1] ?? "", /<karpathy-guidelines-skill>/);
+  assert.match(systemContents[1] ?? "", /# Karpathy Guidelines/);
   assert.doesNotMatch(systemContents[1] ?? "", /path="templates\/skills\//);
   assert.doesNotMatch(systemContents[1] ?? "", /当前LLM模型为test-model/);
   assert.match(systemContents[2] ?? "", /# Local Workspace Environment/);
