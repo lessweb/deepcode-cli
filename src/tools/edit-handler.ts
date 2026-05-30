@@ -56,6 +56,14 @@ type CorrectedEditStrings = {
   newString: string;
 };
 
+type EscapeCorrectionResult =
+  | {
+      ok: true;
+      newString: string;
+      changed: boolean;
+    }
+  | { ok: false };
+
 const editSchema = z.strictObject({
   file_path: z.string().optional(),
   snippet_id: z.string().min(1, "snippet_id is required."),
@@ -227,31 +235,37 @@ export async function handleEditTool(
         if (matches.length === 0) {
           const looseEscapeMatches = findLooseEscapeMatches(raw, oldString, scope);
           if (looseEscapeMatches.length === 1 && looseEscapeMatches[0]?.score === 1) {
-            const correctedStrings = await correctEscapedStringsWithLLM(
-              raw.slice(scope.startOffset, scope.endOffset),
-              oldString,
-              newString,
-              looseEscapeMatches[0].text,
-              context
-            );
+            const looseEscapeMatch = looseEscapeMatches[0];
+            const deterministicCorrection = fixNewStringEscaping(oldString, looseEscapeMatch.text, newString);
 
-            if (correctedStrings) {
-              const correctedMatches = findOccurrences(raw, correctedStrings.oldString, scope);
-              if (correctedMatches.length > 0) {
-                matches = correctedMatches;
-                matchedVia = "llm_escape_correction";
-                replacementOldString = correctedStrings.oldString;
-                replacementNewString = correctedStrings.newString;
-              }
-            }
-
-            if (matches.length === 0) {
-              matches = [looseEscapeMatches[0]];
+            if (deterministicCorrection.ok) {
+              matches = [looseEscapeMatch];
               matchedVia = "loose_escape";
-              replacementOldString = looseEscapeMatches[0].text;
-              const correctedNew = fixNewStringEscaping(oldString, looseEscapeMatches[0].text, newString);
-              if (correctedNew !== null) {
-                replacementNewString = correctedNew;
+              replacementOldString = looseEscapeMatch.text;
+              replacementNewString = deterministicCorrection.newString;
+            } else {
+              const correctedStrings = await correctEscapedStringsWithLLM(
+                raw.slice(scope.startOffset, scope.endOffset),
+                oldString,
+                newString,
+                looseEscapeMatch.text,
+                context
+              );
+
+              if (correctedStrings) {
+                const correctedMatches = findOccurrences(raw, correctedStrings.oldString, scope);
+                if (correctedMatches.length > 0) {
+                  matches = correctedMatches;
+                  matchedVia = "llm_escape_correction";
+                  replacementOldString = correctedStrings.oldString;
+                  replacementNewString = correctedStrings.newString;
+                }
+              }
+
+              if (matches.length === 0) {
+                matches = [looseEscapeMatch];
+                matchedVia = "loose_escape";
+                replacementOldString = looseEscapeMatch.text;
               }
             }
           }
@@ -567,25 +581,29 @@ function stripReadResultLineTabs(value: string): string {
 
 type TokenSegment = { type: "slash"; length: number } | { type: "text"; value: string };
 
-function fixNewStringEscaping(oldString: string, matchedText: string, newString: string): string | null {
+function fixNewStringEscaping(oldString: string, matchedText: string, newString: string): EscapeCorrectionResult {
   if (oldString === matchedText) {
-    return null; // no escaping difference to correct
+    return { ok: true, newString, changed: false };
   }
 
   const ratios = collectLooseEscapeRatios(oldString, matchedText);
   if (!ratios) {
-    return null;
+    return { ok: false };
   }
 
   const newTokens = tokenizeLooseEscaping(newString);
+  const canReuseLastRatio = ratios.length > 0 && ratios.every((ratio) => Math.abs(ratio - ratios[0]) < Number.EPSILON);
 
-  // Apply ratios to newString; reuse last ratio for trailing slash runs.
+  // Apply ratios to newString; reuse the last ratio only when the observed escaping error is uniform.
   let result = "";
   let ri = 0;
   let lastRatio: number | null = null;
   for (const tok of newTokens) {
     if (tok.type === "slash") {
       const ratio = ri < ratios.length ? ratios[ri] : lastRatio;
+      if (ri >= ratios.length && !canReuseLastRatio) {
+        return { ok: false };
+      }
       if (ratio !== null) {
         const correctedCount = Math.max(0, Math.round(tok.length * ratio));
         result += "\\".repeat(correctedCount);
@@ -601,7 +619,11 @@ function fixNewStringEscaping(oldString: string, matchedText: string, newString:
     }
   }
 
-  return result === newString ? null : result;
+  return {
+    ok: true,
+    newString: result,
+    changed: result !== newString,
+  };
 }
 
 function collectLooseEscapeRatios(oldString: string, matchedText: string): number[] | null {

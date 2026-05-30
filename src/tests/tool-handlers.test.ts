@@ -539,6 +539,7 @@ test("Edit accepts a unique loose-escape match when only escaping differs", asyn
   const sessionId = "closest-match";
   const snippet = await readSnippet(filePath, sessionId, workspace);
 
+  let llmCalls = 0;
   const editResult = await handleEditTool(
     {
       snippet_id: snippet.id,
@@ -550,19 +551,10 @@ test("Edit accepts a unique loose-escape match when only escaping differs", asyn
         client: {
           chat: {
             completions: {
-              create: async () => ({
-                choices: [
-                  {
-                    message: {
-                      content:
-                        "<response>" +
-                        "<corrected_old_string><![CDATA[params['city_json'] = f'\"{city}\"']]></corrected_old_string>" +
-                        "<corrected_new_string><![CDATA[params['city_json'] = city]]></corrected_new_string>" +
-                        "</response>",
-                    },
-                  },
-                ],
-              }),
+              create: async () => {
+                llmCalls += 1;
+                throw new Error("LLM correction should not be called when deterministic correction succeeds.");
+              },
             },
           },
         } as any,
@@ -573,11 +565,12 @@ test("Edit accepts a unique loose-escape match when only escaping differs", asyn
   );
 
   assert.equal(editResult.ok, true);
-  assert.equal(editResult.metadata?.matched_via, "llm_escape_correction");
+  assert.equal(llmCalls, 0);
+  assert.equal(editResult.metadata?.matched_via, "loose_escape");
   assert.equal(fs.readFileSync(filePath, "utf8"), "params['city_json'] = city\n");
 });
 
-test("Edit accepts a unique loose-escape match for over-escaped unicode sequences", async () => {
+test("Edit deterministically corrects a unique loose-escape match for over-escaped unicode sequences", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "keys.ts");
   fs.writeFileSync(filePath, 'const sequence = "\\u001B[13;2~";\n', "utf8");
@@ -597,6 +590,45 @@ test("Edit accepts a unique loose-escape match for over-escaped unicode sequence
         client: {
           chat: {
             completions: {
+              create: async () => {
+                llmCalls += 1;
+                throw new Error("LLM correction should not be called when deterministic correction succeeds.");
+              },
+            },
+          },
+        } as any,
+        model: "test-model",
+        thinkingEnabled: false,
+      }),
+    })
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(llmCalls, 0);
+  assert.equal(editResult.metadata?.matched_via, "loose_escape");
+  assert.equal(fs.readFileSync(filePath, "utf8"), 'const sequence = "\\u001B[13;130u";\n');
+});
+
+test("Edit uses LLM correction when mixed escaping ratios make deterministic correction ambiguous", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "mixed-escape.tex");
+  fs.writeFileSync(filePath, String.raw`\alpha + "x"` + "\n", "utf8");
+
+  const sessionId = "mixed-escape-llm-fallback";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  let llmCalls = 0;
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: String.raw`\\alpha + \"x\"`,
+      new_string: String.raw`\\beta + \"y\" + \\gamma`,
+    },
+    createContext(sessionId, workspace, {
+      createOpenAIClient: () => ({
+        client: {
+          chat: {
+            completions: {
               create: async (request: { messages?: Array<{ content?: string }> }) => {
                 llmCalls += 1;
                 assert.match(String(request.messages?.[1]?.content ?? ""), /<matched_text><!\[CDATA\[/);
@@ -606,8 +638,8 @@ test("Edit accepts a unique loose-escape match for over-escaped unicode sequence
                       message: {
                         content:
                           "<response>" +
-                          '<corrected_old_string><![CDATA[const sequence = "\\u001B[13;2~";]]></corrected_old_string>' +
-                          '<corrected_new_string><![CDATA[const sequence = "\\u001B[13;130u";]]></corrected_new_string>' +
+                          '<corrected_old_string><![CDATA[\\alpha + "x"]]></corrected_old_string>' +
+                          '<corrected_new_string><![CDATA[\\beta + "y" + \\gamma]]></corrected_new_string>' +
                           "</response>",
                       },
                     },
@@ -626,7 +658,156 @@ test("Edit accepts a unique loose-escape match for over-escaped unicode sequence
   assert.equal(editResult.ok, true);
   assert.equal(llmCalls, 1);
   assert.equal(editResult.metadata?.matched_via, "llm_escape_correction");
-  assert.equal(fs.readFileSync(filePath, "utf8"), 'const sequence = "\\u001B[13;130u";\n');
+  assert.equal(fs.readFileSync(filePath, "utf8"), String.raw`\beta + "y" + \gamma` + "\n");
+});
+
+test("Edit uses LLM correction for ambiguous mixed escaping with JS unicode escapes", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "mixed-unicode.ts");
+  fs.writeFileSync(filePath, 'const sequence = "\\u001B[13;2~" + "done";\n', "utf8");
+
+  const sessionId = "mixed-unicode-llm-fallback";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  let llmCalls = 0;
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: 'const sequence = "\\\\u001B[13;2~" + \\"done\\";',
+      new_string: 'const sequence = "\\\\u001B[13;130u" + \\"done\\" + "\\\\u001B[0m";',
+    },
+    createContext(sessionId, workspace, {
+      createOpenAIClient: () => ({
+        client: {
+          chat: {
+            completions: {
+              create: async (request: { messages?: Array<{ content?: string }> }) => {
+                llmCalls += 1;
+                assert.match(String(request.messages?.[1]?.content ?? ""), /<matched_text><!\[CDATA\[/);
+                return {
+                  choices: [
+                    {
+                      message: {
+                        content:
+                          "<response>" +
+                          '<corrected_old_string><![CDATA[const sequence = "\\u001B[13;2~" + "done";]]></corrected_old_string>' +
+                          '<corrected_new_string><![CDATA[const sequence = "\\u001B[13;130u" + "done" + "\\u001B[0m";]]></corrected_new_string>' +
+                          "</response>",
+                      },
+                    },
+                  ],
+                };
+              },
+            },
+          },
+        } as any,
+        model: "test-model",
+        thinkingEnabled: false,
+      }),
+    })
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(llmCalls, 1);
+  assert.equal(editResult.metadata?.matched_via, "llm_escape_correction");
+  assert.equal(fs.readFileSync(filePath, "utf8"), 'const sequence = "\\u001B[13;130u" + "done" + "\\u001B[0m";\n');
+});
+
+test("Edit deterministically corrects JSON string escaping without calling LLM", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "pattern.json");
+  fs.writeFileSync(filePath, ["{", '  "pattern": "\\\\d+",', '  "label": "count"', "}"].join("\n") + "\n", "utf8");
+
+  const sessionId = "json-deterministic-loose-escape";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  let llmCalls = 0;
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: String.raw`"pattern": "\\\\d+"`,
+      new_string: String.raw`"pattern": "\\\\w+"`,
+    },
+    createContext(sessionId, workspace, {
+      createOpenAIClient: () => ({
+        client: {
+          chat: {
+            completions: {
+              create: async () => {
+                llmCalls += 1;
+                throw new Error("LLM correction should not be called when deterministic correction succeeds.");
+              },
+            },
+          },
+        } as any,
+        model: "test-model",
+        thinkingEnabled: false,
+      }),
+    })
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(llmCalls, 0);
+  assert.equal(editResult.metadata?.matched_via, "loose_escape");
+  assert.equal(
+    fs.readFileSync(filePath, "utf8"),
+    ["{", '  "pattern": "\\\\w+",', '  "label": "count"', "}"].join("\n") + "\n"
+  );
+});
+
+test("Edit uses LLM correction for ambiguous mixed escaping in JSON strings", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "message.json");
+  fs.writeFileSync(filePath, ["{", '  "message": "path \\"C:\\\\tmp\\""', "}"].join("\n") + "\n", "utf8");
+
+  const sessionId = "json-mixed-llm-fallback";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  let llmCalls = 0;
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: String.raw`"message": "path \\\"C:\\\\tmp\\\""`,
+      new_string: String.raw`"message": "path \\\"D:\\\\logs\\\" and regex \\\\d+"`,
+    },
+    createContext(sessionId, workspace, {
+      createOpenAIClient: () => ({
+        client: {
+          chat: {
+            completions: {
+              create: async (request: { messages?: Array<{ content?: string }> }) => {
+                llmCalls += 1;
+                assert.match(String(request.messages?.[1]?.content ?? ""), /<matched_text><!\[CDATA\[/);
+                return {
+                  choices: [
+                    {
+                      message: {
+                        content:
+                          "<response>" +
+                          '<corrected_old_string><![CDATA["message": "path \\"C:\\\\tmp\\""]]></corrected_old_string>' +
+                          '<corrected_new_string><![CDATA["message": "path \\"D:\\\\logs\\" and regex \\\\d+"]]></corrected_new_string>' +
+                          "</response>",
+                      },
+                    },
+                  ],
+                };
+              },
+            },
+          },
+        } as any,
+        model: "test-model",
+        thinkingEnabled: false,
+      }),
+    })
+  );
+
+  assert.equal(editResult.ok, true);
+  assert.equal(llmCalls, 1);
+  assert.equal(editResult.metadata?.matched_via, "llm_escape_correction");
+  assert.equal(
+    fs.readFileSync(filePath, "utf8"),
+    ["{", '  "message": "path \\"D:\\\\logs\\" and regex \\\\d+"', "}"].join("\n") + "\n"
+  );
 });
 
 test("Edit corrects newString escaping in loose_escape fallback when LLM correction is unavailable", async () => {
