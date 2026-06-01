@@ -9,10 +9,10 @@ const THEME_PRESETS: ThemePreset[] = [
   "dark",
   "github-light",
   "github-dark",
-  "gitlab-light",
-  "gitlab-dark",
   "monokai",
   "dracula",
+  "ansi-light",
+  "ansi-dark",
   "custom",
 ];
 
@@ -145,8 +145,8 @@ const ThemeDropdown: React.FC<Props> = ({
     const presetTheme = PRESETS[preset];
     return {
       key: preset,
-      label: preset,
-      labelColor: presetTheme?.primary,
+      label: presetTheme?.name ?? preset,
+      labelColor: presetTheme?.brand.primary,
       description:
         preset === currentPreset
           ? "current theme"

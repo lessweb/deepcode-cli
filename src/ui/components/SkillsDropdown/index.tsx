@@ -64,7 +64,7 @@ const SkillsDropdown: React.FC<{
         label: skill.name,
         description: skill.path,
         selected: isSkillSelected(selectedSkills, skill),
-        statusIndicator: skill.isLoaded ? { symbol: "✓", color: theme.success } : undefined,
+        statusIndicator: skill.isLoaded ? { symbol: "✓", color: theme.status.success } : undefined,
       }))}
       activeIndex={skillsDropdownIndex}
       maxVisible={6}

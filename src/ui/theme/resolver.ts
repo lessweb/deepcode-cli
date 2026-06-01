@@ -1,9 +1,10 @@
 import { type ThemeTokens, type ThemeSettings } from "./types";
+import { buildThemeTokens } from "./colors-theme";
 import { LIGHT_THEME, PRESETS } from "./presets";
 
 /**
  * 深度合并两个对象。right 的值覆盖 left。
- * 仅支持最多两层嵌套（ThemeTokens）。
+ * 支持任意深度嵌套。
  */
 function deepMerge<T extends object>(left: T, right: object): T {
   const result = { ...left };
@@ -41,13 +42,23 @@ export function resolveTheme(themeSettings: ThemeSettings | undefined): ThemeTok
     return PRESETS[preset];
   }
 
-  // preset="custom"：应用用户自定义
+  // preset="custom"：基于 base 预设应用用户自定义
   if (preset === "custom") {
+    const baseName = themeSettings.base;
+    const baseTheme = baseName && baseName !== "custom" && baseName in PRESETS ? PRESETS[baseName] : LIGHT_THEME;
+
+    // 优先级：tokens > colors + overrides > overrides > colors
     if (themeSettings.tokens) {
-      return deepMerge(LIGHT_THEME, themeSettings.tokens);
+      return deepMerge(baseTheme, themeSettings.tokens);
+    }
+    if (themeSettings.colors && themeSettings.overrides) {
+      return deepMerge(buildThemeTokens(themeSettings.colors, baseTheme.mode, "Custom"), themeSettings.overrides);
+    }
+    if (themeSettings.colors) {
+      return buildThemeTokens(themeSettings.colors, baseTheme.mode, "Custom");
     }
     if (themeSettings.overrides) {
-      return deepMerge(LIGHT_THEME, themeSettings.overrides);
+      return deepMerge(baseTheme, themeSettings.overrides);
     }
   }
 

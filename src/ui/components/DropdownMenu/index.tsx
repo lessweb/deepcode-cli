@@ -76,8 +76,8 @@ const DropdownMenu = React.memo(function DropdownMenu({
   renderItem,
 }: DropdownMenuProps): React.ReactElement | null {
   const theme = useTheme();
-  const effectiveTitleColor = titleColor ?? theme.primary;
-  const effectiveActiveColor = activeColor ?? theme.primary;
+  const effectiveTitleColor = titleColor ?? theme.brand.accent;
+  const effectiveActiveColor = activeColor ?? theme.brand.accent;
   // Calculate visible window
   const visibleStart = calculateVisibleStart(activeIndex, items?.length, maxVisible);
   const visibleItems = items?.slice(visibleStart, visibleStart + maxVisible);
@@ -125,11 +125,11 @@ const DropdownMenu = React.memo(function DropdownMenu({
       flexDirection="column"
       marginBottom={1}
       borderStyle={"round"}
-      borderBottom={true}
-      borderTop={true}
+      borderBottom={false}
+      borderTop={false}
       borderLeft={false}
       borderRight={false}
-      borderColor={theme.border}
+      borderColor={theme.border.default}
       width={width}
     >
       {/* Title */}
@@ -196,7 +196,17 @@ const DropdownMenu = React.memo(function DropdownMenu({
 
       {/* Help text */}
       {helpText ? (
-        <Box paddingX={1} marginLeft={2} marginTop={1}>
+        <Box
+          paddingX={1}
+          paddingLeft={2}
+          marginTop={1}
+          borderStyle={"classic"}
+          borderBottom={false}
+          borderTop={true}
+          borderLeft={false}
+          borderRight={false}
+          borderColor={theme.border.default}
+        >
           <Text dimColor>{helpText}</Text>
         </Box>
       ) : null}

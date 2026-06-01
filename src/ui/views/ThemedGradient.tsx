@@ -5,7 +5,7 @@ import { useTheme } from "../theme";
 
 export const ThemedGradient: React.FC<TextProps> = ({ children, ...props }) => {
   const theme = useTheme();
-  const gradient = theme.gradients;
+  const gradient = theme.gradients.logo;
 
   if (gradient && gradient.length >= 2) {
     return (
@@ -25,7 +25,7 @@ export const ThemedGradient: React.FC<TextProps> = ({ children, ...props }) => {
 
   // Fallback to primary color if no gradient
   return (
-    <Text color={theme.primary} {...props}>
+    <Text color={theme.brand.accent} {...props}>
       {children}
     </Text>
   );

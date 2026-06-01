@@ -59,7 +59,7 @@ export async function promptForPendingUpdate(packageInfo: PackageInfo): Promise<
     if (ok) {
       writeUpdateState({ ...state, pending: null });
       process.stdout.write(
-        `\n${chalk.hex(LIGHT_THEME.error)("Deep Code has been updated. Please restart the CLI to use the new version.")}\n\n`
+        `\n${chalk.hex(LIGHT_THEME.status.danger)("Deep Code has been updated. Please restart the CLI to use the new version.")}\n\n`
       );
     }
     return { installed: ok };

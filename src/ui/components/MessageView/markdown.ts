@@ -1,5 +1,6 @@
 import chalk from "chalk";
 import { getCurrentThemedChalk } from "../../theme";
+import type { ThemedChalk } from "../../theme";
 
 /**
  * A rendered piece of markdown.  Consumers should use `wrap="truncate-end"` for
@@ -34,17 +35,17 @@ export function renderMarkdownSegments(text: string, maxWidth?: number): Markdow
   const segments: MarkdownSegment[] = [];
   const fenceSegments = splitByFences(text);
 
+  const tc = getCurrentThemedChalk();
   for (const seg of fenceSegments) {
     if (seg.kind === "code") {
-      const tc = getCurrentThemedChalk();
-      const langTag = seg.lang ? tc.textBright(`[${seg.lang}]`) + "\n" : "";
-      segments.push({ kind: "code", body: langTag + tc.code(seg.body), lang: seg.lang });
+      const langTag = seg.lang ? tc.dim(`[${seg.lang}]`) + "\n" : "";
+      segments.push({ kind: "code", body: langTag + tc.dim(seg.body), lang: seg.lang });
       continue;
     }
     const blocks = splitTableBlocks(seg.body);
     for (const b of blocks) {
       if (b.kind === "table") {
-        segments.push({ kind: "table", body: renderTableBorder(b.rows, maxWidth) });
+        segments.push({ kind: "table", body: renderTableBorder(b.rows, maxWidth, tc) });
       } else {
         const body = b.body
           .split("\n")
@@ -227,7 +228,7 @@ function isWideChar(code: number): boolean {
 // Table rendering
 // ---------------------------------------------------------------------------
 
-function renderTableBorder(rows: string[][], maxWidth?: number): string {
+function renderTableBorder(rows: string[][], maxWidth?: number, tc?: ThemedChalk): string {
   if (rows.length === 0) return "";
 
   const colCount = rows[0].length;
@@ -342,10 +343,11 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
 
   const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - visualWidth(s)));
 
-  const top = "┌" + colWidths.map((w) => "─".repeat(w + 2)).join("┬") + "┐";
-  const hdr = "├" + colWidths.map((w) => "─".repeat(w + 2)).join("┼") + "┤";
-  const sep = "├" + colWidths.map((w) => "─".repeat(w + 2)).join("┼") + "┤";
-  const bot = "└" + colWidths.map((w) => "─".repeat(w + 2)).join("┴") + "┘";
+  const b = tc?.tableBorder ?? ((s: string) => s);
+  const top = b("┌") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┬")) + b("┐");
+  const hdr = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");
+  const sep = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");
+  const bot = b("└") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┴")) + b("┘");
 
   const out: string[] = [top];
 
@@ -353,7 +355,7 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
     const h = heights[ri];
     for (let li = 0; li < h; li++) {
       const line = wrapped[ri].map((cellLines, ci) => " " + pad(cellLines[li] ?? "", colWidths[ci]) + " ");
-      out.push("│" + line.join("│") + "│");
+      out.push(b("│") + line.join(b("│")) + b("│"));
     }
     if (ri === 0 && rows.length > 1) out.push(hdr);
     else if (ri < rows.length - 1) out.push(sep);

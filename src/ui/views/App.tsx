@@ -739,7 +739,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       ) : null}
       {errorLine ? (
         <Box marginLeft={2}>
-          <Text color={theme.error}>Error: {errorLine}</Text>
+          <Text color={theme.status.danger}>Error: {errorLine}</Text>
         </Box>
       ) : null}
       {showProcessStdout ? (

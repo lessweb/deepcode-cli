@@ -129,9 +129,9 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.warning} paddingX={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.status.warning} paddingX={1} marginY={1}>
       <Box marginBottom={1}>
-        <Text color={theme.warning} bold>
+        <Text color={theme.status.warning} bold>
           Permission required
         </Text>
         <Text dimColor>
@@ -139,17 +139,17 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
           {Math.min(effectiveIndex + 1, prompts.length)}/{prompts.length}
         </Text>
       </Box>
-      <Text bold color={theme.text}>
+      <Text bold color={theme.text.primary}>
         {prompt.request.name}
       </Text>
-      <Text color={theme.text}>{prompt.request.command}</Text>
+      <Text color={theme.text.primary}>{prompt.request.command}</Text>
       {prompt.request.description ? <Text dimColor>{prompt.request.description}</Text> : null}
       <Box marginTop={1}>
-        <Text color={theme.text}>Do you want to proceed?</Text>
+        <Text color={theme.text.primary}>Do you want to proceed?</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, optionIndex) => (
-          <Text key={option.kind} color={optionIndex === cursor ? theme.primary : undefined}>
+          <Text key={option.kind} color={optionIndex === cursor ? theme.brand.accent : undefined}>
             {optionIndex === cursor ? "> " : "  "}
             {optionIndex + 1}. {renderOptionLabel(option)}
           </Text>
@@ -236,20 +236,20 @@ export function getScopeRiskColor(scope: AskPermissionScope, theme?: ThemeTokens
   switch (scope) {
     case "read-in-cwd":
     case "query-git-log":
-      return t.success;
+      return t.risk.low;
     case "read-out-cwd":
     case "write-in-cwd":
     case "network":
     case "mcp":
-      return t.warning;
+      return t.risk.medium;
     case "write-out-cwd":
     case "delete-in-cwd":
     case "delete-out-cwd":
     case "mutate-git-log":
     case "unknown":
-      return t.error;
+      return t.risk.high;
     default:
-      return t.error;
+      return t.risk.critical;
   }
 }
 

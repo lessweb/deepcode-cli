@@ -165,9 +165,9 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor={theme.warning} paddingX={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.status.warning} paddingX={1} marginY={1}>
       <Box marginBottom={1}>
-        <Text color={theme.warning} bold>
+        <Text color={theme.status.warning} bold>
           Answer questions
         </Text>
         <Text dimColor>
@@ -175,7 +175,7 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
           {questionIndex + 1}/{questions.length}
         </Text>
       </Box>
-      <Text bold color={theme.text}>
+      <Text bold color={theme.text.primary}>
         {question.question}
       </Text>
       <Box flexDirection="column" marginTop={1}>
@@ -187,7 +187,7 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
           const marker = question.multiSelect ? (isSelected ? "[x]" : "[ ]") : isSelected ? "●" : "○";
           return (
             <Box key={option.value} flexDirection="column">
-              <Text color={isCursor ? theme.primary : undefined}>
+              <Text color={isCursor ? theme.brand.accent : undefined}>
                 {isCursor ? "> " : "  "}
                 {marker} <Text bold={isCursor}>{option.label}</Text>
               </Text>
@@ -196,14 +196,14 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
                   marginLeft={4}
                   marginTop={0}
                   borderStyle="single"
-                  borderColor={isCursor ? theme.primary : theme.textDim}
+                  borderColor={isCursor ? theme.brand.accent : theme.text.muted}
                   paddingX={1}
                   width={64}
                 >
                   {otherText ? (
-                    <Text color={theme.text}>
+                    <Text color={theme.text.primary}>
                       {otherText}
-                      {isCursor ? <Text color={theme.primary}>▌</Text> : null}
+                      {isCursor ? <Text color={theme.brand.accent}>▌</Text> : null}
                     </Text>
                   ) : (
                     <Text dimColor>{isCursor ? "type your answer here" : "type a custom answer"}</Text>

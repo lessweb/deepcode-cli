@@ -51,7 +51,7 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
 
           <Box
             borderStyle={"round"}
-            borderColor={theme.secondary}
+            borderColor={theme.brand.secondary}
             flexDirection="column"
             flexGrow={1}
             height={compact ? undefined : PANEL_CONTENT_HEIGHT}
@@ -59,7 +59,7 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
             paddingX={1}
           >
             <Box flexGrow={1} marginBottom={compact ? 1 : 0}>
-              <Text color={theme.secondary}>{">"}_ Deep Code </Text>
+              <Text color={theme.brand.secondary}>{">"}_ Deep Code </Text>
               <Text dimColor> (v{version || "unknown"})</Text>
             </Box>
             {!compact ? <Text> </Text> : null}

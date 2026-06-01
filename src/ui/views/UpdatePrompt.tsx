@@ -62,14 +62,14 @@ export function UpdatePrompt({ currentVersion, latestVersion, installCommand, on
 
   return (
     <Box flexDirection="column" marginY={1}>
-      <Text bold color={theme.text}>
+      <Text bold color={theme.text.primary}>
         Deep Code latest version has been released: {currentVersion} -&gt; {latestVersion}
       </Text>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, index) => {
           const selected = index === selectedIndex;
           return (
-            <Text key={option.value} color={selected ? theme.primary : undefined}>
+            <Text key={option.value} color={selected ? theme.brand.accent : undefined}>
               {selected ? "> " : "  "}
               {index + 1}. {option.label}
             </Text>

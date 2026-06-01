@@ -158,7 +158,7 @@ Set `theme.preset` in `settings.json` to switch:
 }
 ```
 
-Available presets: `light` (default), `dark`, `github-light`, `github-dark`, `gitlab-light`, `gitlab-dark`, `monokai`, `dracula`.
+Available presets: `light` (default), `dark`, `github-light`, `github-dark`, `monokai`, `dracula`, `ansi`.
 
 You can also use the `/theme` command at runtime to open the theme picker with live preview.
 

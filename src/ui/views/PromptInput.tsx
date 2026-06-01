@@ -115,7 +115,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
   }, [busy]);
 
   const prefix = busy ? `${SPINNER_FRAMES[spinnerIndex]} ` : "> ";
-  return <Text color={busy ? theme.warning : theme.primary}>{prefix}</Text>;
+  return <Text color={busy ? theme.status.warning : theme.brand.accent}>{prefix}</Text>;
 });
 
 export const PromptInput = React.memo(function PromptInput({
@@ -754,13 +754,13 @@ export const PromptInput = React.memo(function PromptInput({
     <Box flexDirection="column" width={screenWidth}>
       {imageUrls.length > 0 ? (
         <Box marginLeft={2}>
-          <Text color={theme.info}>{formatImageAttachmentStatus(imageUrls.length)}</Text>
+          <Text color={theme.status.info}>{formatImageAttachmentStatus(imageUrls.length)}</Text>
           <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
         </Box>
       ) : null}
       {selectedSkills.length > 0 ? (
         <Box marginLeft={2}>
-          <Text color={theme.info} wrap="truncate-end">
+          <Text color={theme.status.info} wrap="truncate-end">
             {formatSelectedSkillsStatus(selectedSkills)}
           </Text>
           <Text dimColor> (use /skills to edit)</Text>
@@ -773,10 +773,10 @@ export const PromptInput = React.memo(function PromptInput({
         borderBottom={true}
         borderLeft={false}
         borderRight={false}
-        borderColor={isFocused ? theme.primary : theme.border}
+        borderColor={isFocused ? theme.brand.accent : theme.border.default}
       >
         <PromptPrefixLine busy={busy} />
-        <Text>{renderBufferWithCursor(buffer, isFocused, placeholder, pastesRef.current, theme.warning)}</Text>
+        <Text>{renderBufferWithCursor(buffer, isFocused, placeholder, pastesRef.current, theme.status.warning)}</Text>
         {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
       </Box>
       <RawModelDropdown

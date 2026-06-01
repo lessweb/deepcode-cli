@@ -98,9 +98,9 @@ const FileMentionMenu: React.FC<Props> = ({ open, width, token, items, onClose, 
       maxVisible={8}
       renderItem={(item, isActive) => (
         <Box flexDirection="row" paddingX={1} gap={1}>
-          <Text color={isActive ? theme.primary : undefined}>{isActive ? "> " : "  "}</Text>
+          <Text color={isActive ? theme.brand.accent : undefined}>{isActive ? "> " : "  "}</Text>
           <Box flexGrow={1}>
-            <Text color={isActive ? theme.primary : undefined} wrap="truncate-end" bold={isActive}>
+            <Text color={isActive ? theme.brand.accent : undefined} wrap="truncate-end" bold={isActive}>
               {item.label}
             </Text>
           </Box>

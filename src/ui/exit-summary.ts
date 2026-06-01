@@ -75,8 +75,8 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
 
   const theme = getCurrentThemeTokens();
   const tc = getCurrentThemedChalk();
-  const borderColor = chalk.hex(theme.secondary);
-  const titleColor = gradientString(...theme.gradients);
+  const borderColor = chalk.hex(theme.border.subtle);
+  const titleColor = gradientString(...theme.gradients.logo);
   const line = (text: string) => `${borderColor("│")}  ${padRight(text, contentWidth)}  ${borderColor("│")}`;
 
   const header = chalk.bold(titleColor("Goodbye!"));
@@ -116,7 +116,7 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
       padLeft("Output Tokens", colOutput) +
       padLeft("Cached Tokens", colCached);
     rows.push(chalk.bold(headerRow));
-    rows.push(tc.textDim(divider));
+    rows.push(tc.textMuted(divider));
 
     for (const { modelName, usage } of usageRows) {
       const reqsStr = formatNumber(usage.totalReqs).padStart(colReqs);

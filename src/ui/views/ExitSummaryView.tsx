@@ -23,7 +23,7 @@ const COL_CACHED = 18;
 export default function ExitSummaryView({ session }: Props): React.ReactElement {
   const theme = useTheme();
   const data = buildExitSummaryData({ session });
-  const gradient = gradientString(...theme.gradients);
+  const gradient = gradientString(...theme.gradients.logo);
 
   return (
     <Box
@@ -31,7 +31,7 @@ export default function ExitSummaryView({ session }: Props): React.ReactElement 
       marginLeft={1}
       borderStyle="round"
       width={COL_MODEL + COL_REQS + COL_INPUT + COL_OUTPUT + COL_CACHED + 2}
-      borderColor={theme.secondary}
+      borderColor={theme.border.subtle}
       padding={1}
       marginBottom={4}
     >
@@ -46,7 +46,7 @@ export default function ExitSummaryView({ session }: Props): React.ReactElement 
           {/* Table header */}
           <Box
             borderStyle="classic"
-            borderColor={theme.border}
+            borderColor={theme.border.default}
             borderTop={false}
             borderRight={false}
             borderLeft={false}
@@ -79,13 +79,13 @@ export default function ExitSummaryView({ session }: Props): React.ReactElement 
                 <Text>{formatNumber(row.reqs)}</Text>
               </Box>
               <Box width={COL_INPUT} justifyContent="flex-end">
-                <Text color={theme.warning}>{formatNumber(row.inputTokens)}</Text>
+                <Text color={theme.status.warning}>{formatNumber(row.inputTokens)}</Text>
               </Box>
               <Box width={COL_OUTPUT} justifyContent="flex-end">
-                <Text color={theme.warning}>{formatNumber(row.outputTokens)}</Text>
+                <Text color={theme.status.warning}>{formatNumber(row.outputTokens)}</Text>
               </Box>
               <Box width={COL_CACHED} justifyContent="flex-end">
-                <Text color={theme.warning}>{formatNumber(row.cachedTokens)}</Text>
+                <Text color={theme.status.warning}>{formatNumber(row.cachedTokens)}</Text>
               </Box>
             </Box>
           ))}

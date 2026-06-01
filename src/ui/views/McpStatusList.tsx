@@ -40,9 +40,16 @@ export function McpStatusList({ statuses, onCancel, onReconnect }: Props): React
 
   if (statuses.length === 0) {
     return (
-      <Box flexDirection="column" marginLeft={1} paddingX={1} gap={1} borderStyle="round" borderColor={theme.border}>
+      <Box
+        flexDirection="column"
+        marginLeft={1}
+        paddingX={1}
+        gap={1}
+        borderStyle="round"
+        borderColor={theme.border.default}
+      >
         <Box flexDirection="column">
-          <Text color={theme.primary} bold>
+          <Text color={theme.brand.accent} bold>
             Manage MCP servers
           </Text>
           <Text dimColor>0 servers</Text>
@@ -190,18 +197,18 @@ function ServerListView({
       paddingX={1}
       marginTop={1}
     >
-      <Box flexDirection="column" borderStyle="round" borderColor={theme.border} flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.border.default} flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} gap={1}>
-          <Text bold color={theme.primary}>
+          <Text bold color={theme.brand.accent}>
             Manage MCP servers
           </Text>
           <Box gap={1}>
             <Text dimColor>(</Text>
-            <Text color={theme.success}>{readyCount} ready,</Text>
-            <Text color={theme.warning}>{startingCount} starting,</Text>
-            {reconnectingCount > 0 && <Text color={theme.warning}>{reconnectingCount} reconnecting,</Text>}
-            <Text color={theme.error}>{failedCount} failed</Text>
+            <Text color={theme.status.success}>{readyCount} ready,</Text>
+            <Text color={theme.status.warning}>{startingCount} starting,</Text>
+            {reconnectingCount > 0 && <Text color={theme.status.warning}>{reconnectingCount} reconnecting,</Text>}
+            <Text color={theme.status.danger}>{failedCount} failed</Text>
             <Text dimColor>)</Text>
           </Box>
         </Box>
@@ -212,7 +219,7 @@ function ServerListView({
           borderLeft={false}
           borderRight={false}
           borderStyle="round"
-          borderColor={theme.border}
+          borderColor={theme.border.default}
           flexDirection="column"
           flexGrow={1}
           paddingX={1}
@@ -263,12 +270,12 @@ function ServerRow({
     status.status === "ready" ? "✓" : status.status === "failed" ? "✗" : status.status === "reconnecting" ? "↻" : "●";
   const color =
     status.status === "ready"
-      ? theme.success
+      ? theme.status.success
       : status.status === "failed"
-        ? theme.error
+        ? theme.status.danger
         : status.status === "reconnecting"
-          ? theme.warning
-          : theme.warning;
+          ? theme.status.warning
+          : theme.status.warning;
 
   // 加载动画：循环显示 (空) → . → .. → ... → (空) → ...
   const [dots, setDots] = React.useState(0);
@@ -294,7 +301,7 @@ function ServerRow({
       {/* Server row */}
       <Box gap={2}>
         <Box width={labelColumnWidth} flexShrink={0}>
-          <Text color={selected ? theme.primary : undefined}>
+          <Text color={selected ? theme.brand.accent : undefined}>
             {selected ? "> " : "  "}
             <Text color={color}>{icon} </Text>
             <Text bold>{status.name}</Text>
@@ -420,12 +427,12 @@ function ServerDetailView({
     server.status === "ready" ? "✓" : server.status === "failed" ? "✗" : server.status === "reconnecting" ? "↻" : "●";
   const statusColor =
     server.status === "ready"
-      ? theme.success
+      ? theme.status.success
       : server.status === "failed"
-        ? theme.error
+        ? theme.status.danger
         : server.status === "reconnecting"
-          ? theme.warning
-          : theme.warning;
+          ? theme.status.warning
+          : theme.status.warning;
 
   return (
     <Box
@@ -436,11 +443,11 @@ function ServerDetailView({
       paddingX={1}
       marginTop={1}
     >
-      <Box flexDirection="column" borderStyle="round" borderColor={theme.border} flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.border.default} flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} gap={1}>
           <Text color={statusColor}>{statusIcon} </Text>
-          <Text bold color={theme.primary} wrap="truncate-end">
+          <Text bold color={theme.brand.accent} wrap="truncate-end">
             {server.name}
           </Text>
           <Text dimColor>— {server.status === "ready" ? "Details" : "Status"}</Text>
@@ -466,7 +473,7 @@ function ServerDetailView({
           borderLeft={false}
           borderRight={false}
           borderStyle="round"
-          borderColor={theme.border}
+          borderColor={theme.border.default}
           flexDirection="column"
           flexGrow={1}
           paddingX={1}
@@ -521,11 +528,11 @@ function ItemRow({ item, selected }: { item: { type: string; name: string }; sel
   const isAction = item.type === "action";
   const icon = isAction ? "↻" : item.type === "tool" ? "🔧" : item.type === "prompt" ? "📝" : "📦";
   const theme = useTheme();
-  const color = isAction && selected ? theme.warning : selected ? theme.primary : undefined;
+  const color = isAction && selected ? theme.status.warning : selected ? theme.brand.accent : undefined;
 
   return (
     <Box height={1} flexDirection="row">
-      <Text color={selected ? theme.primary : undefined}>{selected ? "> " : "  "}</Text>
+      <Text color={selected ? theme.brand.accent : undefined}>{selected ? "> " : "  "}</Text>
       <Text dimColor>{icon} </Text>
       <Text color={color} dimColor={!selected} bold={isAction} wrap="truncate-end">
         {isAction ? `[${item.name}]` : item.name}
@@ -545,11 +552,11 @@ function ErrorRow({ error }: { error: string }): React.ReactElement {
       marginTop={0}
       marginBottom={0}
       borderStyle="round"
-      borderColor={theme.error}
+      borderColor={theme.status.danger}
     >
       {lines.map((line, index) => (
         <Box key={index}>
-          <Text color={theme.error} dimColor>
+          <Text color={theme.status.danger} dimColor>
             {line}
           </Text>
         </Box>

@@ -149,43 +149,93 @@ Available preset themes:
 | `dark`          | Dark theme (optimized for dark backgrounds) |
 | `github-light`  | GitHub Light style theme                 |
 | `github-dark`   | GitHub Dark style theme                  |
-| `gitlab-light`  | GitLab Light style theme                 |
-| `gitlab-dark`   | GitLab Dark style theme                  |
 | `monokai`       | Monokai-style theme                      |
 | `dracula`       | Dracula-style theme                      |
+| `ansi-light`    | ANSI light theme (standard 16 colors) |
+| `ansi-dark`     | ANSI dark theme (standard 16 colors)  |
 
 **Custom Theme Colors**
 
-Use `preset: "custom"` with `overrides` to customize specific colors:
+The recommended way is to use `colors` — a simplified palette of 16 base colors. The system automatically derives the full theme:
 
 ```json
 {
   "theme": {
     "preset": "custom",
-    "overrides": {
-      "primary": "#ff6600",
-      "success": "greenBright"
+    "colors": {
+      "Background": "#ffffff",
+      "Foreground": "#1F2328",
+      "Gray": "#8b949e",
+      "LightBlue": "#0969da",
+      "AccentBlue": "#ff6600",
+      "AccentPurple": "#8250df",
+      "AccentCyan": "#0550ae",
+      "AccentGreen": "#1a7f37",
+      "AccentYellow": "#fa8c16",
+      "AccentRed": "#d1242f",
+      "AccentYellowDim": "#9a6700",
+      "AccentRedDim": "#a40e26",
+      "DiffAdded": "#dafbe1",
+      "DiffRemoved": "#ffebe9",
+      "Comment": "#6e7781"
     }
   }
 }
 ```
 
-**Available Color Tokens**
+You can also combine `colors` with `overrides` to fine-tune specific tokens:
 
-| Token        | Description                                      | Default Value |
-| ------------ | ------------------------------------------------ | ------------- |
-| `primary`    | Brand color: logo, user messages, selected items, headings | `#229ac3`  |
-| `secondary`  | Auxiliary brand color: borders, gradients        | `#229ac3e6`  |
-| `success`    | Success: tool execution success, low-risk ops    | `#1a7f37`    |
-| `error`      | Error: tool execution failure, high-risk ops     | `#d1242f`    |
-| `warning`    | Warning: in-progress state, mid-risk ops         | `#fa8c16`    |
-| `info`       | Info: skills, image attachments                  | `#0969da`    |
-| `text`       | Main text color                                  | `#3D4149`    |
-| `textDim`    | Secondary text: dimmed hints, quote blocks       | `#646A71`    |
-| `textBright` | Bright text: emphasized hints                    | `#1F2329`    |
-| `code`       | Code blocks / inline code                        | `#787f8a`    |
-| `border`     | Borders                                          | `#999`       |
-| `gradients`  | Logo gradient color array                        | `["#229ac3", "#8250df"]` |
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "colors": { "Background": "#1a1a2e", "Foreground": "#e0e0e0", "..." : "..." },
+    "overrides": {
+      "agent": { "streaming": "#ffcc00" }
+    }
+  }
+}
+```
+
+Advanced: use `base` to inherit from another preset, with `overrides` to tweak:
+
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "base": "dark",
+    "overrides": {
+      "brand": { "primary": "#ff6600" }
+    }
+  }
+}
+```
+
+**Available Color Token Groups**
+
+| Group | Description | Tokens |
+| ----- | ----------- | ------ |
+| `text` | Text hierarchy | `primary`, `secondary`, `muted`, `disabled`, `inverse` |
+| `border` | Border hierarchy | `default`, `subtle`, `active`, `focus` |
+| `surface` | Surface colors | `default`, `elevated`, `muted`, `code`, `panel`, `quote`, `selection` |
+| `brand` | Brand colors | `primary`, `secondary`, `accent` |
+| `status` | Status colors | `success`, `warning`, `danger`, `info` |
+| `risk` | Risk levels | `low`, `medium`, `high`, `critical` |
+| `typography` | Typography colors | `h1`-`h6`, `paragraph`, `strong`, `emphasis`, `delete` |
+| `link` | Link colors | `default`, `visited`, `hover` |
+| `inlineCode` | Inline code | `foreground`, `background`, `border` |
+| `codeBlock` | Code blocks | `foreground`, `background`, `border`, `title`, `lineNumber`, `highlight` |
+| `syntax` | Syntax highlighting | `keyword`, `string`, `function`, `variable`, `property`, `type`, `number`, `operator`, `punctuation`, `comment`, `regexp`, `constant` |
+| `blockquote` | Blockquotes | `foreground`, `border` |
+| `list` | Lists | `bullet`, `ordered`, `marker` |
+| `task` | Task lists | `checked`, `unchecked` |
+| `table` | Tables | `border`, `headerForeground`, `headerBackground`, `cellForeground` |
+| `hr` | Horizontal rules | `foreground` |
+| `admonition` | Admonitions | `note`, `tip`, `warning`, `important`, `caution` |
+| `diff` | Diff | `added`, `removed`, `modified`, `addedBackground`, `removedBackground`, `modifiedBackground` |
+| `agent` | Agent states | `thinking`, `reasoning`, `toolCall`, `toolResult`, `streaming`, `completed` |
+| `approval` | Approval | `allow`, `deny`, `review` |
+| `gradients` | Gradients | `banner`, `logo`, `thinking` (each is a color array) |
 
 Color values support the following formats:
 - Hex format: `"#ff6600"`, `"#ff6600cc"` (with alpha)
