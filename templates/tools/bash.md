@@ -29,6 +29,8 @@ Before executing the command, please follow these steps:
 Usage notes:
   - The command argument is required.
   - The sideEffects argument is required. Declare the minimum permission scopes the command may need.
+  - You can use `run_in_background: true` to run a command in the background. Only use this if you need to perform a blocking task, like running a server for the upcoming test scripts.
+  - When using `run_in_background`, do not add `&` to the command. Output is written to a log file.
   - Use `sideEffects: []` only for commands that do not read, write, delete, query Git history, mutate Git history, or access the network, such as `date` or `node --version`.
   - Use `*-out-cwd` when the command accesses paths outside the current workspace. For example, `cat /etc/hosts` requires `["read-out-cwd"]`.
   - Use `query-git-log` for commands such as `git log`, `git show HEAD`, `git blame`, or history diffs. Use `mutate-git-log` for commands such as `git commit`, `git reset`, `git rebase`, `git merge`, `git cherry-pick`, or `git tag`.
@@ -85,6 +87,10 @@ Usage notes:
         ]
       },
       "uniqueItems": true
+    },
+    "run_in_background": {
+      "description": "Set to true to run the command in the background. Use this only when you do not need the result immediately and can wait for a completion notification.",
+      "type": "boolean"
     }
   },
   "required": [

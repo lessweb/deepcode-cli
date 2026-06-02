@@ -2172,6 +2172,7 @@ ${skillMd}
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
+      onBackgroundProcessComplete: (completion) => this.addBackgroundProcessCompletionMessage(sessionId, completion),
       onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
       onAfterFileMutation: (filePath) => this.recordFileMutationCheckpoint(sessionId, filePath),
       shouldStop: () => this.isInterrupted(sessionId),
@@ -2675,6 +2676,46 @@ ${skillMd}
         updateTime: now,
       };
     });
+  }
+
+  private addBackgroundProcessCompletionMessage(
+    sessionId: string,
+    completion: {
+      command: string;
+      outputPath: string;
+      ok: boolean;
+      exitCode: number | null;
+      signal: string | null;
+      error?: string;
+      completedAtMs: number;
+      startedAtMs: number;
+    }
+  ): void {
+    const status = completion.ok ? "completed" : "failed";
+    const exitText =
+      completion.exitCode !== null
+        ? `exit code ${completion.exitCode}`
+        : completion.signal
+          ? `signal ${completion.signal}`
+          : completion.error || "unknown status";
+    const durationMs = Math.max(0, completion.completedAtMs - completion.startedAtMs);
+    const content =
+      `Background command "${completion.command}" ${status} with ${exitText} ` +
+      `after ${this.formatBackgroundDuration(durationMs)}. Output: ${completion.outputPath}`;
+    this.addSessionSystemMessage(sessionId, content, true);
+  }
+
+  private formatBackgroundDuration(durationMs: number): string {
+    if (durationMs < 1000) {
+      return `${durationMs}ms`;
+    }
+    const seconds = Math.round(durationMs / 1000);
+    if (seconds < 60) {
+      return `${seconds}s`;
+    }
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = seconds % 60;
+    return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
   }
 
   private removeSessionProcess(sessionId: string, processId: string | number): void {

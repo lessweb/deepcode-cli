@@ -351,6 +351,11 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
               },
               uniqueItems: true,
             },
+            run_in_background: {
+              type: "boolean",
+              description:
+                "Set to true to run the command in the background. Use this only when you need to perform a blocking task and do not need the result immediately.",
+            },
           },
           required: ["command", "sideEffects"],
           additionalProperties: false,

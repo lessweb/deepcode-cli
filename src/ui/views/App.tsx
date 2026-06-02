@@ -328,9 +328,12 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
       setBusy(true);
       setErrorLine(null);
-      setRunningProcesses(null);
+      const activeProcesses = activeSessionId ? (sessionManager.getSession(activeSessionId)?.processes ?? null) : null;
+      setRunningProcesses(activeProcesses);
       setShowProcessStdout(false);
-      processStdoutRef.current.clear();
+      if (!activeProcesses || activeProcesses.size === 0) {
+        processStdoutRef.current.clear();
+      }
       try {
         await sessionManager.handleUserPrompt(prompt);
         if (permissionReply) {
@@ -344,7 +347,10 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       } finally {
         setBusy(false);
         setStreamProgress(null);
-        setRunningProcesses(null);
+        const finalActiveSessionId = sessionManager.getActiveSessionId();
+        setRunningProcesses(
+          finalActiveSessionId ? (sessionManager.getSession(finalActiveSessionId)?.processes ?? null) : null
+        );
       }
     },
     [

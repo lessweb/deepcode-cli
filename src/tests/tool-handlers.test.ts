@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { setTimeout as delay } from "node:timers/promises";
-import type { ProcessTimeoutControl, ToolExecutionContext } from "../tools/executor";
+import type { BackgroundProcessCompletion, ProcessTimeoutControl, ToolExecutionContext } from "../tools/executor";
 import { handleBashTool } from "../tools/bash-handler";
 import { handleEditTool } from "../tools/edit-handler";
 import { handleReadTool } from "../tools/read-handler";
@@ -102,6 +102,78 @@ test("Bash timeout control can extend the active command deadline", async () => 
   assert.match(result.output ?? "", /done/);
   assert.equal(result.metadata?.timedOut, false);
   assert.equal(result.metadata?.timeoutMs, 1000);
+});
+
+test("Bash can run commands in the background and report completion output", async () => {
+  const workspace = createTempWorkspace();
+  let completion: BackgroundProcessCompletion | null = null;
+  const starts: Array<string | number> = [];
+  const exits: Array<string | number> = [];
+  const startedAt = Date.now();
+
+  const result = await handleBashTool(
+    {
+      command: "printf 'start\\n'; sleep 0.2; printf 'done\\n'",
+      run_in_background: true,
+    },
+    createContext("bash-background", workspace, {
+      bashTimeoutMs: 10,
+      bashMinTimeoutMs: 1,
+      onProcessStart: (pid) => starts.push(pid),
+      onProcessExit: (pid) => exits.push(pid),
+      onBackgroundProcessComplete: (event) => {
+        completion = event;
+      },
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.metadata?.runInBackground, true);
+  assert.equal(typeof result.metadata?.backgroundTaskId, "string");
+  assert.equal(typeof result.metadata?.outputPath, "string");
+  assert.ok(Date.now() - startedAt < 500);
+  assert.equal(starts.length, 1);
+
+  await waitFor(() => completion !== null, 2000);
+
+  assert.ok(completion);
+  const done = completion as BackgroundProcessCompletion;
+  assert.equal(done.ok, true);
+  assert.equal(done.exitCode, 0);
+  assert.equal(exits.length, 1);
+  const outputPath = done.outputPath;
+  const output = fs.readFileSync(outputPath, "utf8");
+  assert.match(output, /start/);
+  assert.match(output, /done/);
+  assert.doesNotMatch(output, /__DEEPCODE_PWD__/);
+});
+
+test("Bash background completion reports failed exit codes", async () => {
+  const workspace = createTempWorkspace();
+  let completion: BackgroundProcessCompletion | null = null;
+
+  const result = await handleBashTool(
+    {
+      command: "printf 'bad\\n'; exit 7",
+      run_in_background: true,
+    },
+    createContext("bash-background-failure", workspace, {
+      onBackgroundProcessComplete: (event) => {
+        completion = event;
+      },
+    })
+  );
+
+  assert.equal(result.ok, true);
+  await waitFor(() => completion !== null, 2000);
+
+  assert.ok(completion);
+  const done = completion as BackgroundProcessCompletion;
+  assert.equal(done.ok, false);
+  assert.equal(done.exitCode, 7);
+  assert.match(done.error ?? "", /exit code 7/);
+  const output = fs.readFileSync(done.outputPath, "utf8");
+  assert.match(output, /bad/);
 });
 
 test("UpdatePlan accepts a markdown task list string", async () => {

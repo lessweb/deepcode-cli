@@ -30,6 +30,8 @@ test("getTools requires bash sideEffects permission scopes", () => {
   assert.equal(sideEffects.type, "array");
   assert.equal(sideEffects.items?.enum?.includes("write-out-cwd"), true);
   assert.equal(sideEffects.items?.enum?.includes("unknown"), true);
+  const runInBackground = tool.function.parameters.properties.run_in_background as { type?: unknown };
+  assert.equal(runInBackground.type, "boolean");
 });
 
 test("getSystemPrompt always includes WebSearch docs", () => {
@@ -41,6 +43,12 @@ test("getSystemPrompt includes UpdatePlan docs", () => {
   const prompt = getSystemPrompt("/tmp/project");
   assert.equal(prompt.includes("## UpdatePlan"), true);
   assert.equal(prompt.includes("The `plan` argument is a markdown string, not an array of step objects."), true);
+});
+
+test("getSystemPrompt includes Bash background guidance", () => {
+  const prompt = getSystemPrompt("/tmp/project");
+  assert.equal(prompt.includes("run_in_background: true"), true);
+  assert.equal(prompt.includes("do not add `&`"), true);
 });
 
 test("getSystemPrompt does not include runtime context", () => {
