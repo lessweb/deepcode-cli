@@ -214,9 +214,16 @@ export const PromptInput = React.memo(function PromptInput({
         ? `${loadingText}${processOrPasteHint}`
         : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`
       : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
+
   const showFooterText = useMemo(
-    () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
-    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
+    () =>
+      showMenu ||
+      showSkillsDropdown ||
+      openRawModelDropdown ||
+      showModelDropdown ||
+      showThemeDropdown ||
+      showFileMentionMenu,
+    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showThemeDropdown, showFileMentionMenu]
   );
   const cursorPlacement = useMemo(
     () => getPromptCursorPlacement(buffer, screenWidth, 2, footerText),
@@ -745,17 +752,6 @@ export const PromptInput = React.memo(function PromptInput({
     setBuffer((state) => removeCurrentSlashToken(state));
     clearUndoRedoStacks();
   }
-
-  const showFooterText = useMemo(
-    () =>
-      showMenu ||
-      showSkillsDropdown ||
-      openRawModelDropdown ||
-      showModelDropdown ||
-      showThemeDropdown ||
-      showFileMentionMenu,
-    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showThemeDropdown, showFileMentionMenu]
-  );
 
   const isFocused = useMemo(() => !disabled && hasTerminalFocus, [disabled, hasTerminalFocus]);
 
