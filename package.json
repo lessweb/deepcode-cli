@@ -1,6 +1,6 @@
 {
   "name": "@vegamo/deepcode-cli",
-  "version": "0.1.26",
+  "version": "0.1.27",
   "description": "Deep Code CLI - Vibe coding for the deepseek-v4 model in your terminal",
   "license": "MIT",
   "type": "module",
@@ -45,7 +45,7 @@
     "gray-matter": "^4.0.3",
     "ignore": "^7.0.5",
     "ink": "^7.0.4",
-    "ink-gradient": "^4.0.0",
+    "ink-gradient": "^4.0.1",
     "openai": "^6.35.0",
     "react": "^19.2.5",
     "undici": "^7.25.0",

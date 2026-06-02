@@ -49,14 +49,11 @@ test("getSystemPrompt does not include runtime context", () => {
   assert.equal(prompt.includes('"root path": "/tmp/project"'), false);
 });
 
-test("getDefaultSkillPrompt loads default skill templates in order", () => {
+test("getDefaultSkillPrompt loads the default skill template", () => {
   const prompt = getDefaultSkillPrompt();
-  const agentDriftIndex = prompt.indexOf("<agent-drift-guard-skill>");
-  const planIndex = prompt.indexOf("<plan-and-execute-skill>");
 
-  assert.notEqual(agentDriftIndex, -1);
-  assert.notEqual(planIndex, -1);
-  assert.equal(agentDriftIndex < planIndex, true);
+  assert.equal(prompt.includes("<karpathy-guidelines-skill>"), true);
+  assert.equal(prompt.includes("# Karpathy Guidelines"), true);
   assert.equal(prompt.includes("Use the skill documents below to assist the user:"), true);
   assert.equal(prompt.includes('path="templates/skills/'), false);
 });

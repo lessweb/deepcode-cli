@@ -210,7 +210,7 @@ test("Edit returns candidate match snippets when old_string is not unique", asyn
   assert.match(candidates[0]?.preview ?? "", /city/);
 });
 
-test("Edit returns closest matches only above threshold with surrounding context", async () => {
+test("Edit reports missing old_string without closest-match metadata when no LLM is configured", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "closest.ts");
   fs.writeFileSync(
@@ -239,15 +239,7 @@ test("Edit returns closest matches only above threshold with surrounding context
 
   assert.equal(closeResult.ok, false);
   assert.equal(closeResult.error, "old_string not found in file.");
-  const closestMatch = closeResult.metadata?.closest_match as
-    | { snippet_id?: string; start_line?: number; end_line?: number; similarity?: number; preview?: string }
-    | undefined;
-  assert.ok(closestMatch?.snippet_id);
-  assert.equal(closestMatch.start_line, 1);
-  assert.equal(closestMatch.end_line, 4);
-  assert.ok((closestMatch.similarity ?? 0) >= 0.8);
-  assert.match(closestMatch.preview ?? "", /const before = true/);
-  assert.match(closestMatch.preview ?? "", /return value/);
+  assert.equal(closeResult.metadata?.closest_match, undefined);
 
   const lowResult = await handleEditTool(
     {
@@ -279,12 +271,119 @@ test("Edit returns closest matches only above threshold with surrounding context
   );
 
   assert.equal(scopedCloseResult.ok, false);
-  const scopedClosestMatch = scopedCloseResult.metadata?.closest_match as
-    | { start_line?: number; end_line?: number; preview?: string }
-    | undefined;
-  assert.equal(scopedClosestMatch?.start_line, 2);
-  assert.equal(scopedClosestMatch?.end_line, 3);
-  assert.doesNotMatch(scopedClosestMatch?.preview ?? "", /const before = true/);
+  assert.equal(scopedCloseResult.error, "old_string not found in file.");
+  assert.equal(scopedCloseResult.metadata?.closest_match, undefined);
+});
+
+test("Edit appends an LLM diagnosis when old_string is not found", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "diagnose.ts");
+  fs.writeFileSync(
+    filePath,
+    [
+      "const beforeOne = true;",
+      "const beforeTwo = true;",
+      "function computeSubtotal(value: number) {",
+      "  return value;",
+      "}",
+      "const afterOne = true;",
+      "const afterTwo = true;",
+      "const afterThree = true;",
+    ].join("\n"),
+    "utf8"
+  );
+
+  const sessionId = "llm-not-found-diagnosis";
+  const readResult = await handleReadTool(
+    { file_path: filePath, offset: 3, limit: 2 },
+    createContext(sessionId, workspace)
+  );
+  const snippet = (readResult.metadata?.snippet ?? null) as { id: string } | null;
+  assert.ok(snippet);
+
+  let llmCalls = 0;
+  let prompt = "";
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: "function computeTotal(value: number) {\n  return value;",
+      new_string: "function computeTotal(input: number) {\n  return input;",
+    },
+    createContext(sessionId, workspace, {
+      createOpenAIClient: () => ({
+        client: {
+          chat: {
+            completions: {
+              create: async (request: { messages?: Array<{ content?: string }> }) => {
+                llmCalls += 1;
+                prompt = String(request.messages?.[1]?.content ?? "");
+                return {
+                  choices: [
+                    {
+                      message: {
+                        content:
+                          "<response><reason><![CDATA[The requested function name is computeTotal, but the snippet contains computeSubtotal.]]></reason></response>",
+                      },
+                    },
+                  ],
+                };
+              },
+            },
+          },
+        } as any,
+        model: "test-model",
+        thinkingEnabled: false,
+      }),
+    })
+  );
+
+  assert.equal(editResult.ok, false);
+  assert.equal(llmCalls, 1);
+  assert.equal(
+    editResult.error,
+    "old_string not found in file. The requested function name is computeTotal, but the snippet contains computeSubtotal."
+  );
+  assert.equal(editResult.metadata?.closest_match, undefined);
+  assert.match(prompt, /<content_before_snippet><!\[CDATA\[const beforeOne = true;\nconst beforeTwo = true;\]\]>/);
+  assert.match(prompt, /<snippet_text><!\[CDATA\[function computeSubtotal\(value: number\) \{\n {2}return value;\n/);
+  assert.match(prompt, /<content_after_snippet><!\[CDATA\[\}\nconst afterOne = true;\]\]>/);
+  assert.doesNotMatch(prompt, /const afterTwo = true/);
+});
+
+test("Edit keeps the base not-found error when the LLM diagnosis is unavailable", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "invalid-diagnosis.ts");
+  fs.writeFileSync(filePath, "const existing = true;\n", "utf8");
+
+  const sessionId = "invalid-llm-not-found-diagnosis";
+  const snippet = await readSnippet(filePath, sessionId, workspace);
+
+  const editResult = await handleEditTool(
+    {
+      snippet_id: snippet.id,
+      old_string: "const missing = true;",
+      new_string: "const missing = false;",
+    },
+    createContext(sessionId, workspace, {
+      createOpenAIClient: () => ({
+        client: {
+          chat: {
+            completions: {
+              create: async () => ({
+                choices: [{ message: { content: "<response></response>" } }],
+              }),
+            },
+          },
+        } as any,
+        model: "test-model",
+        thinkingEnabled: false,
+      }),
+    })
+  );
+
+  assert.equal(editResult.ok, false);
+  assert.equal(editResult.error, "old_string not found in file.");
+  assert.equal(editResult.metadata?.closest_match, undefined);
 });
 
 test("Edit allows outdated snippet matches but reports outdated snippet when no match is found", async () => {

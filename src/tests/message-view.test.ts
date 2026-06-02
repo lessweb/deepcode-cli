@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { parseDiffPreview } from "../ui";
 import {
   buildThinkingSummary,
+  formatBashStatusParams,
+  formatToolStatusParams,
   renderMessageToStdout,
   getUpdatePlanPreviewLines,
   parseToolPayload,
@@ -58,6 +60,26 @@ test("MessageView shows full reasoning content in Normal/Raw mode", () => {
     buildThinkingSummary("", { reasoning_content: "hidden chain of thought" }, RawMode.Raw),
     "hidden chain of thought"
   );
+});
+
+test("formatBashStatusParams compacts multi-line commands and keeps the final description", () => {
+  assert.equal(
+    formatBashStatusParams('python3 -c "\nprint(1)\nprint(2)\n"  # Run inline script'),
+    'python3 -c " ... "  # Run inline script'
+  );
+});
+
+test("formatToolStatusParams preserves compacted Bash params but truncates other tools", () => {
+  assert.equal(
+    formatToolStatusParams({
+      name: "bash",
+      params: "cat <<'EOF'\nhello\nEOF  # Print heredoc",
+      ok: true,
+      metadata: null,
+    }),
+    "cat <<'EOF' ... EOF  # Print heredoc"
+  );
+  assert.equal(formatToolStatusParams({ name: "read", params: "first\nsecond", ok: true, metadata: null }), "first");
 });
 
 // --- renderMessageToStdout tests ---
@@ -137,6 +159,18 @@ test("renderMessageToStdout renders tool messages with resultMd output", () => {
   assert.ok(output.includes("└ Result"));
   assert.ok(output.includes("File content:"));
   assert.ok(output.includes("line 1"));
+});
+
+test("renderMessageToStdout compacts multi-line Bash params", () => {
+  const payload = JSON.stringify({ name: "bash", ok: true });
+  const msg = makeSessionMessage({
+    role: "tool",
+    content: payload,
+    meta: { paramsMd: 'python3 -c "\nprint(1)\nprint(2)\n"  # Run inline script' },
+  });
+  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.ok(output.includes('python3 -c " ... "  # Run inline script'));
+  assert.ok(!output.includes("print(1)"));
 });
 
 test("renderMessageToStdout renders UpdatePlan tool messages with Plan preview and resultMd", () => {
