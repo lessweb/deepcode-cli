@@ -47,7 +47,7 @@ Create `~/.deepcode/settings.json`:
 
 The configuration file is shared with the [Deep Code VSCode extension](https://github.com/lessweb/deepcode) — configure once, use everywhere.
 
-For complete configuration details (multi-level priority, environment variables, etc.), see [docs/configuration.md](docs/configuration.md).
+For complete configuration details (multi-level priority, environment variables, etc.), see [docs/configuration_en.md](docs/configuration_en.md).
 
 ## Key Features
 
@@ -117,7 +117,7 @@ Deep Code comes with a built-in, free Web Search tool that works well for most u
 
 Deep Code supports MCP (Model Context Protocol) to connect external services such as GitHub, browsers, databases, and more. Configure the `mcpServers` field in `settings.json` to enable it, then use the `/mcp` command to view MCP server status and available tools.
 
-> 📖 See [docs/mcp.md](docs/mcp.md) for details.
+> 📖 See [docs/mcp_en.md](docs/mcp.md) for details.
 
 ### How to configure notifications after a task completes?
 
@@ -127,7 +127,7 @@ When the AI assistant completes a task, Deep Code can automatically execute a no
 
 ### Does Deep Code only support YOLO mode?
 
-No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission.md](docs/permission.md) for details.
+No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission_en.md](docs/permission.md) for details.
 
 ### Does it support Coding Plan?
 
@@ -154,7 +154,7 @@ Deep Code CLI includes 8 built-in preset themes, supports the `/theme` command f
 
 **Custom themes:** Supports simplified color palette (`colors`), partial overrides (`overrides`), and full customization (`tokens`).
 
-> 📖 See [docs/configuration.md](docs/configuration.md) for the full configuration guide.
+> 📖 See [docs/configuration_en.md](docs/configuration_en.md) for the full configuration guide.
 
 ## Contributing
 
