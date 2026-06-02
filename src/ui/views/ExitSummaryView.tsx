@@ -7,7 +7,6 @@ import { buildExitSummaryData } from "../exit-summary";
 
 type Props = {
   session: SessionEntry | null;
-  width: number;
 };
 
 function formatNumber(n: number): string {

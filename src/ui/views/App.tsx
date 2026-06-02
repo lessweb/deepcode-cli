@@ -795,7 +795,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           onCancel={handlePermissionCancel}
         />
       ) : isExiting ? (
-        <ExitSummaryView session={exitSession} width={screenWidth} />
+        <ExitSummaryView session={exitSession} />
       ) : (
         <PromptInput
           projectRoot={projectRoot}

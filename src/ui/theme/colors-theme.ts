@@ -42,9 +42,13 @@ export interface ColorsTheme {
 
 /**
  * 将 hex 颜色淡化（混合灰色）。
+ * 对非 hex 命名色（如 ANSI 的 "white"、"black"）返回原色，不做淡化。
  */
 function dimHex(hex: string, ratio: number): string {
-  const h = hex.replace("#", "");
+  if (!hex.startsWith("#")) {
+    return hex;
+  }
+  const h = hex.slice(1);
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
@@ -143,7 +147,7 @@ export function buildThemeTokens(
       hover: c.LightBlue,
     },
     inlineCode: {
-      foreground: c.AccentBlue,
+      foreground: `${c.AccentPurple}cc`,
       background: dimHex(c.Background, 0.08),
       border: dimHex(fg, 0.7),
     },

@@ -39,7 +39,7 @@ export function renderMarkdownSegments(text: string, maxWidth?: number): Markdow
   for (const seg of fenceSegments) {
     if (seg.kind === "code") {
       const langTag = seg.lang ? tc.dim(`[${seg.lang}]`) + "\n" : "";
-      segments.push({ kind: "code", body: langTag + tc.dim(seg.body), lang: seg.lang });
+      segments.push({ kind: "code", body: langTag + tc.code(seg.body), lang: seg.lang });
       continue;
     }
     const blocks = splitTableBlocks(seg.body);

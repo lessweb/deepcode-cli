@@ -115,8 +115,9 @@ export class ThemeManager {
    */
   revertTheme(): void {
     this.currentPreset = this.loadPresetFromSettings();
-    const savedSettings = resolveCurrentSettings(this.projectRoot);
-    this.applyTheme(savedSettings.theme, this.currentPreset);
+    const themeSettings = this.loadThemeSettings();
+    const newTheme = this.resolveWithContrast(themeSettings);
+    this.applyTheme(newTheme, this.currentPreset);
   }
 
   /**

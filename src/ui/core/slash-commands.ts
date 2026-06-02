@@ -46,7 +46,7 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     kind: "new",
     name: "new",
     label: "/new",
-    description: "Start a new session with empty context; previous session stays on disk (resumable with /resume)",
+    description: "Start a new session (previous session resumable with /resume)",
   },
   {
     kind: "init",
