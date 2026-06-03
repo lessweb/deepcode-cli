@@ -42,6 +42,21 @@ test("renderMarkdown styles inline code without removing it", () => {
   assert.equal(result.includes("npm install"), true);
 });
 
+test("renderMarkdown preserves underscores inside inline code", () => {
+  const source =
+    "Use `redo_completed_tasks2_1min`, replace `execute_query` with `select_one`/`select_all`, and check `ocr_result`.";
+  const result = stripAnsi(renderMarkdown(source));
+  assert.equal(
+    result,
+    "Use redo_completed_tasks2_1min, replace execute_query with select_one/select_all, and check ocr_result."
+  );
+});
+
+test("renderMarkdown preserves underscores in plain identifiers", () => {
+  const result = stripAnsi(renderMarkdown("Check redo_completed_tasks2_1min and ocr_result values."));
+  assert.equal(result, "Check redo_completed_tasks2_1min and ocr_result values.");
+});
+
 test("renderMarkdown keeps bullet markers", () => {
   const result = stripAnsi(renderMarkdown("- item one\n- item two"));
   assert.equal(result.includes("- item one"), true);

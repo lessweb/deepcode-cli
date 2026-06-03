@@ -402,10 +402,35 @@ function renderInlineLine(line: string): string {
 function renderInlineSpans(text: string): string {
   if (!text) return text;
   const tc = getCurrentThemedChalk();
+
+  const parts: string[] = [];
+  const codeRe = /`([^`]+)`/g;
+  let lastIndex = 0;
+  let match: RegExpExecArray | null;
+
+  while ((match = codeRe.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(renderEmphasisSpans(text.slice(lastIndex, match.index)));
+    }
+    parts.push(chalk.cyan(match[1] ?? ""));
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    parts.push(renderEmphasisSpans(text.slice(lastIndex)));
+  }
+
+  return parts.join("");
+}
+
+function renderEmphasisSpans(text: string): string {
   let result = text;
   result = result.replace(/`([^`]+)`/g, (_, inner) => tc.inlineCode(inner));
   result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => tc.bold(inner));
   result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => tc.italic(inner));
   result = result.replace(/_([^_\n]+)_/g, (_, inner) => tc.italic(inner));
+  result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => chalk.bold(inner));
+  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => chalk.italic(inner));
+  result = result.replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, (_, inner) => chalk.italic(inner));
   return result;
 }

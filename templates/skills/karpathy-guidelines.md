@@ -10,6 +10,8 @@ Behavioral guidelines to reduce common LLM coding mistakes.
 
 **Tradeoff:** These guidelines bias toward caution over speed. For trivial tasks, use judgment.
 
+**Internal use:** Apply these guidelines silently. Do not cite this document, its title, or guideline names in user-facing responses.
+
 ## 1. Think Before Coding
 
 **Don't assume. Don't hide confusion. Surface tradeoffs.**
