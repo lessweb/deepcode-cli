@@ -31,10 +31,23 @@ export class ThemeManager {
   /**
    * 异步初始化（含 OSC 11 终端背景查询）。
    * 应在 App 启动时调用一次。
+   *
+   * 只有主题实际变化时才通知监听器，避免首次挂载时因 themeVersion
+   * 递增导致 Static 组件卸载再挂载，产生重复的欢迎页渲染。
    */
   async init(): Promise<void> {
     this.terminalBg = await detectTerminalThemeAsync();
-    this.refreshFromSettings();
+    const themeSettings = this.loadThemeSettings();
+    const newTheme = this.resolveWithContrast(themeSettings);
+    const newPreset = this.loadPresetFromSettings();
+
+    if (newPreset !== this.currentPreset) {
+      this.applyTheme(newTheme, newPreset);
+    } else {
+      this.currentTheme = newTheme;
+      this.currentPreset = newPreset;
+      setCurrentTheme(newTheme);
+    }
   }
 
   /**
