@@ -5,7 +5,7 @@ import * as crypto from "crypto";
 import matter from "gray-matter";
 import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { launchNotifyScript } from "./common/notify";
+import { launchBuiltinNotify, launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
 import { DEEPSEEK_V4_MODELS } from "./common/model-capabilities";
 import { readTextFileWithMetadata } from "./common/file-utils";
@@ -2423,10 +2423,6 @@ ${skillMd}
     startedAt: number,
     configuredEnv: Record<string, string> = {}
   ): void {
-    if (!notifyCommand) {
-      return;
-    }
-
     const session = this.getSession(sessionId);
     if (!session || (session.status !== "completed" && session.status !== "failed")) {
       return;
@@ -2443,12 +2439,22 @@ ${skillMd}
       }
     }
 
-    launchNotifyScript(notifyCommand, Date.now() - startedAt, this.projectRoot, undefined, configuredEnv, {
+    const context = {
       status: session.status,
       failReason: session.failReason ?? undefined,
       body,
       title: session.summary ?? undefined,
-    });
+    };
+
+    if (notifyCommand) {
+      launchNotifyScript(notifyCommand, Date.now() - startedAt, this.projectRoot, undefined, configuredEnv, context);
+      return;
+    }
+
+    // Windows: fall back to the built-in toast notification with click-to-focus.
+    if (process.platform === "win32") {
+      launchBuiltinNotify(Date.now() - startedAt, this.projectRoot, undefined, configuredEnv, context);
+    }
   }
 
   private addSessionProcess(sessionId: string, processId: string | number, command: string): void {

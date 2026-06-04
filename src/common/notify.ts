@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptions } from "child_process";
+import * as path from "path";
 
 type NotifyChildProcess = {
   once(event: "error", listener: (error: NodeJS.ErrnoException) => void): NotifyChildProcess;
@@ -91,6 +92,64 @@ export function launchNotifyScript(
         // Ignore notification failures.
       }
     });
+    child.unref();
+  } catch {
+    // Ignore notification failures.
+  }
+}
+
+/**
+ * Resolve the bundled built-in notification script shipped with the CLI.
+ * In the esbuild bundle this lives next to `dist/cli.js`, so we resolve
+ * relative to `__dirname` (which is `dist/`) and walk up to the project root.
+ */
+export function resolveBuiltinNotifyPath(): string | null {
+  if (process.platform !== "win32") {
+    return null;
+  }
+  try {
+    // __dirname is dist/ in the bundled output; the scripts live at
+    // <project-root>/templates/tools/deepcode-notify.ps1
+    return path.resolve(__dirname, "..", "templates", "tools", "deepcode-notify.ps1");
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Launch the built-in Windows notification (PowerShell BalloonTip with
+ * click-to-focus behaviour).  Has no effect on non-Windows platforms.
+ *
+ * This is intentionally separate from `launchNotifyScript` so that callers
+ * can decide whether to prefer a user-configured external script or the
+ * built-in one.
+ */
+export function launchBuiltinNotify(
+  durationMs: number,
+  workingDirectory?: string,
+  spawnProcess: NotifySpawn = spawn as unknown as NotifySpawn,
+  configuredEnv: Record<string, string> = {},
+  context: NotifyContext = {}
+): void {
+  const scriptPath = resolveBuiltinNotifyPath();
+  if (!scriptPath) {
+    return;
+  }
+
+  const options = {
+    cwd: workingDirectory,
+    detached: false,
+    env: buildNotifyEnv(durationMs, { ...process.env, ...configuredEnv }, context),
+    stdio: "ignore" as const,
+  };
+
+  try {
+    const child = spawnProcess(
+      "powershell.exe",
+      ["-ExecutionPolicy", "Bypass", "-NoProfile", "-File", scriptPath],
+      options
+    );
+    child.once("error", () => undefined);
     child.unref();
   } catch {
     // Ignore notification failures.
