@@ -12,7 +12,7 @@
   Environment variables passed by the CLI:
     STATUS      - "completed" | "failed" | "interrupted"
     TITLE       - Session summary / task title
-    BODY        - Last assistant message body
+    BODY        - Last user message body
     DURATION    - Task wall-clock duration in seconds
 #>
 
@@ -51,9 +51,7 @@ $parts += "Click here to jump to the terminal window"
 $bodyText = $parts -join "`n"
 
 # ---------------------------------------------------------------------------
-# Capture the console window handle
-# Running in the same console as the parent deepcode process, so
-# GetConsoleWindow() returns the correct HWND.
+# Win32 API declarations (used to capture & activate the console window)
 # ---------------------------------------------------------------------------
 Add-Type -MemberDefinition @'
 [DllImport("kernel32.dll")]
@@ -63,62 +61,45 @@ public static extern bool SetForegroundWindow(IntPtr hWnd);
 [DllImport("user32.dll")]
 public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
 [DllImport("user32.dll")]
-public static extern IntPtr GetForegroundWindow();
+public static extern bool IsIconic(IntPtr hWnd);
 [DllImport("user32.dll")]
-public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-[DllImport("user32.dll")]
-public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-'@ -Name Win32 -Namespace DeepCodeNotify
+public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+'@ -Name Win32 -Namespace DC
 
-$consoleHwnd = [DeepCodeNotify.Win32]::GetConsoleWindow()
+$consoleHwnd = [DC.Win32]::GetConsoleWindow()
 
 if ($consoleHwnd -eq [IntPtr]::Zero) {
   Write-Warning "DeepCode: Could not capture console window handle."
   exit 0
 }
 
-# Persist the HWND so the click handler can reach it even from a
-# background job that has no access to the main-script scope.
-$hwndFileBase = Join-Path ([System.IO.Path]::GetTempPath()) "deepcode\notify-hwnd"
-New-Item -ItemType Directory -Path (Split-Path $hwndFileBase) -Force | Out-Null
-$hwndFile = "$hwndFileBase-$PID.txt"
-$consoleHwnd.ToInt64().ToString() | Out-File -FilePath $hwndFile -NoNewline
-
 # ---------------------------------------------------------------------------
-# Window activation helper (written to disk so the click handler can
-# invoke it as a fresh process that respects foreground rules).
+# Helper: activate & focus the target console window
 # ---------------------------------------------------------------------------
-$activatePs1 = "$hwndFileBase-activate-$PID.ps1"
-@'
-param([uint64]$WindowHwnd)
+function Activate-ConsoleWindow {
+  param([IntPtr]$hwnd)
 
-Add-Type -MemberDefinition @"
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
-"@ -Name W32 -Namespace DA
+  # 1. Restore from minimized
+  [DC.Win32]::ShowWindow($hwnd, 9) | Out-Null          # SW_RESTORE
+  Start-Sleep -Milliseconds 200
 
-$hwnd = [IntPtr]::new([int64]$WindowHwnd)
+  if ([DC.Win32]::IsIconic($hwnd)) {
+    [DC.Win32]::ShowWindow($hwnd, 1) | Out-Null         # SW_SHOWNORMAL
+    Start-Sleep -Milliseconds 200
+  }
 
-# 1. Restore from minimized
-[DA.W32]::ShowWindow($hwnd, 9)  # SW_RESTORE
-Start-Sleep -Milliseconds 150
-if ([DA.W32]::IsIconic($hwnd)) {
-  [DA.W32]::ShowWindow($hwnd, 1)  # SW_SHOWNORMAL
-  Start-Sleep -Milliseconds 150
+  # 2. Set as foreground window
+  #    (called from the main thread while we still have foreground rights
+  #     from the BalloonTip click)
+  [DC.Win32]::SetForegroundWindow($hwnd) | Out-Null
+
+  # 3. Undocumented fallback that often works on modern Windows
+  Start-Sleep -Milliseconds 50
+  [DC.Win32]::SwitchToThisWindow($hwnd, $true)
 }
 
-# 2. Set foreground (AllowSetForegroundWindow already called by parent)
-[DA.W32]::SetForegroundWindow($hwnd) | Out-Null
-
-# 3. Fallback
-Start-Sleep -Milliseconds 50
-[DA.W32]::SwitchToThisWindow($hwnd, $true)
-'@ | Out-File -FilePath $activatePs1 -Encoding UTF8
-
 # ---------------------------------------------------------------------------
-# Show the notification
+# Build the notification
 # ---------------------------------------------------------------------------
 Add-Type -AssemblyName System.Windows.Forms
 
@@ -129,46 +110,42 @@ $notify.BalloonTipText    = $bodyText
 $notify.BalloonTipIcon    = $iconType
 $notify.Visible           = $true
 
-# Register click handler.
-# The BalloonTip click gives THIS process temporary foreground rights.
-# We call AllowSetForegroundWindow(-1) so the child helper process we
-# spawn is permitted to call SetForegroundWindow on the target window.
-Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked `
-  -MessageData @{
-    HwndFile    = $hwndFile
-    ActivatePs1 = $activatePs1
-  } `
-  -Action {
-    try {
-      Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool AllowSetForegroundWindow(int dwProcessId);' -Name ASFW -Namespace DC
-      [DC.ASFW]::AllowSetForegroundWindow(-1) | Out-Null
+# Register BalloonTipClicked WITHOUT -Action.
+# We will capture the event in the main thread via Wait-Event so that
+# Activate-ConsoleWindow runs with the foreground rights granted by the click.
+$clickSub = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked
 
-      $data = $Event.MessageData
-      $hwndVal = Get-Content $data.HwndFile -Raw -ErrorAction Stop
-      Start-Process powershell.exe -ArgumentList @(
-        "-ExecutionPolicy", "Bypass", "-NoProfile",
-        "-File", $data.ActivatePs1,
-        "-WindowHwnd", $hwndVal.Trim()
-      ) -WindowStyle Hidden -Wait
-    } catch { }
-
-    try { $Event.Sender.Dispose() } catch { }
-  } | Out-Null
-
-# Dismiss handler
-Register-ObjectEvent -InputObject $notify -EventName BalloonTipClosed -Action {
-  try { $Event.Sender.Dispose() } catch { }
-} | Out-Null
+# Dismiss handler — no action needed, just clean up
+$dismissSub = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClosed
 
 $notify.ShowBalloonTip(30000)
 
 # ---------------------------------------------------------------------------
-# Keep the process alive to receive events
+# Event loop: wait for click, dismiss, or timeout
 # ---------------------------------------------------------------------------
 try {
-  Wait-Event -Timeout 35
+  $remaining = 35  # seconds
+  while ($remaining -gt 0) {
+    $event = Wait-Event -Timeout $remaining
+    if (-not $event) {
+      break  # timeout
+    }
+
+    if ($event.SourceIdentifier -eq $clickSub.Name) {
+      # User clicked the notification → activate the console window.
+      # This runs in the MAIN thread, so SetForegroundWindow is allowed.
+      try { Activate-ConsoleWindow $consoleHwnd } catch { }
+      break
+    }
+
+    if ($event.SourceIdentifier -eq $dismissSub.Name) {
+      break  # dismissed / timed out
+    }
+
+    Remove-Event -EventIdentifier $event.EventIdentifier
+    $remaining -= 1
+  }
 } finally {
   Get-EventSubscriber | Unregister-Event -Force -ErrorAction SilentlyContinue
   try { $notify.Dispose() } catch { }
-  Remove-Item $hwndFile, $activatePs1 -Force -ErrorAction SilentlyContinue
 }
