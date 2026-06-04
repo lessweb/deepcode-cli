@@ -1,6 +1,5 @@
-import chalk from "chalk";
-import { getCurrentThemedChalk } from "../../theme";
 import type { ThemedChalk } from "../../theme";
+import { getCurrentThemedChalk } from "../../theme";
 
 /**
  * A rendered piece of markdown.  Consumers should use `wrap="truncate-end"` for
@@ -242,8 +241,7 @@ function renderTableBorder(rows: string[][], maxWidth?: number, tc?: ThemedChalk
   // Natural width per column, measured as terminal cells rather than UTF-16 units.
   const natural: number[] = Array.from({ length: colCount }, (_, i) => {
     const texts = normalizedRows.map((r) => r[i] ?? "");
-    const maxLine = Math.max(4, ...texts.map((t) => visualWidth(t)));
-    return maxLine;
+    return Math.max(4, ...texts.map((t) => visualWidth(t)));
   });
 
   // Keep minimums small so long CJK text or unbroken tokens can wrap by character.
@@ -393,7 +391,7 @@ function renderInlineLine(line: string): string {
   const quoteMatch = /^(\s*)>\s?(.*)$/.exec(line);
   if (quoteMatch) {
     const [, lead, content] = quoteMatch;
-    return `${lead}${tc.quote("│ ")}${chalk.italic(renderInlineSpans(content))}`;
+    return `${lead}${tc.dim("│ ")}${tc.italic(renderInlineSpans(content))}`;
   }
 
   return renderInlineSpans(line);
@@ -412,7 +410,7 @@ function renderInlineSpans(text: string): string {
     if (match.index > lastIndex) {
       parts.push(renderEmphasisSpans(text.slice(lastIndex, match.index)));
     }
-    parts.push(chalk.cyan(match[1] ?? ""));
+    parts.push(tc.cyan(match[1] ?? ""));
     lastIndex = match.index + match[0].length;
   }
 
@@ -425,12 +423,9 @@ function renderInlineSpans(text: string): string {
 
 function renderEmphasisSpans(text: string): string {
   let result = text;
-  result = result.replace(/`([^`]+)`/g, (_, inner) => tc.inlineCode(inner));
+  const tc = getCurrentThemedChalk();
   result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => tc.bold(inner));
   result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => tc.italic(inner));
-  result = result.replace(/_([^_\n]+)_/g, (_, inner) => tc.italic(inner));
-  result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => chalk.bold(inner));
-  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => chalk.italic(inner));
-  result = result.replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, (_, inner) => chalk.italic(inner));
+  result = result.replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, (_, inner) => tc.italic(inner));
   return result;
 }

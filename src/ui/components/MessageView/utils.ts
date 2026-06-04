@@ -263,7 +263,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   }
 
   if (message.role === "system") {
-    if (message.meta?.isModelChange) {
+    if (message.meta?.settingChange) {
       return tc.brandPrimary(`> ${message.content}`);
     }
     if (message.meta?.skill && typeof message.meta.skill === "object") {

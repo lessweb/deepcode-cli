@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useStdout, useWindowSize } from "ink";
-import { useTheme } from "../theme";
+import { useTheme, type ThemePreset } from "../theme";
 import { useAppContext } from "../contexts";
 import { createOpenAIClient } from "../../common/openai-client";
 import type { PermissionScope } from "../../settings";
@@ -395,6 +395,37 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     [sessionManager]
   );
 
+  const handleThemeChange = useCallback(
+    (preset: ThemePreset) => {
+      const activeSessionId = sessionManager.getActiveSessionId();
+      const meta: MessageMeta = { settingChange: "theme" };
+      const content = `/theme\n└ Theme set to ${preset}`;
+
+      if (activeSessionId) {
+        sessionManager.addSessionSystemMessage(activeSessionId, content, true, meta);
+      } else {
+        const now = new Date().toISOString();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            sessionId: "local",
+            role: "system" as const,
+            content,
+            contentParams: null,
+            messageParams: null,
+            compacted: true,
+            visible: true,
+            createTime: now,
+            updateTime: now,
+            meta,
+          },
+        ]);
+      }
+    },
+    [sessionManager]
+  );
+
   const handleModelConfigChange = useCallback(
     (selection: ModelConfigSelection): string => {
       const current = resolveCurrentSettings(projectRoot);
@@ -408,7 +439,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
       const activeSessionId = sessionManager.getActiveSessionId();
       const meta: MessageMeta = {
-        isModelChange: true,
+        settingChange: "model",
       };
       const content = `/model\n└ Set model to ${selection.model} (${selection?.thinkingEnabled ? selection?.reasoningEffort : "no thinking"})`;
 
@@ -811,6 +842,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           onToggleProcessStdout={handleToggleProcessStdout}
           onThemePreview={previewTheme}
           onThemeRevert={revertTheme}
+          onThemeChange={handleThemeChange}
           placeholder="Type your message..."
         />
       )}

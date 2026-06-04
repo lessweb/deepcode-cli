@@ -179,6 +179,7 @@ export interface ThemedChalk {
   bold: StyleFn;
   italic: StyleFn;
   dim: StyleFn;
+  cyan: StyleFn;
 }
 
 export function createThemedChalk(theme: ThemeTokens): ThemedChalk {
@@ -452,5 +453,6 @@ export function createThemedChalk(theme: ThemeTokens): ThemedChalk {
     bold: (t) => chalk.bold(t),
     italic: (t) => chalk.italic(t),
     dim: (t) => chalk.dim(t),
+    cyan: (t) => chalk.cyan(t),
   };
 }

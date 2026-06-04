@@ -97,6 +97,7 @@ type Props = {
   onToggleProcessStdout?: () => void;
   onThemePreview?: (preset: ThemePreset) => void;
   onThemeRevert?: () => void;
+  onThemeChange?: (preset: ThemePreset) => void;
 };
 
 const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
@@ -140,6 +141,7 @@ export const PromptInput = React.memo(function PromptInput({
   onRawModeChange,
   onThemePreview,
   onThemeRevert,
+  onThemeChange,
 }: Props): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
@@ -815,7 +817,10 @@ export const PromptInput = React.memo(function PromptInput({
         hasCustomConfig={hasCustomThemeConfig}
         currentPreset={currentPreset}
         onClose={() => setShowThemeDropdown(false)}
-        onThemeChange={(preset: ThemePreset) => switchTheme?.(preset)}
+        onThemeChange={(preset: ThemePreset) => {
+          onThemeChange?.(preset);
+          switchTheme?.(preset);
+        }}
         onThemePreview={onThemePreview}
         onThemeRevert={onThemeRevert}
         onStatusMessage={setStatusMessage}

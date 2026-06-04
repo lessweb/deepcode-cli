@@ -110,7 +110,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
 
   if (message.role === "system") {
     // Render model change messages in the same style as user commands.
-    if (message.meta?.isModelChange) {
+    if (message.meta?.settingChange) {
       return (
         <Box marginY={0} marginLeft={1} marginBottom={1} flexGrow={1} flexDirection="row" gap={1}>
           <Box>
@@ -157,7 +157,6 @@ function StatusLine({
   width: number;
 }): React.ReactElement {
   const { mode } = useRawModeContext();
-  const theme = useTheme();
   const containerWidth = Math.max(1, width - 2);
   const contentWidth = Math.max(1, width - 4);
 
@@ -174,7 +173,7 @@ function StatusLine({
             {name}
           </Text>
           {params ? (
-            <Text key="params" color={theme.text.primary}>
+            <Text key="params" dimColor>
               {` ${params}`}
             </Text>
           ) : null}
