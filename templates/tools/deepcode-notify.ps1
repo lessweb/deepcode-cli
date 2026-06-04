@@ -38,7 +38,6 @@ $statusLabel = switch ($Status) {
 }
 
 $iconType = if ($Status -eq "failed") { "Error" } else { "Info" }
-
 $titleText = if ($Title) { "$Title" } else { "DeepCode Task" }
 
 $shortBody = if ($Body) {
@@ -53,21 +52,70 @@ $bodyText = $parts -join "`n"
 
 # ---------------------------------------------------------------------------
 # Capture the console window handle
-# (runs in the same console as the parent deepcode process)
+# Running in the same console as the parent deepcode process, so
+# GetConsoleWindow() returns the correct HWND.
 # ---------------------------------------------------------------------------
 Add-Type -MemberDefinition @'
-[DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-[DllImport("user32.dll")]   public static extern bool SetForegroundWindow(IntPtr hWnd);
-[DllImport("user32.dll")]   public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+[DllImport("kernel32.dll")]
+public static extern IntPtr GetConsoleWindow();
+[DllImport("user32.dll")]
+public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")]
+public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll")]
+public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")]
+public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+[DllImport("user32.dll")]
+public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 '@ -Name Win32 -Namespace DeepCodeNotify
 
 $consoleHwnd = [DeepCodeNotify.Win32]::GetConsoleWindow()
 
 if ($consoleHwnd -eq [IntPtr]::Zero) {
-  # No console attached — show a non-clickable notification and exit
   Write-Warning "DeepCode: Could not capture console window handle."
   exit 0
 }
+
+# Persist the HWND so the click handler can reach it even from a
+# background job that has no access to the main-script scope.
+$hwndFileBase = Join-Path ([System.IO.Path]::GetTempPath()) "deepcode\notify-hwnd"
+New-Item -ItemType Directory -Path (Split-Path $hwndFileBase) -Force | Out-Null
+$hwndFile = "$hwndFileBase-$PID.txt"
+$consoleHwnd.ToInt64().ToString() | Out-File -FilePath $hwndFile -NoNewline
+
+# ---------------------------------------------------------------------------
+# Window activation helper (written to disk so the click handler can
+# invoke it as a fresh process that respects foreground rules).
+# ---------------------------------------------------------------------------
+$activatePs1 = "$hwndFileBase-activate-$PID.ps1"
+@'
+param([uint64]$WindowHwnd)
+
+Add-Type -MemberDefinition @"
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+"@ -Name W32 -Namespace DA
+
+$hwnd = [IntPtr]::new([int64]$WindowHwnd)
+[DA.W32]::ShowWindow($hwnd, 9)
+
+# AttachThreadInput trick: briefly attach the target window's thread to
+# the foreground thread so SetForegroundWindow is permitted.
+$fgHwnd = [DA.W32]::GetForegroundWindow()
+$tidTarget = 0; $null = [DA.W32]::GetWindowThreadProcessId($hwnd, [ref]$tidTarget)
+$tidFg     = 0; $null = [DA.W32]::GetWindowThreadProcessId($fgHwnd, [ref]$tidFg)
+if ($tidTarget -and $tidFg) {
+  [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $true)
+  [DA.W32]::SetForegroundWindow($hwnd)
+  [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $false)
+} else {
+  [DA.W32]::SetForegroundWindow($hwnd)
+}
+'@ | Out-File -FilePath $activatePs1 -Encoding UTF8
 
 # ---------------------------------------------------------------------------
 # Show the notification
@@ -75,48 +123,50 @@ if ($consoleHwnd -eq [IntPtr]::Zero) {
 Add-Type -AssemblyName System.Windows.Forms
 
 $notify = New-Object System.Windows.Forms.NotifyIcon
-$notify.Icon          = [System.Drawing.SystemIcons]::Information
-$notify.BalloonTipTitle  = $titleText
-$notify.BalloonTipText   = $bodyText
-$notify.BalloonTipIcon   = $iconType
-$notify.Visible          = $true
+$notify.Icon              = [System.Drawing.SystemIcons]::Information
+$notify.BalloonTipTitle   = $titleText
+$notify.BalloonTipText    = $bodyText
+$notify.BalloonTipIcon    = $iconType
+$notify.Visible           = $true
 
 # Register click handler.
-# Register-ObjectEvent runs the -Action in a background job, so we must
-# redeclare the P/Invoke types inside the action.
+# Register-ObjectEvent runs the -Action in a background job.  The job
+# cannot reliably call SetForegroundWindow itself (foreground-lock),
+# so we make the action spawn a short-lived helper PowerShell that
+# uses AttachThreadInput to gain permission and activate the window.
 Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked `
-  -MessageData $consoleHwnd `
+  -MessageData @{
+    HwndFile    = $hwndFile
+    ActivatePs1 = $activatePs1
+  } `
   -Action {
-    param($eventSourceIdentifier, $eventSender)
-    $hwnd = $Event.MessageData
     try {
-      Add-Type -MemberDefinition @'
-[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
-[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-'@ -Name Win32 -Namespace DeepCodeNotifyClick -IgnoreWarnings
+      $data = $Event.MessageData
+      $hwndVal = Get-Content $data.HwndFile -Raw -ErrorAction Stop
+      Start-Process powershell.exe -ArgumentList @(
+        "-ExecutionPolicy", "Bypass", "-NoProfile",
+        "-File", $data.ActivatePs1,
+        "-WindowHwnd", $hwndVal.Trim()
+      ) -WindowStyle Hidden -Wait
     } catch { }
 
-    [DeepCodeNotifyClick.Win32]::ShowWindow($hwnd, 9)          # SW_RESTORE
-    [DeepCodeNotifyClick.Win32]::SetForegroundWindow($hwnd)
-
-    if ($Event.Sender) {
-      $Event.Sender.Dispose()
-    }
+    try { $Event.Sender.Dispose() } catch { }
   } | Out-Null
 
-# Register dismiss handler so we clean up even if timed out
+# Dismiss handler
 Register-ObjectEvent -InputObject $notify -EventName BalloonTipClosed -Action {
-  if ($Event.Sender) { $Event.Sender.Dispose() }
+  try { $Event.Sender.Dispose() } catch { }
 } | Out-Null
 
-$notify.ShowBalloonTip(30000)   # Show for up to 30 seconds
+$notify.ShowBalloonTip(30000)
 
 # ---------------------------------------------------------------------------
-# Keep the process alive to receive click / dismiss events
+# Keep the process alive to receive events
 # ---------------------------------------------------------------------------
 try {
   Wait-Event -Timeout 35
 } finally {
   Get-EventSubscriber | Unregister-Event -Force -ErrorAction SilentlyContinue
   try { $notify.Dispose() } catch { }
+  Remove-Item $hwndFile, $activatePs1 -Force -ErrorAction SilentlyContinue
 }
