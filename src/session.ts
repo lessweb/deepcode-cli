@@ -2433,7 +2433,7 @@ ${skillMd}
     const messages = this.listSessionMessages(sessionId);
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      if (msg && msg.role === "assistant" && msg.content) {
+      if (msg && msg.role === "user" && msg.content) {
         body = msg.content;
         break;
       }

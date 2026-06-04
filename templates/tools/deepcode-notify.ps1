@@ -101,25 +101,31 @@ Add-Type -MemberDefinition @"
 [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
 [DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+[DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
 "@ -Name W32 -Namespace DA
 
 $hwnd = [IntPtr]::new([int64]$WindowHwnd)
 
-# 1. Restore the window if minimized
-[DA.W32]::ShowWindow($hwnd, 9)   # SW_RESTORE
-Start-Sleep -Milliseconds 50
+# 1. Restore if minimized — call ShowWindow twice to be safe
+[DA.W32]::ShowWindow($hwnd, 9)    # SW_RESTORE
+Start-Sleep -Milliseconds 150
+if ([DA.W32]::IsIconic($hwnd)) {
+  [DA.W32]::ShowWindow($hwnd, 1)  # SW_SHOWNORMAL
+  Start-Sleep -Milliseconds 150
+}
 
 # 2. Bring to top briefly to give it Z-order priority
 $SWP_NOMOVE = 0x0002; $SWP_NOSIZE = 0x0001
 $HWND_TOPMOST = [IntPtr](-1); $HWND_NOTOPMOST = [IntPtr](-2)
 [DA.W32]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE)
 [DA.W32]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE)
+Start-Sleep -Milliseconds 50
 
 # 3. Simulate Alt key press to gain foreground activation permission
 [DA.W32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)           # Alt down
 Start-Sleep -Milliseconds 50
 [DA.W32]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)           # Alt up
-Start-Sleep -Milliseconds 50
+Start-Sleep -Milliseconds 100
 
 # 4. AttachThreadInput + SetForegroundWindow
 $fgHwnd = [DA.W32]::GetForegroundWindow()
