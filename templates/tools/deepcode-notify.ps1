@@ -99,32 +99,35 @@ Add-Type -MemberDefinition @"
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
 [DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
-[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
-[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 "@ -Name W32 -Namespace DA
 
 $hwnd = [IntPtr]::new([int64]$WindowHwnd)
 
-# 1. Restore if minimized — call ShowWindow twice to be safe
-[DA.W32]::ShowWindow($hwnd, 9)    # SW_RESTORE
+# 1. Restore — use WM_SYSCOMMAND / SC_RESTORE (how Windows taskbar restores windows)
+$WM_SYSCOMMAND = 0x0112; $SC_RESTORE = [IntPtr]0xF120
+[DA.W32]::SendMessage($hwnd, $WM_SYSCOMMAND, $SC_RESTORE, [IntPtr]::Zero) | Out-Null
+Start-Sleep -Milliseconds 100
+[DA.W32]::ShowWindow($hwnd, 9)  # SW_RESTORE (belt-and-suspenders)
 Start-Sleep -Milliseconds 150
+
+# Still minimized? Try ShowWindow with SW_SHOWNORMAL
 if ([DA.W32]::IsIconic($hwnd)) {
   [DA.W32]::ShowWindow($hwnd, 1)  # SW_SHOWNORMAL
-  Start-Sleep -Milliseconds 150
+  Start-Sleep -Milliseconds 200
 }
 
-# 2. Bring to top briefly to give it Z-order priority
-$SWP_NOMOVE = 0x0002; $SWP_NOSIZE = 0x0001
-$HWND_TOPMOST = [IntPtr](-1); $HWND_NOTOPMOST = [IntPtr](-2)
-[DA.W32]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE)
-[DA.W32]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE)
+# 2. Bring to front
+[DA.W32]::BringWindowToTop($hwnd) | Out-Null
 Start-Sleep -Milliseconds 50
 
-# 3. Simulate Alt key press to gain foreground activation permission
-[DA.W32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)           # Alt down
+# 3. Simulate Alt key press to gain foreground permission
+[DA.W32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 50
-[DA.W32]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)           # Alt up
+[DA.W32]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
 Start-Sleep -Milliseconds 100
 
 # 4. AttachThreadInput + SetForegroundWindow
@@ -139,7 +142,7 @@ if ($tidTarget -and $tidFg) {
   [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $false)
 }
 
-# 5. Fallback: SwitchToThisWindow (undocumented, often works on Win11)
+# 5. Fallback: SwitchToThisWindow
 Start-Sleep -Milliseconds 50
 [DA.W32]::SwitchToThisWindow($hwnd, $true)
 '@ | Out-File -FilePath $activatePs1 -Encoding UTF8
