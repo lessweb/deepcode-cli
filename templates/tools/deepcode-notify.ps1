@@ -98,23 +98,44 @@ Add-Type -MemberDefinition @"
 [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
 [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
+[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
+[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 "@ -Name W32 -Namespace DA
 
 $hwnd = [IntPtr]::new([int64]$WindowHwnd)
-[DA.W32]::ShowWindow($hwnd, 9)
 
-# AttachThreadInput trick: briefly attach the target window's thread to
-# the foreground thread so SetForegroundWindow is permitted.
+# 1. Restore the window if minimized
+[DA.W32]::ShowWindow($hwnd, 9)   # SW_RESTORE
+Start-Sleep -Milliseconds 50
+
+# 2. Bring to top briefly to give it Z-order priority
+$SWP_NOMOVE = 0x0002; $SWP_NOSIZE = 0x0001
+$HWND_TOPMOST = [IntPtr](-1); $HWND_NOTOPMOST = [IntPtr](-2)
+[DA.W32]::SetWindowPos($hwnd, $HWND_TOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE)
+[DA.W32]::SetWindowPos($hwnd, $HWND_NOTOPMOST, 0, 0, 0, 0, $SWP_NOMOVE -bor $SWP_NOSIZE)
+
+# 3. Simulate Alt key press to gain foreground activation permission
+[DA.W32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)           # Alt down
+Start-Sleep -Milliseconds 50
+[DA.W32]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)           # Alt up
+Start-Sleep -Milliseconds 50
+
+# 4. AttachThreadInput + SetForegroundWindow
 $fgHwnd = [DA.W32]::GetForegroundWindow()
 $tidTarget = 0; $null = [DA.W32]::GetWindowThreadProcessId($hwnd, [ref]$tidTarget)
 $tidFg     = 0; $null = [DA.W32]::GetWindowThreadProcessId($fgHwnd, [ref]$tidFg)
 if ($tidTarget -and $tidFg) {
   [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $true)
-  [DA.W32]::SetForegroundWindow($hwnd)
-  [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $false)
-} else {
-  [DA.W32]::SetForegroundWindow($hwnd)
 }
+[DA.W32]::SetForegroundWindow($hwnd)
+if ($tidTarget -and $tidFg) {
+  [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $false)
+}
+
+# 5. Fallback: SwitchToThisWindow (undocumented, often works on Win11)
+Start-Sleep -Milliseconds 50
+[DA.W32]::SwitchToThisWindow($hwnd, $true)
 '@ | Out-File -FilePath $activatePs1 -Encoding UTF8
 
 # ---------------------------------------------------------------------------
