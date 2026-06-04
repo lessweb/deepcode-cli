@@ -95,54 +95,24 @@ param([uint64]$WindowHwnd)
 Add-Type -MemberDefinition @"
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-[DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
-[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool fAttach);
-[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-[DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
-[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
-[DllImport("user32.dll")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
+[DllImport("user32.dll")] public static extern void SwitchToThisWindow(IntPtr hWnd, bool fAltTab);
 "@ -Name W32 -Namespace DA
 
 $hwnd = [IntPtr]::new([int64]$WindowHwnd)
 
-# 1. Restore — use WM_SYSCOMMAND / SC_RESTORE (how Windows taskbar restores windows)
-$WM_SYSCOMMAND = 0x0112; $SC_RESTORE = [IntPtr]0xF120
-[DA.W32]::SendMessage($hwnd, $WM_SYSCOMMAND, $SC_RESTORE, [IntPtr]::Zero) | Out-Null
-Start-Sleep -Milliseconds 100
-[DA.W32]::ShowWindow($hwnd, 9)  # SW_RESTORE (belt-and-suspenders)
+# 1. Restore from minimized
+[DA.W32]::ShowWindow($hwnd, 9)  # SW_RESTORE
 Start-Sleep -Milliseconds 150
-
-# Still minimized? Try ShowWindow with SW_SHOWNORMAL
 if ([DA.W32]::IsIconic($hwnd)) {
   [DA.W32]::ShowWindow($hwnd, 1)  # SW_SHOWNORMAL
-  Start-Sleep -Milliseconds 200
+  Start-Sleep -Milliseconds 150
 }
 
-# 2. Bring to front
-[DA.W32]::BringWindowToTop($hwnd) | Out-Null
-Start-Sleep -Milliseconds 50
+# 2. Set foreground (AllowSetForegroundWindow already called by parent)
+[DA.W32]::SetForegroundWindow($hwnd) | Out-Null
 
-# 3. Simulate Alt key press to gain foreground permission
-[DA.W32]::keybd_event(0x12, 0, 0, [UIntPtr]::Zero)
-Start-Sleep -Milliseconds 50
-[DA.W32]::keybd_event(0x12, 0, 2, [UIntPtr]::Zero)
-Start-Sleep -Milliseconds 100
-
-# 4. AttachThreadInput + SetForegroundWindow
-$fgHwnd = [DA.W32]::GetForegroundWindow()
-$tidTarget = 0; $null = [DA.W32]::GetWindowThreadProcessId($hwnd, [ref]$tidTarget)
-$tidFg     = 0; $null = [DA.W32]::GetWindowThreadProcessId($fgHwnd, [ref]$tidFg)
-if ($tidTarget -and $tidFg) {
-  [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $true)
-}
-[DA.W32]::SetForegroundWindow($hwnd)
-if ($tidTarget -and $tidFg) {
-  [DA.W32]::AttachThreadInput($tidTarget, $tidFg, $false)
-}
-
-# 5. Fallback: SwitchToThisWindow
+# 3. Fallback
 Start-Sleep -Milliseconds 50
 [DA.W32]::SwitchToThisWindow($hwnd, $true)
 '@ | Out-File -FilePath $activatePs1 -Encoding UTF8
@@ -160,10 +130,9 @@ $notify.BalloonTipIcon    = $iconType
 $notify.Visible           = $true
 
 # Register click handler.
-# Register-ObjectEvent runs the -Action in a background job.  The job
-# cannot reliably call SetForegroundWindow itself (foreground-lock),
-# so we make the action spawn a short-lived helper PowerShell that
-# uses AttachThreadInput to gain permission and activate the window.
+# The BalloonTip click gives THIS process temporary foreground rights.
+# We call AllowSetForegroundWindow(-1) so the child helper process we
+# spawn is permitted to call SetForegroundWindow on the target window.
 Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked `
   -MessageData @{
     HwndFile    = $hwndFile
@@ -171,6 +140,9 @@ Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked `
   } `
   -Action {
     try {
+      Add-Type -MemberDefinition '[DllImport("user32.dll")]public static extern bool AllowSetForegroundWindow(int dwProcessId);' -Name ASFW -Namespace DC
+      [DC.ASFW]::AllowSetForegroundWindow(-1) | Out-Null
+
       $data = $Event.MessageData
       $hwndVal = Get-Content $data.HwndFile -Raw -ErrorAction Stop
       Start-Process powershell.exe -ArgumentList @(
