@@ -1,5 +1,6 @@
 import { spawn, type SpawnOptions } from "child_process";
 import * as path from "path";
+import { fileURLToPath } from "url";
 
 type NotifyChildProcess = {
   once(event: "error", listener: (error: NodeJS.ErrnoException) => void): NotifyChildProcess;
@@ -100,17 +101,19 @@ export function launchNotifyScript(
 
 /**
  * Resolve the bundled built-in notification script shipped with the CLI.
- * In the esbuild bundle this lives next to `dist/cli.js`, so we resolve
- * relative to `__dirname` (which is `dist/`) and walk up to the project root.
+ * The esbuild ESM bundle does not inject `__dirname`, so we replicate the
+ * same fallback pattern used by `getExtensionRoot`.
  */
 export function resolveBuiltinNotifyPath(): string | null {
   if (process.platform !== "win32") {
     return null;
   }
   try {
-    // __dirname is dist/ in the bundled output; the scripts live at
-    // <project-root>/templates/tools/deepcode-notify.ps1
-    return path.resolve(__dirname, "..", "templates", "tools", "deepcode-notify.ps1");
+    const root =
+      typeof __dirname !== "undefined"
+        ? path.resolve(__dirname, "..")
+        : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+    return path.join(root, "templates", "tools", "deepcode-notify.ps1");
   } catch {
     return null;
   }
