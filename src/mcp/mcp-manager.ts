@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import { McpClient, type McpToolDefinition, type McpPromptDefinition, type McpResourceDefinition } from "./mcp-client";
 import type { McpServerConfig } from "../settings";
 
@@ -5,6 +6,8 @@ const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
   ? parseInt(process.env.DEEPCODE_MCP_TIMEOUT, 10)
   : 30_000;
 const MCP_CALL_TOOL_TIMEOUT_MS = 60_000;
+const API_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
+const API_TOOL_NAME_MAX_LENGTH = 64;
 
 type McpToolEntry = {
   serverName: string;
@@ -26,6 +29,32 @@ export type McpServerStatus = {
   resourceCount: number;
   resources: string[];
 };
+
+function buildMcpNamespacedName(
+  serverName: string,
+  toolName: string,
+  usedNames: ReadonlySet<string> = new Set()
+): string {
+  const rawName = buildRawMcpNamespacedName(serverName, toolName);
+  const sanitizedName = `mcp__${sanitizeApiToolNamePart(serverName)}__${sanitizeApiToolNamePart(toolName)}`;
+  let candidate = fitApiToolName(sanitizedName, rawName);
+  if (!usedNames.has(candidate)) {
+    return candidate;
+  }
+
+  const hash = hashToolName(rawName);
+  candidate = fitApiToolNameWithSuffix(sanitizedName, `_${hash}`);
+  if (!usedNames.has(candidate)) {
+    return candidate;
+  }
+
+  for (let index = 2; ; index += 1) {
+    candidate = fitApiToolNameWithSuffix(sanitizedName, `_${hash}_${index}`);
+    if (!usedNames.has(candidate)) {
+      return candidate;
+    }
+  }
+}
 
 export class McpManager {
   private clients: McpClient[] = [];
@@ -151,8 +180,10 @@ export class McpManager {
       const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
       if (this.disposed) return;
       const toolNamespacedNames: string[] = [];
+      const usedToolNames = new Set(this.tools.map((tool) => tool.namespacedName));
       for (const tool of serverTools) {
-        const namespacedName = `mcp__${name}__${tool.name}`;
+        const namespacedName = buildMcpNamespacedName(name, tool.name, usedToolNames);
+        usedToolNames.add(namespacedName);
         this.tools.push({
           serverName: name,
           originalName: tool.name,
@@ -289,7 +320,7 @@ export class McpManager {
       type: "function" as const,
       function: {
         name: t.namespacedName,
-        description: t.definition.description ?? `${t.serverName}: ${t.originalName}`,
+        description: this.buildMcpToolDescription(t),
         parameters: {
           type: "object" as const,
           properties: t.definition.inputSchema.properties,
@@ -413,8 +444,10 @@ export class McpManager {
     const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
     this.tools = this.tools.filter((t) => t.serverName !== serverName);
     const toolNamespacedNames: string[] = [];
+    const usedToolNames = new Set(this.tools.map((tool) => tool.namespacedName));
     for (const tool of serverTools) {
-      const namespacedName = `mcp__${serverName}__${tool.name}`;
+      const namespacedName = buildMcpNamespacedName(serverName, tool.name, usedToolNames);
+      usedToolNames.add(namespacedName);
       this.tools.push({
         serverName,
         originalName: tool.name,
@@ -450,4 +483,42 @@ export class McpManager {
     }
     this.onStatusChanged?.();
   }
+
+  private buildMcpToolDescription(tool: McpToolEntry): string {
+    const description = tool.definition.description?.trim();
+    const source = `${tool.serverName}: ${tool.originalName}`;
+    if (!description) {
+      return source;
+    }
+    if (tool.namespacedName === buildRawMcpNamespacedName(tool.serverName, tool.originalName)) {
+      return description;
+    }
+    return `${description}\nMCP source: ${source}`;
+  }
+}
+
+function buildRawMcpNamespacedName(serverName: string, toolName: string): string {
+  return `mcp__${serverName}__${toolName}`;
+}
+
+function sanitizeApiToolNamePart(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9_-]/g, "_");
+  return sanitized || "unnamed";
+}
+
+function fitApiToolName(name: string, rawName: string): string {
+  if (API_TOOL_NAME_PATTERN.test(name) && name.length <= API_TOOL_NAME_MAX_LENGTH) {
+    return name;
+  }
+  return fitApiToolNameWithSuffix(name, `_${hashToolName(rawName)}`);
+}
+
+function fitApiToolNameWithSuffix(name: string, suffix: string): string {
+  const maxPrefixLength = API_TOOL_NAME_MAX_LENGTH - suffix.length;
+  const prefix = name.slice(0, Math.max(1, maxPrefixLength));
+  return `${prefix}${suffix}`;
+}
+
+function hashToolName(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
 }

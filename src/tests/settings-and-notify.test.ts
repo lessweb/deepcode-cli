@@ -19,6 +19,7 @@ test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool
         BASE_URL: "https://example.com/v1",
         API_KEY: "sk-test",
       },
+      temperature: 0.3,
       thinkingEnabled: true,
       reasoningEffort: "high",
       debugLogEnabled: true,
@@ -35,6 +36,7 @@ test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool
   assert.equal(resolved.model, "deepseek-v3.2");
   assert.equal(resolved.baseURL, "https://example.com/v1");
   assert.equal(resolved.apiKey, "sk-test");
+  assert.equal(resolved.temperature, 0.3);
   assert.equal(resolved.thinkingEnabled, true);
   assert.equal(resolved.reasoningEffort, "high");
   assert.equal(resolved.debugLogEnabled, true);
@@ -60,10 +62,11 @@ test("resolveSettings gives top-level model priority over env MODEL", () => {
   assert.equal(resolved.model, "deepseek-v4-flash");
 });
 
-test("resolveSettings reads THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_ENABLED from env", () => {
+test("resolveSettings reads TEMPERATURE, THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_ENABLED from env", () => {
   const resolved = resolveSettings(
     {
       env: {
+        TEMPERATURE: "0.7",
         THINKING_ENABLED: "true",
         REASONING_EFFORT: "high",
         DEBUG_LOG_ENABLED: "true",
@@ -77,6 +80,7 @@ test("resolveSettings reads THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_EN
   );
 
   assert.equal(resolved.thinkingEnabled, true);
+  assert.equal(resolved.temperature, 0.7);
   assert.equal(resolved.reasoningEffort, "high");
   assert.equal(resolved.debugLogEnabled, true);
   assert.equal(resolved.model, "default-model");
@@ -138,12 +142,14 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
         MODEL: "user-env-model",
         THINKING_ENABLED: "false",
         REASONING_EFFORT: "high",
+        TEMPERATURE: "0.2",
         DEBUG_LOG_ENABLED: "false",
         WEBHOOK: "user-webhook",
       },
       model: "user-top-model",
       thinkingEnabled: true,
       reasoningEffort: "max",
+      temperature: 0.4,
       debugLogEnabled: true,
       telemetryEnabled: false,
     },
@@ -153,9 +159,11 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
         MODEL: "project-env-model",
         THINKING_ENABLED: "false",
         DEBUG_LOG_ENABLED: "false",
+        TEMPERATURE: "0.6",
       },
       model: "project-top-model",
       thinkingEnabled: true,
+      temperature: 0.8,
       telemetryEnabled: true,
     },
     {
@@ -166,6 +174,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
       DEEPCODE_MODEL: "system-model",
       DEEPCODE_THINKING_ENABLED: "false",
       DEEPCODE_REASONING_EFFORT: "high",
+      DEEPCODE_TEMPERATURE: "1.2",
       DEEPCODE_DEBUG_LOG_ENABLED: "true",
       DEEPCODE_TELEMETRY_ENABLED: "false",
       DEEPCODE_WEBHOOK: "system-webhook",
@@ -176,6 +185,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
   assert.equal(resolved.apiKey, "project-key");
   assert.equal(resolved.thinkingEnabled, false);
   assert.equal(resolved.reasoningEffort, "high");
+  assert.equal(resolved.temperature, 1.2);
   assert.equal(resolved.debugLogEnabled, true);
   assert.equal(resolved.telemetryEnabled, false);
   assert.equal(resolved.env.WEBHOOK, "system-webhook");
@@ -339,6 +349,24 @@ test("resolveSettings defaults invalid reasoning effort to max", () => {
   );
 
   assert.equal(resolved.reasoningEffort, "max");
+});
+
+test("resolveSettings ignores invalid temperature values", () => {
+  const resolved = resolveSettings(
+    {
+      env: {
+        TEMPERATURE: "hot",
+      },
+      temperature: 3,
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.temperature, undefined);
 });
 
 test("applyModelConfigSelection writes model only when the effective model changes or already exists", () => {

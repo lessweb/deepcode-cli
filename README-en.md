@@ -54,8 +54,14 @@ For complete configuration details (multi-level priority, environment variables,
 ### **Skills**
 Deep Code CLI supports agent skills that allow you to extend the assistant's capabilities:
 
-- **User-level Skills**: discovered and activated from `~/.agents/skills/`.
-- **Project-level Skills**: loaded from `./.agents/skills/` for project-specific workflows, with legacy `./.deepcode/skills/` compatibility.
+Skills are discovered from these locations, in priority order:
+
+| Scope   | Path                  | Purpose                       |
+| :------ | :-------------------- | :---------------------------- |
+| Project | `./.deepcode/skills/` | Deep Code's native location   |
+| Project | `./.agents/skills/`   | Cross-client interoperability |
+| User    | `~/.deepcode/skills/` | Deep Code's native location   |
+| User    | `~/.agents/skills/`   | Cross-client interoperability |
 
 ### **Optimized for DeepSeek**
 - Specifically tuned for DeepSeek model performance.

@@ -60,6 +60,7 @@ export type ComputeToolCallPermissionsOptions = {
   projectRoot: string;
   toolCalls: unknown[];
   settings?: Required<PermissionSettings>;
+  readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
 };
 
@@ -159,6 +160,7 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
       sessionId: options.sessionId,
       projectRoot: options.projectRoot,
       toolCall,
+      readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
     });
     const permission = evaluatePermissionScopes(request.scopes, options.settings);
@@ -182,6 +184,7 @@ export function describeToolPermissionRequest(options: {
   sessionId: string;
   projectRoot: string;
   toolCall: PermissionToolCall;
+  readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
 }): AskPermissionRequest {
   const name = options.toolCall.function.name;
@@ -193,7 +196,10 @@ export function describeToolPermissionRequest(options: {
       toolCallId: options.toolCall.id,
       name,
       command: formatToolPathCommand("read", filePath),
-      scopes: filePath ? [isPathInProject(options.projectRoot, filePath) ? "read-in-cwd" : "read-out-cwd"] : [],
+      scopes:
+        filePath && !isPathInAnyDirectory(options.projectRoot, filePath, options.readPermissionExemptPaths)
+          ? [isPathInProject(options.projectRoot, filePath) ? "read-in-cwd" : "read-out-cwd"]
+          : [],
     };
   }
 
@@ -384,6 +390,30 @@ export function isPathInProject(projectRoot: string, filePath: string): boolean 
   const absolutePath = isAbsoluteFilePath(normalized) ? normalized : path.resolve(projectRoot, normalized);
   const relative = path.relative(path.resolve(projectRoot), path.resolve(absolutePath));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+export function isPathInAnyDirectory(
+  projectRoot: string,
+  filePath: string,
+  directories: string[] | undefined
+): boolean {
+  if (!directories?.length) {
+    return false;
+  }
+
+  const normalized = normalizeFilePath(filePath);
+  const absolutePath = isAbsoluteFilePath(normalized) ? normalized : path.resolve(projectRoot, normalized);
+  for (const directory of directories) {
+    const normalizedDirectory = normalizeFilePath(directory);
+    const absoluteDirectory = isAbsoluteFilePath(normalizedDirectory)
+      ? normalizedDirectory
+      : path.resolve(projectRoot, normalizedDirectory);
+    const relative = path.relative(path.resolve(absoluteDirectory), path.resolve(absolutePath));
+    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function hasUserPermissionReplies(value: { permissions?: unknown; alwaysAllows?: unknown }): boolean {

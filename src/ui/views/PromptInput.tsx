@@ -45,7 +45,13 @@ import {
 } from "../core/file-mentions";
 import type { FileMentionItem } from "../core/file-mentions";
 import { readClipboardImageAsync } from "../core/clipboard";
-import { useTerminalInput, usePasteHandling, useHistoryNavigation } from "../hooks";
+import {
+  useTerminalInput,
+  usePasteHandling,
+  useHistoryNavigation,
+  getPromptCursorPlacement,
+  usePromptTerminalCursor,
+} from "../hooks";
 import type { InputKey } from "../hooks";
 import {
   useHiddenTerminalCursor,
@@ -116,7 +122,11 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine({ busy }: { busy: 
   }, [busy]);
 
   const prefix = busy ? `${SPINNER_FRAMES[spinnerIndex]} ` : "> ";
-  return <Text color={busy ? theme.status.warning : theme.brand.accent}>{prefix}</Text>;
+  return (
+    <Box width={2}>
+      <Text color={busy ? theme.status.warning : theme.brand.accent}>{prefix}</Text>
+    </Box>
+  );
 });
 
 export const PromptInput = React.memo(function PromptInput({
@@ -225,9 +235,17 @@ export const PromptInput = React.memo(function PromptInput({
       showFileMentionMenu,
     [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showThemeDropdown, showFileMentionMenu]
   );
-  // The prompt draws its own inverse-video cursor inside the text. Keep the
-  // native terminal cursor hidden so wrapping edges do not show two cursors.
-  const hideNativeCursor = !disabled;
+
+  const cursorPlacement = useMemo(
+    () => getPromptCursorPlacement(buffer, screenWidth, 2, footerText),
+    [buffer, footerText, screenWidth]
+  );
+  const usePositionedCursor = !disabled && hasTerminalFocus && !showFooterText;
+  useTerminalFocusReporting(stdout, !disabled);
+  useTerminalExtendedKeys(stdout, !disabled);
+  useBracketedPaste(stdout, !disabled);
+  usePromptTerminalCursor(stdout, cursorPlacement, usePositionedCursor);
+  useHiddenTerminalCursor(stdout, !disabled && !usePositionedCursor);
 
   const refreshFileMentionItems = React.useCallback(() => {
     setFileMentionItems(scanFileMentionItems(projectRoot));
@@ -583,10 +601,6 @@ export const PromptInput = React.memo(function PromptInput({
     },
     { isActive: !disabled }
   );
-  useTerminalFocusReporting(stdout, !disabled);
-  useTerminalExtendedKeys(stdout, !disabled);
-  useBracketedPaste(stdout, !disabled);
-  useHiddenTerminalCursor(stdout, hideNativeCursor);
 
   function undo(): void {
     const previous = undoPromptEdit(undoRedoRef.current, buffer);
@@ -773,6 +787,7 @@ export const PromptInput = React.memo(function PromptInput({
       ) : null}
       {/* Input */}
       <Box
+        width={screenWidth}
         borderStyle="single"
         borderTop={true}
         borderBottom={true}
@@ -781,8 +796,10 @@ export const PromptInput = React.memo(function PromptInput({
         borderColor={isFocused ? theme.brand.accent : theme.border.default}
       >
         <PromptPrefixLine busy={busy} />
-        <Text>{renderBufferWithCursor(buffer, isFocused, placeholder, pastesRef.current, theme.status.warning)}</Text>
-        {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
+        <Box flexGrow={1} flexShrink={1} width={screenWidth - 2}>
+          <Text>{renderBufferWithCursor(buffer, isFocused, placeholder, pastesRef.current, theme.status.warning)}</Text>
+          {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
+        </Box>
       </Box>
       <RawModelDropdown
         open={openRawModelDropdown}

@@ -35,6 +35,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `notify`           | string  | Full path to a task-completion notification script (e.g., Slack notification script) |
 | `webSearchTool`    | string  | Full path to a custom web search script                                     |
 | `mcpServers`       | object  | MCP server configurations (keys are service names, values are McpServerConfig objects) |
+| `temperature`      | number  | Sampling temperature for LLM, from `0` to `2`                 |
 
 #### `env` Sub-fields
 
@@ -43,6 +44,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `MODEL`           | string | Model name, e.g. `"deepseek-v4-pro"`, `"deepseek-v4-flash"`     |
 | `BASE_URL`        | string | Base URL for API requests, e.g. `"https://api.deepseek.com"`    |
 | `API_KEY`         | string | API key                                                         |
+| `TEMPERATURE`     | string | Sampling temperature for chat completions, from `"0"` to `"2"`  |
 | `THINKING_ENABLED`| string | Enable thinking mode                                            |
 | `REASONING_EFFORT`| string | Reasoning intensity                                             |
 | `DEBUG_LOG_ENABLED`| string| Enable debug log output                                         |

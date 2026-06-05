@@ -4,7 +4,6 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { render, type Instance } from "ink";
-import chalk from "chalk";
 import { UpdatePrompt, type UpdatePromptChoice } from "../ui";
 import { killProcessTree } from "./process-tree";
 
@@ -27,6 +26,7 @@ const UPDATE_STATE_FILE = "update-check.json";
 const NPM_VIEW_TIMEOUT_MS = 5000;
 const MAX_NPM_VIEW_OUTPUT_CHARS = 64 * 1024;
 const TENCENT_MIRROR_REGISTRY = "https://mirrors.cloud.tencent.com/npm/";
+export const UPDATE_SUCCESS_MESSAGE = "🎉 Update ran successfully! Please restart Deep Code.";
 
 export async function promptForPendingUpdate(packageInfo: PackageInfo): Promise<{ installed: boolean }> {
   const state = readUpdateState();
@@ -57,9 +57,7 @@ export async function promptForPendingUpdate(packageInfo: PackageInfo): Promise<
     const ok = await runNpmInstallGlobal(installSpec);
     if (ok) {
       writeUpdateState({ ...state, pending: null });
-      process.stdout.write(
-        `\n${chalk.red("Deep Code has been updated. Please restart the CLI to use the new version.")}\n\n`
-      );
+      process.stdout.write(`${UPDATE_SUCCESS_MESSAGE}\n\n`);
     }
     return { installed: ok };
   }

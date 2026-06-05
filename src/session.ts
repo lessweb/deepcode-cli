@@ -10,6 +10,7 @@ import { buildThinkingRequestOptions } from "./common/openai-thinking";
 import { DEEPSEEK_V4_MODELS } from "./common/model-capabilities";
 import { readTextFileWithMetadata } from "./common/file-utils";
 import {
+  buildSkillDocumentsPrompt,
   getCompactPrompt,
   getDefaultSkillPrompt,
   getExtensionRoot,
@@ -719,7 +720,7 @@ export class SessionManager {
     options?: { signal?: AbortSignal; sessionId?: string }
   ): Promise<string[]> {
     this.throwIfAborted(options?.signal);
-    let systemPrompt = `When users ask you to perform tasks, check if any of the available skills match. Skills provide specialized capabilities and domain knowledge.\n
+    let systemPrompt = `When users ask you to perform tasks, check if any of the available skills match the goal and situation. Skills provide specialized capabilities and domain knowledge.\n
 Response in JSON format:
 \`\`\`
 {
@@ -727,7 +728,7 @@ Response in JSON format:
 }
 \`\`\`\n
 If none of the available skills match, respond with an empty array, i.e. \`{"skillNames": []}\`.\n
-The candidate skills are as follows:\n\n`;
+`;
     const simpleSkills = skills
       .filter((x) => !x.isLoaded)
       .map((x) => {
@@ -736,18 +737,29 @@ The candidate skills are as follows:\n\n`;
     if (simpleSkills.length === 0) {
       return [];
     }
-    systemPrompt += "```\n" + JSON.stringify(simpleSkills, null, 2) + "\n```";
 
     const { client, model, baseURL, debugLogEnabled } = this.createOpenAIClient();
     if (!client) {
       return [];
     }
 
+    const agentInstructions = this.loadAgentInstructions();
+    if (agentInstructions) {
+      systemPrompt += `Use the current agent instructions as additional context when deciding which skills match:\n
+<agent-instructions>
+${agentInstructions}
+</agent-instructions>\n
+`;
+    }
+    systemPrompt += "The candidate skills are as follows:\n\n";
+    systemPrompt += "```\n" + JSON.stringify(simpleSkills, null, 2) + "\n```";
+
     try {
       const response = await this.createChatCompletionStream(
         client,
         {
           model,
+          temperature: 0.1,
           messages: [
             { role: "system", content: systemPrompt },
             { role: "user", content: userPrompt },
@@ -760,7 +772,7 @@ The candidate skills are as follows:\n\n`;
           enabled: debugLogEnabled,
           location: "SessionManager.identifyMatchingSkillNames",
           baseURL,
-          params: { purpose: "skill-matching" },
+          params: { purpose: "skill-matching", temperature: 0.1 },
         }
       );
       this.throwIfAborted(options?.signal);
@@ -785,11 +797,18 @@ The candidate skills are as follows:\n\n`;
     }
   }
 
-  async listSkills(sessionId?: string): Promise<SkillInfo[]> {
+  private getSkillScanRoots(): Array<{ root: string; displayRoot: string }> {
     const homeDir = os.homedir();
-    const agentsRoot = path.join(homeDir, ".agents", "skills");
-    const legacyProjectSkillsRoot = path.join(this.projectRoot, ".deepcode", "skills");
-    const projectAgentsSkillsRoot = path.join(this.projectRoot, ".agents", "skills");
+    return [
+      { root: path.join(this.projectRoot, ".deepcode", "skills"), displayRoot: "./.deepcode/skills" },
+      { root: path.join(this.projectRoot, ".agents", "skills"), displayRoot: "./.agents/skills" },
+      { root: path.join(homeDir, ".deepcode", "skills"), displayRoot: "~/.deepcode/skills" },
+      { root: path.join(homeDir, ".agents", "skills"), displayRoot: "~/.agents/skills" },
+    ];
+  }
+
+  async listSkills(sessionId?: string): Promise<SkillInfo[]> {
+    const skillRoots = this.getSkillScanRoots();
     const skillsByName = new Map<string, SkillInfo>();
 
     const collectSkills = (root: string, displayRoot: string): SkillInfo[] => {
@@ -826,14 +845,12 @@ The candidate skills are as follows:\n\n`;
       return results;
     };
 
-    for (const skill of collectSkills(agentsRoot, "~/.agents/skills")) {
-      skillsByName.set(skill.name, skill);
-    }
-    for (const skill of collectSkills(legacyProjectSkillsRoot, "./.deepcode/skills")) {
-      skillsByName.set(skill.name, skill);
-    }
-    for (const skill of collectSkills(projectAgentsSkillsRoot, "./.agents/skills")) {
-      skillsByName.set(skill.name, skill);
+    for (const { root, displayRoot } of skillRoots) {
+      for (const skill of collectSkills(root, displayRoot)) {
+        if (!skillsByName.has(skill.name)) {
+          skillsByName.set(skill.name, skill);
+        }
+      }
     }
 
     if (sessionId) {
@@ -865,6 +882,18 @@ The candidate skills are as follows:\n\n`;
       return skillPath;
     }
     return path.join(os.homedir(), skillPath);
+  }
+
+  private buildSkillPrompt(skill: SkillInfo): string {
+    const skillPath = this.resolveSkillPath(skill.path);
+    return buildSkillDocumentsPrompt([
+      {
+        name: skill.name,
+        content: fs.readFileSync(skillPath, "utf8"),
+        path: skillPath,
+        skillFilePath: skillPath,
+      },
+    ]);
   }
 
   private readSkillInfo(skillPath: string, displayPath: string, fallbackName: string): SkillInfo {
@@ -1090,11 +1119,7 @@ The candidate skills are as follows:\n\n`;
         if (skill.isLoaded) {
           continue;
         }
-        const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
-<${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
-${skillMd}
-</${skill.name}-skill>`;
+        const skillPrompt = this.buildSkillPrompt(skill);
         const skillMessage = this.buildSkillMessage(sessionId, skillPrompt, skill);
         this.appendSessionMessage(sessionId, skillMessage);
         this.onAssistantMessage(skillMessage, true);
@@ -1169,11 +1194,7 @@ ${skillMd}
         if (skill.isLoaded) {
           continue;
         }
-        const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
-<${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
-${skillMd}
-</${skill.name}-skill>`;
+        const skillPrompt = this.buildSkillPrompt(skill);
         const skillMessage = this.buildSkillMessage(sessionId, skillPrompt, skill);
         this.appendSessionMessage(sessionId, skillMessage);
         this.onAssistantMessage(skillMessage, true);
@@ -1198,7 +1219,7 @@ ${skillMd}
     permissionPrompt?: UserPromptContent
   ): Promise<void> {
     const startedAt = Date.now();
-    const { client, model, baseURL, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, env } =
+    const { client, model, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, env } =
       this.createOpenAIClient();
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
@@ -1264,7 +1285,9 @@ ${skillMd}
             permissionOverrides: permissionPrompt?.permissions,
             messagePermissions: pendingToolCallMessage.message?.meta?.permissions,
           });
-          permissionPrompt = await this.appendDeferredPermissionPrompt(sessionId, permissionPrompt, sessionController);
+          await this.appendDeferredPermissionPrompt(sessionId, permissionPrompt, sessionController);
+          // Permission replies are one-shot: do not reuse decisions or append the deferred user prompt again on later tool-call batches.
+          permissionPrompt = undefined;
           if (this.isInterrupted(sessionId)) {
             return;
           }
@@ -1301,6 +1324,7 @@ ${skillMd}
           client,
           {
             model,
+            ...(temperature !== undefined ? { temperature } : {}),
             messages,
             tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
             ...thinkingOptions,
@@ -1311,7 +1335,7 @@ ${skillMd}
             enabled: debugLogEnabled,
             location: "SessionManager.activateSession",
             baseURL,
-            params: { iteration, thinkingEnabled, reasoningEffort },
+            params: { iteration, temperature, thinkingEnabled, reasoningEffort },
           }
         );
 
@@ -1335,6 +1359,7 @@ ${skillMd}
               projectRoot: this.projectRoot,
               toolCalls,
               settings: this.getResolvedSettings().permissions,
+              readPermissionExemptPaths: this.getSkillScanRoots().map((entry) => entry.root),
               resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
             })
           : null;
@@ -1441,7 +1466,8 @@ ${skillMd}
 
   async compactSession(sessionId: string, signal?: AbortSignal): Promise<void> {
     this.throwIfAborted(signal);
-    const { client, model, baseURL, thinkingEnabled, reasoningEffort, debugLogEnabled } = this.createOpenAIClient();
+    const { client, model, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled } =
+      this.createOpenAIClient();
     if (!client) {
       return;
     }
@@ -1473,6 +1499,7 @@ ${skillMd}
       client,
       {
         model,
+        ...(temperature !== undefined ? { temperature } : {}),
         messages: [{ role: "user", content: compactPrompt }],
         ...thinkingOptions,
       },
@@ -1482,7 +1509,7 @@ ${skillMd}
         enabled: debugLogEnabled,
         location: "SessionManager.compactSession",
         baseURL,
-        params: { thinkingEnabled, reasoningEffort },
+        params: { temperature, thinkingEnabled, reasoningEffort },
       }
     );
     this.throwIfAborted(signal);
@@ -1669,6 +1696,27 @@ ${skillMd}
       removeMessages: true,
       processIds: this.getProcessIds(targetEntry?.processes ?? null),
     });
+    return true;
+  }
+
+  /**
+   * Rename a session by updating its summary (display title).
+   * Returns true if the session was found and renamed, false otherwise.
+   */
+  renameSession(sessionId: string, summary: string): boolean {
+    const trimmed = summary.trim();
+    if (!trimmed) {
+      return false;
+    }
+    const entry = this.getSession(sessionId);
+    if (!entry) {
+      return false;
+    }
+    this.updateSessionEntry(sessionId, (existing) => ({
+      ...existing,
+      summary: trimmed,
+      updateTime: new Date().toISOString(),
+    }));
     return true;
   }
 
@@ -2263,9 +2311,9 @@ ${skillMd}
     sessionId: string,
     userPrompt: UserPromptContent | undefined,
     controller: AbortController
-  ): Promise<UserPromptContent | undefined> {
+  ): Promise<void> {
     if (!userPrompt || this.isContinuePrompt(userPrompt)) {
-      return undefined;
+      return;
     }
     const text = userPrompt.text ?? "";
     const hasUserContent =
@@ -2273,7 +2321,7 @@ ${skillMd}
       (Array.isArray(userPrompt.imageUrls) && userPrompt.imageUrls.length > 0) ||
       (Array.isArray(userPrompt.skills) && userPrompt.skills.length > 0);
     if (!hasUserContent) {
-      return undefined;
+      return;
     }
     this.reportNewPrompt();
     const signal = controller.signal;
@@ -2298,17 +2346,12 @@ ${skillMd}
         if (skill.isLoaded) {
           continue;
         }
-        const skillMd = fs.readFileSync(this.resolveSkillPath(skill.path), "utf8");
-        const skillPrompt = `Use the skill document below to assist the user:\n
-<${skill.name}-skill path="${this.resolveSkillPath(skill.path)}">
-${skillMd}
-</${skill.name}-skill>`;
+        const skillPrompt = this.buildSkillPrompt(skill);
         const skillMessage = this.buildSkillMessage(sessionId, skillPrompt, skill);
         this.appendSessionMessage(sessionId, skillMessage);
         this.onAssistantMessage(skillMessage, true);
       }
     }
-    return undefined;
   }
 
   private buildToolParamsSnippet(toolFunction: unknown | null): string {

@@ -8,6 +8,7 @@ import {
   computeToolCallPermissions,
   evaluatePermissionScopes,
   hasUserPermissionReplies,
+  isPathInAnyDirectory,
   parseBashSideEffects,
 } from "../common/permissions";
 
@@ -124,6 +125,77 @@ test("computeToolCallPermissions only asks for scopes not already allowed", () =
     plan.askPermissions.map((item) => ({ id: item.toolCallId, scopes: item.scopes })),
     [{ id: "call-bash", scopes: ["network"] }]
   );
+});
+
+test("computeToolCallPermissions allows read tool calls under skill scan paths", () => {
+  const projectRoot = createTempDir("deepcode-permissions-skill-read-workspace-");
+  const home = createTempDir("deepcode-permissions-skill-read-home-");
+  const skillRoot = path.join(home, ".agents", "skills");
+  const skillResourcePath = path.join(skillRoot, "pdf", "scripts", "extract.py");
+  const outsidePath = path.join(home, "notes.txt");
+  const plan = computeToolCallPermissions({
+    sessionId: "session-1",
+    projectRoot,
+    readPermissionExemptPaths: [skillRoot],
+    settings: {
+      allow: [],
+      deny: [],
+      ask: [],
+      defaultMode: "askAll",
+    },
+    toolCalls: [
+      {
+        id: "call-skill-read",
+        type: "function",
+        function: { name: "read", arguments: JSON.stringify({ file_path: skillResourcePath }) },
+      },
+      {
+        id: "call-outside-read",
+        type: "function",
+        function: { name: "read", arguments: JSON.stringify({ file_path: outsidePath }) },
+      },
+    ],
+  });
+
+  assert.deepEqual(plan.permissions, [
+    { toolCallId: "call-skill-read", permission: "allow" },
+    { toolCallId: "call-outside-read", permission: "ask" },
+  ]);
+  assert.deepEqual(
+    plan.askPermissions.map((item) => ({ id: item.toolCallId, scopes: item.scopes })),
+    [{ id: "call-outside-read", scopes: ["read-out-cwd"] }]
+  );
+});
+
+test("isPathInAnyDirectory matches absolute and project-relative directories without sibling leaks", () => {
+  const projectRoot = createTempDir("deepcode-permissions-directory-match-workspace-");
+  const home = createTempDir("deepcode-permissions-directory-match-home-");
+  const absoluteSkillRoot = path.join(home, ".agents", "skills");
+  const relativeSkillRoot = path.join(".deepcode", "skills");
+
+  assert.equal(
+    isPathInAnyDirectory(projectRoot, path.join(absoluteSkillRoot, "pdf", "scripts", "extract.py"), [
+      absoluteSkillRoot,
+    ]),
+    true
+  );
+  assert.equal(
+    isPathInAnyDirectory(projectRoot, path.join(projectRoot, relativeSkillRoot, "local", "SKILL.md"), [
+      relativeSkillRoot,
+    ]),
+    true
+  );
+  assert.equal(
+    isPathInAnyDirectory(projectRoot, path.join(`${absoluteSkillRoot}-backup`, "extract.py"), [absoluteSkillRoot]),
+    false
+  );
+  assert.equal(
+    isPathInAnyDirectory(projectRoot, path.join(projectRoot, ".deepcode", "skills-extra", "file.md"), [
+      relativeSkillRoot,
+    ]),
+    false
+  );
+  assert.equal(isPathInAnyDirectory(projectRoot, path.join(home, "notes.txt"), undefined), false);
 });
 
 test("appendProjectPermissionAllows writes unique project-level allow scopes", () => {

@@ -27,9 +27,10 @@ if (args.includes("--help") || args.includes("-h")) {
       "Configuration:",
       "  ~/.deepcode/settings.json    User-level API key, model, base URL",
       "  ./.deepcode/settings.json    Project-level settings",
-      "  ~/.agents/skills/*/SKILL.md  User-level skills",
-      "  ./.agents/skills/*/SKILL.md  Project-level skills",
-      "  ./.deepcode/skills/*/SKILL.md Legacy project-level skills",
+      "  ./.deepcode/skills/*/SKILL.md Project-level native skills",
+      "  ./.agents/skills/*/SKILL.md   Project-level interoperable skills",
+      "  ~/.deepcode/skills/*/SKILL.md User-level native skills",
+      "  ~/.agents/skills/*/SKILL.md   User-level interoperable skills",
       "",
       "Inside the TUI:",
       "  enter            Send the prompt",
@@ -79,6 +80,9 @@ void main();
 
 async function main(): Promise<void> {
   const updatePromptResult = await promptForPendingUpdate(packageInfo);
+  if (updatePromptResult.installed) {
+    process.exit(0);
+  }
 
   const restartRef: { current: (() => void) | null } = { current: null };
 
@@ -114,9 +118,7 @@ async function main(): Promise<void> {
     });
   }
 
-  if (!updatePromptResult.installed) {
-    void checkForNpmUpdate(packageInfo);
-  }
+  void checkForNpmUpdate(packageInfo);
 
   startApp();
 }

@@ -100,6 +100,30 @@ type PromptToolOptions = {
 };
 
 const DEFAULT_SKILL_TEMPLATES = ["karpathy-guidelines.md"];
+const DEFAULT_SKILL_RESOURCE_FILE_LIMIT = 50;
+const SKILL_RESOURCE_EXCLUDED_DIRS = new Set([
+  ".cache",
+  ".git",
+  ".next",
+  ".turbo",
+  "build",
+  "coverage",
+  "dist",
+  "node_modules",
+  "out",
+]);
+
+export type SkillPromptDocument = {
+  name: string;
+  content: string;
+  path?: string;
+  skillFilePath?: string;
+};
+
+type SkillResourceListing = {
+  files: string[];
+  truncated: boolean;
+};
 
 function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): string {
   const toolsDir = path.join(extensionRoot, "templates", "tools");
@@ -149,12 +173,97 @@ export function getDefaultSkillPrompt(): string {
     return "";
   }
 
-  const blocks = skillDocs.map(
-    (skill) => `<${skill.name}-skill>
-${skill.content}
-</${skill.name}-skill>`
-  );
+  return buildSkillDocumentsPrompt(skillDocs);
+}
+
+export function buildSkillDocumentsPrompt(skills: SkillPromptDocument[]): string {
+  const blocks = skills.map((skill) => renderSkillDocumentBlock(skill));
   return `Use the skill documents below to assist the user:\n${blocks.join("\n\n")}`;
+}
+
+function renderSkillDocumentBlock(skill: SkillPromptDocument): string {
+  const pathAttribute = skill.path ? ` path="${escapeXml(skill.path)}"` : "";
+  const resources = renderSkillResources(skill.skillFilePath);
+  return `<${skill.name}-skill${pathAttribute}>
+${skill.content}${resources}
+</${skill.name}-skill>`;
+}
+
+function renderSkillResources(skillFilePath?: string): string {
+  if (!skillFilePath) {
+    return "";
+  }
+
+  const listing = listSkillResourceFiles(skillFilePath, DEFAULT_SKILL_RESOURCE_FILE_LIMIT);
+  if (listing.files.length === 0 && !listing.truncated) {
+    return "";
+  }
+
+  const fileLines = listing.files.map((file) => `  <file>${escapeXml(file)}</file>`);
+  const noteLine = listing.truncated
+    ? [`  <note>Listing capped at ${DEFAULT_SKILL_RESOURCE_FILE_LIMIT} files and may be incomplete.</note>`]
+    : [];
+  return `\n\n<skill_resources>\n${[...fileLines, ...noteLine].join("\n")}\n</skill_resources>`;
+}
+
+function listSkillResourceFiles(skillFilePath: string, limit: number): SkillResourceListing {
+  const skillDir = path.dirname(skillFilePath);
+  const files: string[] = [];
+  let truncated = false;
+
+  const visit = (dir: string, relativeDir = ""): void => {
+    if (files.length > limit) {
+      truncated = true;
+      return;
+    }
+
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) {
+        continue;
+      }
+
+      const relativePath = relativeDir ? path.join(relativeDir, entry.name) : entry.name;
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (SKILL_RESOURCE_EXCLUDED_DIRS.has(entry.name)) {
+          continue;
+        }
+        visit(fullPath, relativePath);
+        if (truncated) {
+          return;
+        }
+        continue;
+      }
+
+      if (!entry.isFile() || entry.name === "SKILL.md") {
+        continue;
+      }
+
+      files.push(toPosixPath(relativePath));
+      if (files.length > limit) {
+        truncated = true;
+        return;
+      }
+    }
+  };
+
+  visit(skillDir);
+  return { files: files.slice(0, limit), truncated };
+}
+
+function toPosixPath(filePath: string): string {
+  return filePath.split(path.sep).join("/");
+}
+
+function escapeXml(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
 function getCurrentDateAndModelPrompt(model?: string): string {

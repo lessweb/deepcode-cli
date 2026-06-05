@@ -1,11 +1,31 @@
-import { test } from "node:test";
+import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
-import { getDefaultSkillPrompt, getRuntimeContext, getSystemPrompt, getTools } from "../prompt";
+import {
+  buildSkillDocumentsPrompt,
+  getDefaultSkillPrompt,
+  getRuntimeContext,
+  getSystemPrompt,
+  getTools,
+} from "../prompt";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const tempDirs: string[] = [];
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+function createTempDir(prefix: string): string {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  tempDirs.push(dir);
+  return dir;
+}
 
 test("getTools always includes WebSearch", () => {
   const names = getTools().map((tool) => tool.function.name);
@@ -66,6 +86,70 @@ test("getDefaultSkillPrompt loads the default skill template", () => {
   assert.equal(prompt.includes("# Karpathy Guidelines"), true);
   assert.equal(prompt.includes("Use the skill documents below to assist the user:"), true);
   assert.equal(prompt.includes('path="templates/skills/'), false);
+});
+
+test("buildSkillDocumentsPrompt lists skill resources", () => {
+  const skillDir = createTempDir("deepcode-skill-resources-");
+  fs.mkdirSync(path.join(skillDir, "scripts"), { recursive: true });
+  fs.mkdirSync(path.join(skillDir, "references"), { recursive: true });
+  const skillPath = path.join(skillDir, "SKILL.md");
+  fs.writeFileSync(skillPath, "# PDF Skill\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, "scripts", "extract.py"), "print('extract')\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, "scripts", "merge.py"), "print('merge')\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, "references", "pdf-spec-summary.md"), "# PDF Spec\n", "utf8");
+
+  const prompt = buildSkillDocumentsPrompt([
+    { name: "pdf", content: "# PDF Skill", path: skillPath, skillFilePath: skillPath },
+  ]);
+
+  assert.equal(prompt.includes(`<pdf-skill path="${skillPath}">`), true);
+  assert.equal(prompt.includes("<skill_resources>"), true);
+  assert.equal(prompt.includes("<file>scripts/extract.py</file>"), true);
+  assert.equal(prompt.includes("<file>scripts/merge.py</file>"), true);
+  assert.equal(prompt.includes("<file>references/pdf-spec-summary.md</file>"), true);
+  assert.equal(prompt.includes("<file>SKILL.md</file>"), false);
+});
+
+test("buildSkillDocumentsPrompt caps large skill resource listings", () => {
+  const skillDir = createTempDir("deepcode-skill-resource-cap-");
+  const skillPath = path.join(skillDir, "SKILL.md");
+  fs.writeFileSync(skillPath, "# Large Skill\n", "utf8");
+  for (let index = 0; index < 55; index += 1) {
+    fs.writeFileSync(path.join(skillDir, `file-${String(index).padStart(2, "0")}.txt`), "resource\n", "utf8");
+  }
+
+  const prompt = buildSkillDocumentsPrompt([
+    { name: "large", content: "# Large Skill", path: skillPath, skillFilePath: skillPath },
+  ]);
+
+  assert.equal((prompt.match(/<file>/g) ?? []).length, 50);
+  assert.equal(prompt.includes("<file>file-49.txt</file>"), true);
+  assert.equal(prompt.includes("<file>file-50.txt</file>"), false);
+  assert.equal(prompt.includes("Listing capped at 50 files and may be incomplete."), true);
+});
+
+test("buildSkillDocumentsPrompt excludes hidden and generated skill resources", () => {
+  const skillDir = createTempDir("deepcode-skill-resource-exclusions-");
+  fs.mkdirSync(path.join(skillDir, ".hidden"), { recursive: true });
+  fs.mkdirSync(path.join(skillDir, "node_modules", "pkg"), { recursive: true });
+  fs.mkdirSync(path.join(skillDir, "dist"), { recursive: true });
+  const skillPath = path.join(skillDir, "SKILL.md");
+  fs.writeFileSync(skillPath, "# Clean Skill\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, ".secret.txt"), "hidden\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, ".hidden", "file.txt"), "hidden\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, "node_modules", "pkg", "index.js"), "module.exports = {}\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, "dist", "bundle.js"), "bundle\n", "utf8");
+  fs.writeFileSync(path.join(skillDir, "README.md"), "# Resource\n", "utf8");
+
+  const prompt = buildSkillDocumentsPrompt([
+    { name: "clean", content: "# Clean Skill", path: skillPath, skillFilePath: skillPath },
+  ]);
+
+  assert.equal(prompt.includes("<file>README.md</file>"), true);
+  assert.equal(prompt.includes(".secret.txt"), false);
+  assert.equal(prompt.includes(".hidden/file.txt"), false);
+  assert.equal(prompt.includes("node_modules/pkg/index.js"), false);
+  assert.equal(prompt.includes("dist/bundle.js"), false);
 });
 
 test("getSystemPrompt does not include current date guidance", () => {

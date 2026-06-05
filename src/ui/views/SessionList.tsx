@@ -9,6 +9,7 @@ type Props = {
   onSelect: (sessionId: string) => void;
   onCancel: () => void;
   onDelete?: (sessionId: string) => void;
+  onRename?: (sessionId: string, newName: string) => void;
 };
 
 /**
@@ -39,10 +40,13 @@ export function filterSessions(sessions: SessionEntry[], query: string): Session
   });
 }
 
-export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): React.ReactElement {
+export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }: Props): React.ReactElement {
   const [index, setIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameCursor, setRenameCursor] = useState(0);
   const { columns, rows } = useWindowSize();
   const theme = useTheme();
 
@@ -85,6 +89,65 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
   const selectedSession = filteredSessions[safeIndex];
 
   useInput((input, key) => {
+    // If in rename mode, handle rename editing
+    if (renameSessionId) {
+      if (key.return) {
+        if (renameValue.trim()) {
+          onRename?.(renameSessionId, renameValue.trim());
+        }
+        setRenameSessionId(null);
+        setRenameValue("");
+        setRenameCursor(0);
+        return;
+      }
+      if (key.escape) {
+        setRenameSessionId(null);
+        setRenameValue("");
+        setRenameCursor(0);
+        return;
+      }
+      if (key.leftArrow) {
+        setRenameCursor((c) => Math.max(0, c - 1));
+        return;
+      }
+      if (key.rightArrow) {
+        setRenameCursor((c) => Math.min(renameValue.length, c + 1));
+        return;
+      }
+      if (key.home) {
+        setRenameCursor(0);
+        return;
+      }
+      if (key.end) {
+        setRenameCursor(renameValue.length);
+        return;
+      }
+      if (key.delete) {
+        if (renameCursor < renameValue.length) {
+          setRenameValue((prev) => prev.slice(0, renameCursor) + prev.slice(renameCursor + 1));
+          // cursor stays at same position (next char shifts left)
+        }
+        return;
+      }
+      if (key.backspace) {
+        if (renameCursor > 0) {
+          setRenameValue((prev) => prev.slice(0, renameCursor - 1) + prev.slice(renameCursor));
+          setRenameCursor((c) => c - 1);
+        }
+        return;
+      }
+      // Printable character: insert at cursor position
+      if (input && input.length > 0 && !key.meta && !key.ctrl && !key.tab) {
+        if (key.upArrow || key.downArrow) {
+          return;
+        }
+        setRenameValue((prev) => prev.slice(0, renameCursor) + input + prev.slice(renameCursor));
+        setRenameCursor((c) => c + input.length);
+        return;
+      }
+      return;
+    }
+
     // If in delete confirmation mode, handle confirm/cancel
     if (confirmDeleteSessionId) {
       if (key.return) {
@@ -114,6 +177,17 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
     if (key.ctrl && (input === "c" || input === "C")) {
       onCancel();
       return;
+    }
+
+    // Ctrl+R: start rename on selected session
+    if (key.ctrl && (input === "r" || input === "R")) {
+      if (selectedSession && onRename) {
+        const name = selectedSession.summary || "";
+        setRenameSessionId(selectedSession.id);
+        setRenameValue(name);
+        setRenameCursor(name.length);
+        return;
+      }
     }
 
     // Delete key: remove search character, or start delete confirmation
@@ -240,6 +314,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
               const actualIndex = scrollOffset + i;
               const isSelected = actualIndex === safeIndex;
               const isConfirming = confirmDeleteSessionId === session.id;
+              const isRenaming = renameSessionId === session.id;
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
                   <Box>
@@ -247,12 +322,23 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
                     <Box width={"100%"}>
-                      <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? theme.brand.accent : undefined}>
-                        {formatSessionTitle(session.summary || "Untitled")}
-                      </Text>
+                      {isRenaming ? (
+                        <Text color="yellow">
+                          Rename: {renameValue.slice(0, renameCursor)}
+                          <Text bold>|</Text>
+                          {renameValue.slice(renameCursor)}
+                        </Text>
+                      ) : (
+                        <Text
+                          {...(isSelected ? { bold: true } : {})}
+                          color={isSelected ? theme.brand.accent : undefined}
+                        >
+                          {formatSessionTitle(session.summary || "Untitled")}
+                        </Text>
+                      )}
                       {isConfirming ? (
                         <Text color={theme.status.warning}> [Delete? Enter=yes, Esc=no]</Text>
-                      ) : (
+                      ) : isRenaming ? null : (
                         <Text dimColor> ({formatSessionStatus(session.status)})</Text>
                       )}
                     </Box>
@@ -275,7 +361,19 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
         </Box>
         {/* Footer */}
         <Box flexDirection="column">
-          {confirmDeleteSessionId ? (
+          {renameSessionId ? (
+            <Box>
+              <Text color="yellow">Input new session name, </Text>
+              <Text bold color="green">
+                Enter
+              </Text>
+              <Text dimColor> to save · </Text>
+              <Text bold color="red">
+                Esc
+              </Text>
+              <Text dimColor> to cancel</Text>
+            </Box>
+          ) : confirmDeleteSessionId ? (
             <Box>
               <Text color={theme.status.warning}>Delete this session? </Text>
               <Text bold color={theme.status.success}>
@@ -295,7 +393,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete }: Props): 
           ) : (
             <Box>
               <Text dimColor>
-                Type to search · ↑/↓ navigate · PgUp/PgDn page · Enter select · Esc cancel · Del delete
+                Type to search · ↑/↓ navigate · PgUp/PgDn page · Enter select · Esc cancel · Del delete · Ctrl+r rename
               </Text>
             </Box>
           )}

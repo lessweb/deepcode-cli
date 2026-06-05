@@ -415,7 +415,7 @@ test("SessionManager marks skills loaded from existing session messages", async 
   assert.equal(loadedSkill?.isLoaded, true);
 });
 
-test("SessionManager lists project skills from .agents with legacy .deepcode compatibility", async () => {
+test("SessionManager lists skills from Deep Code and .agents roots by priority", async () => {
   const workspace = createTempDir("deepcode-project-skills-workspace-");
   const home = createTempDir("deepcode-project-skills-home-");
   setHomeDir(home);
@@ -428,11 +428,19 @@ test("SessionManager lists project skills from .agents with legacy .deepcode com
     "utf8"
   );
 
-  const legacyProjectSkillDir = path.join(workspace, ".deepcode", "skills", "legacy");
-  fs.mkdirSync(legacyProjectSkillDir, { recursive: true });
+  const userNativeSkillDir = path.join(home, ".deepcode", "skills", "native-user");
+  fs.mkdirSync(userNativeSkillDir, { recursive: true });
   fs.writeFileSync(
-    path.join(legacyProjectSkillDir, "SKILL.md"),
-    "---\nname: legacy\ndescription: Legacy project skill\n---\n# Legacy\n",
+    path.join(userNativeSkillDir, "SKILL.md"),
+    "---\nname: native-user\ndescription: User .deepcode skill\n---\n# Native User\n",
+    "utf8"
+  );
+
+  const userNativeSharedSkillDir = path.join(home, ".deepcode", "skills", "shared");
+  fs.mkdirSync(userNativeSharedSkillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(userNativeSharedSkillDir, "SKILL.md"),
+    "---\nname: shared\ndescription: User .deepcode skill\n---\n# Shared\n",
     "utf8"
   );
 
@@ -444,15 +452,23 @@ test("SessionManager lists project skills from .agents with legacy .deepcode com
     "utf8"
   );
 
+  const projectNativeSkillDir = path.join(workspace, ".deepcode", "skills", "shared");
+  fs.mkdirSync(projectNativeSkillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(projectNativeSkillDir, "SKILL.md"),
+    "---\nname: shared\ndescription: Project .deepcode skill\n---\n# Shared\n",
+    "utf8"
+  );
+
   const manager = createSessionManager(workspace, "machine-id-project-skills");
   const skills = await manager.listSkills();
-  const legacySkill = skills.find((skill) => skill.name === "legacy");
+  const nativeUserSkill = skills.find((skill) => skill.name === "native-user");
   const sharedSkill = skills.find((skill) => skill.name === "shared");
 
-  assert.equal(legacySkill?.path, "./.deepcode/skills/legacy/SKILL.md");
-  assert.equal(legacySkill?.description, "Legacy project skill");
-  assert.equal(sharedSkill?.path, "./.agents/skills/shared/SKILL.md");
-  assert.equal(sharedSkill?.description, "Project .agents skill");
+  assert.equal(nativeUserSkill?.path, "~/.deepcode/skills/native-user/SKILL.md");
+  assert.equal(nativeUserSkill?.description, "User .deepcode skill");
+  assert.equal(sharedSkill?.path, "./.deepcode/skills/shared/SKILL.md");
+  assert.equal(sharedSkill?.description, "Project .deepcode skill");
 });
 
 test("SessionManager dispose disconnects MCP servers", async () => {
@@ -540,6 +556,64 @@ rl.on("line", (line) => {
   manager.dispose();
 
   assert.deepEqual(manager.getMcpStatus(), []);
+});
+
+test("SessionManager exposes MCP tools with API-safe names and preserves original dispatch names", async () => {
+  const workspace = createTempDir("deepcode-mcp-safe-name-workspace-");
+  const serverPath = path.join(workspace, "mcp-invalid-name-server.cjs");
+  fs.writeFileSync(
+    serverPath,
+    `
+const readline = require("readline");
+const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
+function send(message) {
+  process.stdout.write(JSON.stringify(message) + "\\n");
+}
+rl.on("line", (line) => {
+  const request = JSON.parse(line);
+  if (!("id" in request)) {
+    return;
+  }
+  if (request.method === "initialize") {
+    send({ jsonrpc: "2.0", id: request.id, result: { protocolVersion: "2024-11-05", capabilities: { tools: {} } } });
+    return;
+  }
+  if (request.method === "tools/list") {
+    send({ jsonrpc: "2.0", id: request.id, result: { tools: [
+      { name: "speak.text", description: "Speak text", inputSchema: { type: "object", properties: { text: { type: "string" } }, required: ["text"] } },
+      { name: "speak/text", description: "Speak text using a slash name", inputSchema: { type: "object", properties: {} } }
+    ] } });
+    return;
+  }
+  if (request.method === "tools/call") {
+    send({ jsonrpc: "2.0", id: request.id, result: { content: [{ type: "text", text: request.params.name + ":" + (request.params.arguments.text || "") }] } });
+    return;
+  }
+  send({ jsonrpc: "2.0", id: request.id, result: { content: [] } });
+});
+`,
+    "utf8"
+  );
+
+  const manager = createSessionManager(workspace, "machine-id-mcp-safe-name");
+  await manager.initMcpServers({ "voice.box": { command: process.execPath, args: [serverPath] } });
+
+  const status = manager.getMcpStatus()[0];
+  assert.equal(status?.status, "ready");
+  assert.deepEqual(status?.tools, ["mcp__voice_box__speak_text", "mcp__voice_box__speak_text_59a610ad"]);
+
+  const mcpManager = (manager as any).mcpManager;
+  const definitions = mcpManager.getMcpToolDefinitions();
+  assert.equal(definitions[0].function.name, "mcp__voice_box__speak_text");
+  assert.match(definitions[0].function.name, /^[a-zA-Z0-9_-]+$/);
+  assert.match(definitions[0].function.description, /MCP source: voice\.box: speak\.text/);
+  assert.deepEqual(await mcpManager.executeMcpTool("mcp__voice_box__speak_text", { text: "ok" }), {
+    ok: true,
+    name: "mcp__voice_box__speak_text",
+    output: "speak.text:ok",
+  });
+
+  manager.dispose();
 });
 
 test("SessionManager dispose kills live processes without timeout controls", (t) => {
@@ -817,6 +891,88 @@ test("createSession appends default system prompts in prefix-cache-friendly orde
   const environmentInfo = JSON.parse(environmentJsonMatch[1] ?? "{}") as { "root path"?: string };
   assert.equal(environmentInfo["root path"], workspace);
   assert.equal(systemContents[3], "root project instructions");
+});
+
+test("createSession includes agent instructions in the skill matching system prompt", async () => {
+  const workspace = createTempDir("deepcode-skill-match-create-workspace-");
+  const home = createTempDir("deepcode-skill-match-create-home-");
+  setHomeDir(home);
+  globalThis.fetch = (async () => ({ ok: true, text: async () => "" }) as Response) as typeof fetch;
+
+  fs.mkdirSync(path.join(workspace, ".deepcode"), { recursive: true });
+  fs.writeFileSync(path.join(workspace, ".deepcode", "AGENTS.md"), "prefer project-specific skill matching", "utf8");
+  const skillDir = path.join(workspace, ".deepcode", "skills", "project-aware");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    "---\nname: project-aware\ndescription: Match project-specific instructions\n---\n# Project Aware\n",
+    "utf8"
+  );
+
+  const requests: any[] = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: any) => {
+          requests.push(request);
+          return { choices: [{ message: { content: '{"skillNames":[]}' } }] };
+        },
+      },
+    },
+  };
+  const manager = createMockedClientSessionManagerWithClient(workspace, client);
+  (manager as any).activateSession = async () => {};
+
+  await manager.createSession({ text: "pick the right workflow" });
+
+  const messages = (requests[0]?.messages ?? []) as Array<{ role?: string; content?: string }>;
+  assert.equal(messages[0]?.role, "system");
+  assert.match(messages[0]?.content ?? "", /<agent-instructions>/);
+  assert.match(messages[0]?.content ?? "", /prefer project-specific skill matching/);
+  assert.match(messages[0]?.content ?? "", /<\/agent-instructions>/);
+  assert.match(messages[0]?.content ?? "", /The candidate skills are as follows/);
+  assert.equal(messages[1]?.role, "user");
+});
+
+test("replySession includes current agent instructions in the skill matching system prompt", async () => {
+  const workspace = createTempDir("deepcode-skill-match-reply-workspace-");
+  const home = createTempDir("deepcode-skill-match-reply-home-");
+  setHomeDir(home);
+  globalThis.fetch = (async () => ({ ok: true, text: async () => "" }) as Response) as typeof fetch;
+
+  const requests: any[] = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: any) => {
+          requests.push(request);
+          return { choices: [{ message: { content: '{"skillNames":[]}' } }] };
+        },
+      },
+    },
+  };
+  const manager = createMockedClientSessionManagerWithClient(workspace, client);
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "" });
+  fs.writeFileSync(path.join(workspace, "AGENTS.md"), "use reply-time agent instructions", "utf8");
+  const skillDir = path.join(workspace, ".agents", "skills", "reply-aware");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    "---\nname: reply-aware\ndescription: Match reply-time instructions\n---\n# Reply Aware\n",
+    "utf8"
+  );
+
+  await manager.replySession(sessionId, { text: "pick the reply workflow" });
+
+  const messages = (requests[0]?.messages ?? []) as Array<{ role?: string; content?: string }>;
+  assert.equal(messages[0]?.role, "system");
+  assert.match(messages[0]?.content ?? "", /<agent-instructions>/);
+  assert.match(messages[0]?.content ?? "", /use reply-time agent instructions/);
+  assert.match(messages[0]?.content ?? "", /<\/agent-instructions>/);
+  assert.match(messages[0]?.content ?? "", /The candidate skills are as follows/);
+  assert.equal(messages[1]?.role, "user");
 });
 
 test("replySession stores /init and sends the active root project AGENTS path to the LLM", async () => {
@@ -2701,6 +2857,7 @@ test("SessionManager streams chat completions and counts reasoning progress", as
         create: async (request: Record<string, unknown>) => {
           assert.equal(request.stream, true);
           assert.deepEqual(request.stream_options, { include_usage: true });
+          assert.equal(request.temperature, 0.25);
           return createChatStreamResponse([
             { choices: [{ delta: { reasoning_content: "思考" } }] },
             { choices: [{ delta: { content: "hello" } }] },
@@ -2724,6 +2881,7 @@ test("SessionManager streams chat completions and counts reasoning progress", as
       client: client as any,
       model: "test-model",
       baseURL: "https://api.deepseek.com",
+      temperature: 0.25,
       thinkingEnabled: false,
     }),
     getResolvedSettings: () => ({ model: "test-model" }),
@@ -2766,7 +2924,8 @@ test("SessionManager persists session and user message before skill matching is 
   const client = {
     chat: {
       completions: {
-        create: async (_request: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
+        create: async (request: Record<string, unknown>, options?: { signal?: AbortSignal }) => {
+          assert.equal(request.temperature, 0.1);
           return new Promise((_resolve, reject) => {
             const signal = options?.signal;
             signal?.addEventListener("abort", () => reject(new APIUserAbortError()), { once: true });
