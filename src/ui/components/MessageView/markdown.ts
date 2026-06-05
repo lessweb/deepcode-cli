@@ -1,4 +1,5 @@
-import chalk from "chalk";
+import type { ThemedChalk } from "../../theme";
+import { getCurrentThemedChalk } from "../../theme";
 
 /**
  * A rendered piece of markdown.  Consumers should use `wrap="truncate-end"` for
@@ -33,16 +34,17 @@ export function renderMarkdownSegments(text: string, maxWidth?: number): Markdow
   const segments: MarkdownSegment[] = [];
   const fenceSegments = splitByFences(text);
 
+  const tc = getCurrentThemedChalk();
   for (const seg of fenceSegments) {
     if (seg.kind === "code") {
-      const langTag = seg.lang ? chalk.dim(`[${seg.lang}]`) + "\n" : "";
-      segments.push({ kind: "code", body: langTag + chalk.cyan(seg.body), lang: seg.lang });
+      const langTag = seg.lang ? tc.dim(`[${seg.lang}]`) + "\n" : "";
+      segments.push({ kind: "code", body: langTag + tc.code(seg.body), lang: seg.lang });
       continue;
     }
     const blocks = splitTableBlocks(seg.body);
     for (const b of blocks) {
       if (b.kind === "table") {
-        segments.push({ kind: "table", body: renderTableBorder(b.rows, maxWidth) });
+        segments.push({ kind: "table", body: renderTableBorder(b.rows, maxWidth, tc) });
       } else {
         const body = b.body
           .split("\n")
@@ -225,7 +227,7 @@ function isWideChar(code: number): boolean {
 // Table rendering
 // ---------------------------------------------------------------------------
 
-function renderTableBorder(rows: string[][], maxWidth?: number): string {
+function renderTableBorder(rows: string[][], maxWidth?: number, tc?: ThemedChalk): string {
   if (rows.length === 0) return "";
 
   const colCount = rows[0].length;
@@ -239,8 +241,7 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
   // Natural width per column, measured as terminal cells rather than UTF-16 units.
   const natural: number[] = Array.from({ length: colCount }, (_, i) => {
     const texts = normalizedRows.map((r) => r[i] ?? "");
-    const maxLine = Math.max(4, ...texts.map((t) => visualWidth(t)));
-    return maxLine;
+    return Math.max(4, ...texts.map((t) => visualWidth(t)));
   });
 
   // Keep minimums small so long CJK text or unbroken tokens can wrap by character.
@@ -340,10 +341,11 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
 
   const pad = (s: string, w: number) => s + " ".repeat(Math.max(0, w - visualWidth(s)));
 
-  const top = "┌" + colWidths.map((w) => "─".repeat(w + 2)).join("┬") + "┐";
-  const hdr = "├" + colWidths.map((w) => "─".repeat(w + 2)).join("┼") + "┤";
-  const sep = "├" + colWidths.map((w) => "─".repeat(w + 2)).join("┼") + "┤";
-  const bot = "└" + colWidths.map((w) => "─".repeat(w + 2)).join("┴") + "┘";
+  const b = tc?.tableBorder ?? ((s: string) => s);
+  const top = b("┌") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┬")) + b("┐");
+  const hdr = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");
+  const sep = b("├") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┼")) + b("┤");
+  const bot = b("└") + colWidths.map((w) => b("─".repeat(w + 2))).join(b("┴")) + b("┘");
 
   const out: string[] = [top];
 
@@ -351,7 +353,7 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
     const h = heights[ri];
     for (let li = 0; li < h; li++) {
       const line = wrapped[ri].map((cellLines, ci) => " " + pad(cellLines[li] ?? "", colWidths[ci]) + " ");
-      out.push("│" + line.join("│") + "│");
+      out.push(b("│") + line.join(b("│")) + b("│"));
     }
     if (ri === 0 && rows.length > 1) out.push(hdr);
     else if (ri < rows.length - 1) out.push(sep);
@@ -366,29 +368,30 @@ function renderTableBorder(rows: string[][], maxWidth?: number): string {
 // ---------------------------------------------------------------------------
 
 function renderInlineLine(line: string): string {
+  const tc = getCurrentThemedChalk();
   const headingMatch = /^(\s*)(#{1,6})\s+(.*)$/.exec(line);
   if (headingMatch) {
     const [, lead, hashes, content] = headingMatch;
-    const styled = hashes.length <= 2 ? chalk.bold.cyanBright(content) : chalk.bold.cyan(content);
-    return `${lead}${chalk.dim(hashes)} ${styled}`;
+    const styled = hashes.length <= 2 ? tc.heading1(content) : tc.heading3(content);
+    return `${lead}${tc.dim(hashes)} ${styled}`;
   }
 
   const listMatch = /^(\s*)([-*+])\s+(.*)$/.exec(line);
   if (listMatch) {
     const [, lead, bullet, content] = listMatch;
-    return `${lead}${chalk.yellow(bullet)} ${renderInlineSpans(content)}`;
+    return `${lead}${tc.listBullet(bullet)} ${renderInlineSpans(content)}`;
   }
 
   const numListMatch = /^(\s*)(\d+\.)\s+(.*)$/.exec(line);
   if (numListMatch) {
     const [, lead, marker, content] = numListMatch;
-    return `${lead}${chalk.yellow(marker)} ${renderInlineSpans(content)}`;
+    return `${lead}${tc.listBullet(marker)} ${renderInlineSpans(content)}`;
   }
 
   const quoteMatch = /^(\s*)>\s?(.*)$/.exec(line);
   if (quoteMatch) {
     const [, lead, content] = quoteMatch;
-    return `${lead}${chalk.dim("│ ")}${chalk.italic(renderInlineSpans(content))}`;
+    return `${lead}${tc.dim("│ ")}${tc.italic(renderInlineSpans(content))}`;
   }
 
   return renderInlineSpans(line);
@@ -396,6 +399,7 @@ function renderInlineLine(line: string): string {
 
 function renderInlineSpans(text: string): string {
   if (!text) return text;
+  const tc = getCurrentThemedChalk();
 
   const parts: string[] = [];
   const codeRe = /`([^`]+)`/g;
@@ -406,7 +410,7 @@ function renderInlineSpans(text: string): string {
     if (match.index > lastIndex) {
       parts.push(renderEmphasisSpans(text.slice(lastIndex, match.index)));
     }
-    parts.push(chalk.cyan(match[1] ?? ""));
+    parts.push(tc.cyan(match[1] ?? ""));
     lastIndex = match.index + match[0].length;
   }
 
@@ -419,8 +423,9 @@ function renderInlineSpans(text: string): string {
 
 function renderEmphasisSpans(text: string): string {
   let result = text;
-  result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => chalk.bold(inner));
-  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => chalk.italic(inner));
-  result = result.replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, (_, inner) => chalk.italic(inner));
+  const tc = getCurrentThemedChalk();
+  result = result.replace(/\*\*([^*]+)\*\*/g, (_, inner) => tc.bold(inner));
+  result = result.replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, (_, inner) => tc.italic(inner));
+  result = result.replace(/(?<![\p{L}\p{N}_])_([^_\n]+)_(?![\p{L}\p{N}_])/gu, (_, inner) => tc.italic(inner));
   return result;
 }

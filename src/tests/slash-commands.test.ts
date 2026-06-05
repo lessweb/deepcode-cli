@@ -22,6 +22,7 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
   assert.deepEqual(builtinNames, [
     "skills",
     "model",
+    "theme",
     "new",
     "init",
     "resume",
@@ -103,6 +104,13 @@ test("findExactSlashCommand returns built-in /raw", () => {
   const item = findExactSlashCommand(items, "/raw");
   assert.ok(item);
   assert.equal(item?.kind, "raw");
+});
+
+test("findExactSlashCommand returns built-in /theme", () => {
+  const items = buildSlashCommands(skills);
+  const item = findExactSlashCommand(items, "/theme");
+  assert.ok(item);
+  assert.equal(item?.kind, "theme");
 });
 
 test("findExactSlashCommand returns the matching skill", () => {

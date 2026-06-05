@@ -4,6 +4,7 @@ import { ARGS_SEPARATOR } from "../constants";
 import React from "react";
 import { Box, Text } from "ink";
 import type { SkillInfo } from "../../session";
+import { useTheme } from "../theme";
 
 type SlashCommandMenuProps = {
   items: SlashCommandItem[];
@@ -20,6 +21,7 @@ const SlashCommandMenu = React.memo(function SlashCommandMenu({
   maxVisible = 6,
   width,
 }: SlashCommandMenuProps): React.ReactElement | null {
+  const theme = useTheme();
   // 计算标签列最佳宽度：包含前缀"> "或"  "（2字符），不超过容器一半（扣除gap）
   const labelColumnWidth = React.useMemo(() => {
     if (items.length === 0) {
@@ -56,14 +58,14 @@ const SlashCommandMenu = React.memo(function SlashCommandMenu({
         return (
           <Box key={item.label} gap={2} flexDirection="row" flexGrow={1}>
             <Box width={labelColumnWidth} flexShrink={0} gap={2}>
-              <Text color={actualIndex === activeIndex ? "#229ac3" : undefined} wrap="truncate-end">
+              <Text color={actualIndex === activeIndex ? theme.brand.accent : undefined} wrap="truncate-end">
                 {actualIndex === activeIndex ? "> " : "  "}
                 <Text bold>{formatSlashCommandLabel(item)}</Text>
               </Text>
               {item.args ? <Text dimColor>{item.args.join(ARGS_SEPARATOR)}</Text> : null}
             </Box>
             <Box flexGrow={1}>
-              <Text color={actualIndex === activeIndex ? "#229ac3" : undefined} wrap="truncate-end" dimColor>
+              <Text color={actualIndex === activeIndex ? theme.brand.accent : undefined} wrap="truncate-end" dimColor>
                 {formatSlashCommandDescription(item.description)}
               </Text>
             </Box>

@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
-import chalk from "chalk";
+import { Box, Text, useApp, useStdout, useWindowSize } from "ink";
+import { useTheme, type ThemePreset } from "../theme";
+import { useAppContext } from "../contexts";
 import { createOpenAIClient } from "../../common/openai-client";
 import type { PermissionScope } from "../../settings";
 import { type ModelConfigSelection } from "../../settings";
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
-import { MessageView, RawModeExitPrompt } from "../components";
+import { MessageView, RawModeExitPrompt, ThemeableStatic } from "../components";
 import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { buildLoadingText } from "../core/loading-text";
@@ -20,7 +21,7 @@ import {
   formatAskUserQuestionAnswers,
 } from "../core/ask-user-question";
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
-import { buildExitSummaryText } from "../exit-summary";
+import ExitSummaryView from "./ExitSummaryView";
 import { RawMode, useRawModeContext } from "../contexts";
 import { renderMessageToStdout } from "../components/MessageView/utils";
 import {
@@ -59,6 +60,8 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
   const { mode, setMode } = useRawModeContext();
+  const theme = useTheme();
+  const { themeVersion, currentPreset, previewTheme, revertTheme } = useAppContext();
   const initialPromptSubmittedRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
   const rawModeRef = useRef<RawMode>(mode);
@@ -85,6 +88,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   } | null>(null);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [isExiting, setIsExiting] = useState(false);
+  const [exitSession, setExitSession] = useState<SessionEntry | null>(null);
   const [showWelcome, setShowWelcome] = useState(true);
   const [welcomeNonce, setWelcomeNonce] = useState(0);
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
@@ -153,10 +157,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
    * Reset the static view to the welcome screen.
    */
   const resetStaticView = useCallback(
-    (loadedMessages: SessionMessage[], options?: { clearScreen?: boolean }) => {
-      if (options?.clearScreen) {
-        process.stdout.write(ANSI_CLEAR_SCREEN);
-      }
+    (loadedMessages: SessionMessage[]) => {
       setMessages([]);
       setWelcomeNonce((n) => n + 1);
       navigateToSubView("chat");
@@ -175,6 +176,18 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     const id = setInterval(() => setNowTick((tick) => tick + 1), 500);
     return () => clearInterval(id);
   }, [busy]);
+
+  // After exit summary is rendered by Ink, dispose and exit.
+  useEffect(() => {
+    if (!isExiting) {
+      return;
+    }
+    const timer = setTimeout(() => {
+      sessionManager.dispose();
+      exit();
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [isExiting, sessionManager, exit]);
 
   function loadVisibleMessages(manager: SessionManager, sessionId: string): SessionMessage[] {
     return manager.listSessionMessages(sessionId).filter((m) => m.visible);
@@ -198,9 +211,9 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
   /**
    * Reset the app to the welcome screen.
+   * 先清屏，等 Ink 渲染完空状态后，再显示 welcome 页面。
    */
   const resetToWelcome = useCallback(async () => {
-    writeRef.current(ANSI_CLEAR_SCREEN);
     sessionManager.setActiveSessionId(null);
     setStatusLine("");
     setErrorLine(null);
@@ -209,9 +222,17 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     setActiveAskPermissions(undefined);
     setPendingPermissionReply(null);
     setDismissedQuestionIds(new Set());
-    resetStaticView([]);
+    setMessages([]);
+    setShowWelcome(false);
     await refreshSkills();
-  }, [sessionManager, resetStaticView, refreshSkills]);
+    // 第一步：清屏 + 清空消息，等 Ink 渲染空状态
+    process.stdout.write(ANSI_CLEAR_SCREEN);
+    // 第二步：等 Ink 完成空状态渲染后，再显示 welcome 页面
+    setTimeout(() => {
+      setWelcomeNonce((n) => n + 1);
+      setShowWelcome(true);
+    }, 50);
+  }, [sessionManager, refreshSkills]);
 
   /**
    * Refresh the list of sessions.
@@ -249,25 +270,18 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
       if (submission.command === "exit") {
+        const activeSessionId = sessionManager.getActiveSessionId();
+        const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+        setExitSession(session);
         setIsExiting(true);
-        setTimeout(() => {
-          const activeSessionId = sessionManager.getActiveSessionId();
-          const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
-          const summary = buildExitSummaryText({ session });
-          process.stdout.write("\n");
-          process.stdout.write(chalk.rgb(34, 154, 195)("> /exit "));
-          process.stdout.write("\n\n");
-          process.stdout.write(summary);
-          process.stdout.write("\n\n");
-          sessionManager.dispose();
-          exit();
-        }, 0);
         return;
       }
       if (submission.command === "new") {
         if (onRestart) {
+          // 生产环境：完全销毁重建 Ink 实例，清屏最可靠
           onRestart();
         } else {
+          // 测试环境：在同一实例内重置状态
           await resetToWelcome();
           refreshSessionsList();
         }
@@ -356,7 +370,6 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     [
       sessionManager,
       pendingPermissionReply,
-      exit,
       onRestart,
       refreshSkills,
       refreshSessionsList,
@@ -382,6 +395,37 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     [sessionManager]
   );
 
+  const handleThemeChange = useCallback(
+    (preset: ThemePreset) => {
+      const activeSessionId = sessionManager.getActiveSessionId();
+      const meta: MessageMeta = { settingChange: "theme" };
+      const content = `/theme\n└ Theme set to ${preset}`;
+
+      if (activeSessionId) {
+        sessionManager.addSessionSystemMessage(activeSessionId, content, true, meta);
+      } else {
+        const now = new Date().toISOString();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            sessionId: "local",
+            role: "system" as const,
+            content,
+            contentParams: null,
+            messageParams: null,
+            compacted: true,
+            visible: true,
+            createTime: now,
+            updateTime: now,
+            meta,
+          },
+        ]);
+      }
+    },
+    [sessionManager]
+  );
+
   const handleModelConfigChange = useCallback(
     (selection: ModelConfigSelection): string => {
       const current = resolveCurrentSettings(projectRoot);
@@ -395,7 +439,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
       const activeSessionId = sessionManager.getActiveSessionId();
       const meta: MessageMeta = {
-        isModelChange: true,
+        settingChange: "model",
       };
       const content = `/model\n└ Set model to ${selection.model} (${selection?.thinkingEnabled ? selection?.reasoningEffort : "no thinking"})`;
 
@@ -435,7 +479,8 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
   const reloadActiveSessionView = useCallback(
     (sessionId: string): void => {
-      resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+      process.stdout.write(ANSI_CLEAR_SCREEN);
+      resetStaticView(loadVisibleMessages(sessionManager, sessionId));
     },
     [resetStaticView, sessionManager]
   );
@@ -456,8 +501,8 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
       sessionManager.setActiveSessionId(sessionId);
-      // Clear first so <Static> resets its index to 0.
-      resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+      process.stdout.write(ANSI_CLEAR_SCREEN);
+      resetStaticView(loadVisibleMessages(sessionManager, sessionId));
       const session = sessionManager.getSession(sessionId);
       setStatusLine(session ? buildStatusLine(session) : "");
       setRunningProcesses(session?.processes ?? null);
@@ -576,7 +621,6 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
     if (mode === RawMode.Raw) {
       // In raw mode, re-render all messages directly to stdout at the new width.
-      // Use process.stdout.write instead of writeRef to avoid Ink interference.
       process.stdout.write(ANSI_CLEAR_SCREEN);
       const activeSessionId = sessionManager.getActiveSessionId();
       const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
@@ -584,21 +628,13 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       return;
     }
 
-    // Force full redraw on terminal resize to avoid stale wrapped rows.
-    writeRef.current("\u001B[2J\u001B[H");
-
-    setMessages([]);
-    setShowWelcome(false);
+    // Don't clear the screen on resize — Ink handles re-layout naturally.
+    // Clearing causes scroll-to-top and flash, especially on tab switch in iTerm2.
+    // Use welcomeNonce to force PromptInput and other components to re-render,
+    // but don't pass it to ThemeableStatic (see layoutResetKey below).
     setWelcomeNonce((n) => n + 1);
-
-    const activeSessionId = sessionManager.getActiveSessionId();
-    const nextMessages =
-      activeSessionId && !busy ? loadVisibleMessages(sessionManager, activeSessionId) : messagesRef.current;
-    setTimeout(() => {
-      setMessages(nextMessages);
-      setShowWelcome(true);
-    }, 0);
-  }, [busy, mode, sessionManager, columns, stdout]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busy, mode, sessionManager, columns]);
 
   const screenWidth = useMemo(() => columns ?? stdout?.columns ?? 80, [columns, stdout]);
   const screenHeight = useMemo(() => rows ?? stdout?.rows ?? 24, [rows, stdout]);
@@ -701,7 +737,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
 
   return (
     <Box flexDirection="column" width={screenWidth} minWidth={80} overflowX={"visible"}>
-      <Static items={staticItems}>
+      <ThemeableStatic items={staticItems} themeVersion={themeVersion}>
         {(item) => {
           if (item.id.startsWith("__welcome__")) {
             return (
@@ -723,15 +759,15 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
             />
           );
         }}
-      </Static>
+      </ThemeableStatic>
       {statusLine ? (
-        <Box>
+        <Box marginLeft={2}>
           <Text dimColor>{statusLine}</Text>
         </Box>
       ) : null}
       {errorLine ? (
-        <Box>
-          <Text color="red">Error: {errorLine}</Text>
+        <Box marginLeft={2}>
+          <Text color={theme.status.danger}>Error: {errorLine}</Text>
         </Box>
       ) : null}
       {showProcessStdout ? (
@@ -794,7 +830,9 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />
-      ) : isExiting ? null : (
+      ) : isExiting ? (
+        <ExitSummaryView session={exitSession} />
+      ) : (
         <PromptInput
           projectRoot={projectRoot}
           screenWidth={screenWidth}
@@ -805,11 +843,15 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
           loadingText={loadingText}
           runningProcesses={runningProcesses}
           promptDraft={promptDraft}
+          currentPreset={currentPreset}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
           onRawModeChange={handleRawModeChange}
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}
+          onThemePreview={previewTheme}
+          onThemeRevert={revertTheme}
+          onThemeChange={handleThemeChange}
           placeholder="Type your message..."
         />
       )}

@@ -2,6 +2,7 @@ import React, { useState, useMemo, useCallback } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
 import type { SessionEntry, SessionStatus } from "../../session";
 import { truncate } from "../components/MessageView/utils";
+import { useTheme } from "../theme";
 
 type Props = {
   sessions: SessionEntry[];
@@ -47,6 +48,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
   const [renameValue, setRenameValue] = useState("");
   const [renameCursor, setRenameCursor] = useState(0);
   const { columns, rows } = useWindowSize();
+  const theme = useTheme();
 
   // Filter sessions by search query
   const filteredSessions = useMemo(() => filterSessions(sessions, searchQuery), [sessions, searchQuery]);
@@ -254,7 +256,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
   if (sessions.length === 0) {
     return (
       <Box flexDirection="column">
-        <Text color="yellow">No previous sessions found.</Text>
+        <Text color={theme.status.warning}>No previous sessions found.</Text>
         <Text dimColor>Press Esc to go back.</Text>
       </Box>
     );
@@ -269,22 +271,23 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
       paddingX={1}
       marginTop={1}
     >
-      <Box flexDirection="column" borderStyle="round" borderDimColor flexGrow={1} overflow="hidden">
+      <Box flexDirection="column" borderStyle="round" borderColor={theme.border.default} flexGrow={1} overflow="hidden">
         {/* Header row */}
         <Box paddingX={1} flexDirection="column">
-          <Box>
-            <Text bold color="cyanBright">
+          <Box gap={1}>
+            <Text bold color={theme.brand.accent}>
               Resume a session
             </Text>
-            <Text bold color="#229ac3">
-              {" "}
+            <Text color={theme.brand.accent}>
               ({sessions.length} total
               {hasActiveSearch ? `, ${filteredSessions.length} matched` : ""})
             </Text>
           </Box>
           {/* Search bar */}
           <Box marginTop={hasActiveSearch || searchQuery ? 0 : 0}>
-            <Text dimColor>{searchQuery ? `Search: ${searchQuery}` : "Type to search\u2026"}</Text>
+            <Text dimColor color={searchQuery ? theme.brand.accent : theme.text.muted}>
+              {searchQuery ? `Search: ${searchQuery}` : "Type to search\u2026"}
+            </Text>
             {searchQuery ? <Text bold>|</Text> : null}
           </Box>
         </Box>
@@ -296,7 +299,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
           borderLeft={false}
           borderRight={false}
           borderStyle="round"
-          borderDimColor
+          borderColor={theme.border.default}
           flexDirection="column"
           flexGrow={1}
           paddingX={1}
@@ -304,7 +307,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
         >
           {filteredSessions.length === 0 ? (
             <Box paddingY={1}>
-              <Text color="yellow">No sessions match "{searchQuery}".</Text>
+              <Text color={theme.status.warning}>No sessions match "{searchQuery}".</Text>
             </Box>
           ) : (
             visibleSessions.map((session, i) => {
@@ -315,7 +318,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
                   <Box>
-                    <Text color="#229ac3">{isSelected ? "> " : "  "}</Text>
+                    <Text color={theme.brand.accent}>{isSelected ? "> " : "  "}</Text>
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
                     <Box width={"100%"}>
@@ -326,12 +329,15 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
                           {renameValue.slice(renameCursor)}
                         </Text>
                       ) : (
-                        <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? "#229ac3" : undefined}>
+                        <Text
+                          {...(isSelected ? { bold: true } : {})}
+                          color={isSelected ? theme.brand.accent : undefined}
+                        >
                           {formatSessionTitle(session.summary || "Untitled")}
                         </Text>
                       )}
                       {isConfirming ? (
-                        <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
+                        <Text color={theme.status.warning}> [Delete? Enter=yes, Esc=no]</Text>
                       ) : isRenaming ? null : (
                         <Text dimColor> ({formatSessionStatus(session.status)})</Text>
                       )}
@@ -369,12 +375,12 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
             </Box>
           ) : confirmDeleteSessionId ? (
             <Box>
-              <Text color="yellow">Delete this session? </Text>
-              <Text bold color="green">
+              <Text color={theme.status.warning}>Delete this session? </Text>
+              <Text bold color={theme.status.success}>
                 Enter
               </Text>
               <Text dimColor> to confirm · </Text>
-              <Text bold color="red">
+              <Text bold color={theme.status.danger}>
                 Esc
               </Text>
               <Text dimColor> to cancel</Text>

@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { BASH_TIMEOUT_DECREMENT_MS, BASH_TIMEOUT_INCREMENT_MS } from "../../common/bash-timeout";
 import type { BashTimeoutAdjustment, SessionEntry, SessionProcessEntry } from "../../session";
 import { useTerminalInput } from "../hooks";
+import { useTheme } from "../theme";
 
 type RunningProcesses = SessionEntry["processes"];
 
@@ -27,6 +28,7 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   screenWidth,
   screenHeight,
 }: ProcessStdoutViewProps): React.ReactElement {
+  const theme = useTheme();
   const [stdoutText, setStdoutText] = useState("");
   const [scrollOffset, setScrollOffset] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
@@ -133,7 +135,9 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   return (
     <Box flexDirection="column" width={screenWidth} minWidth={80} height={panelHeight} overflow="hidden">
       <Box borderStyle="single" borderBottom={true} borderLeft={false} borderRight={false} borderTop={false}>
-        <Text bold>📟 Process Output</Text>
+        <Text bold color={theme.text.primary}>
+          📟 Process Output
+        </Text>
         <Text dimColor>{` (${formatTimeoutHint(
           timeoutProcess?.entry
         )} · +/- adjust · Ctrl+O or Esc to close · ↑↓ PageUp/PageDown to scroll)`}</Text>

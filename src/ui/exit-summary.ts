@@ -1,6 +1,7 @@
 import chalk from "chalk";
 import gradientString from "gradient-string";
 import type { ModelUsage, SessionEntry } from "../session";
+import { getCurrentThemedChalk, getCurrentThemeTokens } from "./theme";
 
 type ExitSummaryInput = {
   session: SessionEntry | null;
@@ -72,8 +73,10 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
   const innerWidth = 98;
   const contentWidth = innerWidth - 4; // "│  " prefix + "  │" suffix → 4 chars padding
 
-  const borderColor = chalk.hex("#229ac3e6");
-  const titleColor = gradientString("#229ac3e6", "rgb(125 51 247 / 0.7)");
+  const theme = getCurrentThemeTokens();
+  const tc = getCurrentThemedChalk();
+  const borderColor = chalk.hex(theme.border.subtle);
+  const titleColor = gradientString(...theme.gradients.logo);
   const line = (text: string) => `${borderColor("│")}  ${padRight(text, contentWidth)}  ${borderColor("│")}`;
 
   const header = chalk.bold(titleColor("Goodbye!"));
@@ -113,7 +116,7 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
       padLeft("Output Tokens", colOutput) +
       padLeft("Cached Tokens", colCached);
     rows.push(chalk.bold(headerRow));
-    rows.push(divider);
+    rows.push(tc.textMuted(divider));
 
     for (const { modelName, usage } of usageRows) {
       const reqsStr = formatNumber(usage.totalReqs).padStart(colReqs);
@@ -123,9 +126,9 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
       const dataRow =
         padRight(modelName, colModel) +
         padRight(reqsStr, colReqs) +
-        padRight(chalk.yellow(inputStr), colInput) +
-        padRight(chalk.yellow(outputStr), colOutput) +
-        padRight(chalk.yellow(cachedStr), colCached);
+        padRight(tc.warning(inputStr), colInput) +
+        padRight(tc.warning(outputStr), colOutput) +
+        padRight(tc.warning(cachedStr), colCached);
       rows.push(dataRow);
     }
 
@@ -141,4 +144,41 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
   const body = rows.map((row) => line(row)).join("\n");
 
   return [top, body, bottom].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Structured exit summary for React rendering
+// ---------------------------------------------------------------------------
+
+export type ExitSummaryRow = {
+  modelName: string;
+  reqs: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+};
+
+export type ExitSummaryData = {
+  rows: ExitSummaryRow[];
+  hasUsage: boolean;
+};
+
+export function buildExitSummaryData(input: ExitSummaryInput): ExitSummaryData {
+  const { session } = input;
+
+  const rows = Object.entries(session?.usagePerModel ?? {})
+    .map(([modelName, usage]) => {
+      const fields = extractUsageFields(usage);
+      return {
+        modelName,
+        reqs: fields.totalReqs,
+        inputTokens: fields.promptTokens,
+        outputTokens: fields.completionTokens,
+        cachedTokens: fields.cachedTokens,
+      };
+    })
+    .filter((row) => row.reqs > 0 || row.inputTokens > 0 || row.outputTokens > 0 || row.cachedTokens > 0)
+    .sort((left, right) => right.reqs - left.reqs || left.modelName.localeCompare(right.modelName));
+
+  return { rows, hasUsage: rows.length > 0 };
 }

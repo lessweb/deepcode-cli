@@ -212,7 +212,7 @@ test("renderMessageToStdout renders system model change messages", () => {
   const msg = makeSessionMessage({
     role: "system",
     content: "Switched to deepseek-v4-pro",
-    meta: { isModelChange: true },
+    meta: { settingChange: "model" },
   });
   const output = renderMessageToStdout(msg, RawMode.Raw);
   assert.ok(output.includes("> Switched to deepseek-v4-pro"));

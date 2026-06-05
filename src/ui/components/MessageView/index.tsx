@@ -11,9 +11,11 @@ import {
 } from "./utils";
 import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
+import { useTheme } from "../../theme";
 
 export function MessageView({ message, collapsed, width = 80 }: MessageViewProps): React.ReactElement | null {
   const { mode } = useRawModeContext();
+  const theme = useTheme();
   if (!message.visible) {
     return null;
   }
@@ -23,12 +25,12 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     return (
       <Box marginLeft={1} marginBottom={1} flexDirection="row" marginY={0} flexGrow={1} gap={1}>
         <Box>
-          <Text color="#229ac3">{`>`}</Text>
+          <Text color={theme.brand.accent}>{`>`}</Text>
         </Box>
         <Box flexGrow={1}>
-          <Text color="#229ac3">{text}</Text>
+          <Text color={theme.brand.accent}>{text}</Text>
           {Array.isArray(message.contentParams) && message.contentParams.length > 0 ? (
-            <Text color="#229ac3">{`  📎 ${message.contentParams.length} image attachment(s)`}</Text>
+            <Text color={theme.status.info}>{`  📎 ${message.contentParams.length} image attachment(s)`}</Text>
           ) : null}
         </Box>
       </Box>
@@ -44,13 +46,13 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
       if (collapsed !== false) {
         return (
           <Box marginLeft={1} marginBottom={1} marginY={0}>
-            <StatusLine width={width} bulletColor="gray" name="Thinking" params={summary} />
+            <StatusLine width={width} bulletColor={theme.text.muted} name="Thinking" params={summary} />
           </Box>
         );
       }
       return (
         <Box marginLeft={1} flexDirection="column" marginBottom={1} marginY={0}>
-          <StatusLine width={width} bulletColor="gray" name="Thinking" params={content ? "" : summary} />
+          <StatusLine width={width} bulletColor={theme.text.muted} name="Thinking" params={content ? "" : summary} />
           <Box flexDirection="column" marginLeft={2}>
             {content ? <Text dimColor>{renderMarkdown(content)}</Text> : null}
           </Box>
@@ -64,7 +66,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     return (
       <Box marginLeft={1} marginBottom={1} width={containerWidth} gap={1} marginY={0} flexDirection="row">
         <Box alignSelf="stretch">
-          <Text color="#229ac3">✦</Text>
+          <Text color={theme.brand.accent}>✦</Text>
         </Box>
         <Box flexGrow={1} width={contentWidth} flexDirection="column">
           {content
@@ -77,6 +79,13 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
                           {line}
                         </Text>
                       ))}
+                    </Box>
+                  );
+                }
+                if (seg.kind === "code") {
+                  return (
+                    <Box key={i} backgroundColor={theme.codeBlock.background} paddingLeft={1}>
+                      <Text>{seg.body}</Text>
                     </Box>
                   );
                 }
@@ -96,7 +105,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
       <Box flexDirection="column" marginLeft={1} marginBottom={1} marginY={0}>
         <StatusLine
           width={width}
-          bulletColor={summary.ok ? "green" : "red"}
+          bulletColor={summary.ok ? theme.status.success : theme.status.danger}
           name={formatStatusName(summary.name)}
           params={formatToolStatusParams(summary)}
         />
@@ -108,14 +117,14 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
 
   if (message.role === "system") {
     // Render model change messages in the same style as user commands.
-    if (message.meta?.isModelChange) {
+    if (message.meta?.settingChange) {
       return (
         <Box marginY={0} marginLeft={1} marginBottom={1} flexGrow={1} flexDirection="row" gap={1}>
           <Box>
-            <Text color="#229ac3">{`>`}</Text>
+            <Text color={theme.brand.accent}>{`>`}</Text>
           </Box>
           <Box flexGrow={1} flexDirection="column">
-            <Text color="#229ac3">{message.content}</Text>
+            <Text color={theme.brand.accent}>{message.content}</Text>
           </Box>
         </Box>
       );
@@ -124,7 +133,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     if (message.meta?.skill) {
       return (
         <Box marginY={0} marginLeft={1} marginBottom={1}>
-          <Text color="magenta">⚡ Loaded skill: {message.meta.skill.name}</Text>
+          <Text color={theme.status.info}>⚡ Loaded skill: {message.meta.skill.name}</Text>
         </Box>
       );
     }
@@ -149,7 +158,7 @@ function StatusLine({
   params,
   width,
 }: {
-  bulletColor: "gray" | "green" | "red";
+  bulletColor: string;
   name: string;
   params: string;
   width: number;
@@ -157,11 +166,12 @@ function StatusLine({
   const { mode } = useRawModeContext();
   const containerWidth = Math.max(1, width - 2);
   const contentWidth = Math.max(1, width - 4);
+
   return (
     <Box gap={1} width={containerWidth}>
       <Box alignSelf="stretch">
         <Text key="bullet" color={bulletColor}>
-          ✧
+          ✦
         </Text>
       </Box>
       <Box flexGrow={1} width={contentWidth} gap={1}>
@@ -170,7 +180,7 @@ function StatusLine({
             {name}
           </Text>
           {params ? (
-            <Text key="params" color="white">
+            <Text key="params" dimColor>
               {` ${params}`}
             </Text>
           ) : null}
@@ -181,19 +191,45 @@ function StatusLine({
 }
 
 function DiffPreview({ lines }: { lines: DiffPreviewLine[] }): React.ReactElement {
+  const theme = useTheme();
+  const getBackgroundColor = (kind: string) => {
+    switch (kind) {
+      case "added":
+        return theme.diff.addedBackground;
+      case "removed":
+        return theme.diff.removedBackground;
+      case "modified":
+        return theme.diff.modifiedBackground;
+      default:
+        return undefined;
+    }
+  };
+  const getColor = (kind: string) => {
+    switch (kind) {
+      case "added":
+        return theme.diff.added;
+      case "removed":
+        return theme.diff.removed;
+      case "modified":
+        return theme.diff.modified;
+      default:
+        return undefined;
+    }
+  };
   return (
     <Box flexDirection="column" marginLeft={2}>
       <Text dimColor>└ Changes</Text>
-      <Box flexDirection="column" marginLeft={2}>
+      <Box flexDirection="column">
         {lines.map((line, index) => (
-          <Text key={`${index}-${line.marker}-${line.content}`} wrap="truncate-end">
-            <Text color={line.kind === "added" ? "green" : line.kind === "removed" ? "red" : "gray"}>
-              {line.marker}
-            </Text>
-            <Text color={line.kind === "added" ? "green" : line.kind === "removed" ? "red" : undefined}>
-              {line.content}
-            </Text>
-          </Text>
+          <Box
+            key={`${index}-${line.marker}-${line.content}`}
+            gap={1}
+            paddingLeft={2}
+            backgroundColor={getBackgroundColor(line.kind)}
+          >
+            <Text color={getColor(line.kind)}>{line.marker}</Text>
+            <Text color={getColor(line.kind)}>{line.content}</Text>
+          </Box>
         ))}
       </Box>
     </Box>

@@ -129,6 +129,100 @@ Configuration for MCP (Model Context Protocol) servers. The value is a key-value
 
 For detailed MCP usage instructions, refer to [mcp.md](mcp.md).
 
+#### `theme` — Theme Configuration
+
+Deep Code supports customizing theme colors to make your terminal interface match your personal preferences.
+
+**Using Preset Themes**
+
+```json
+{
+  "theme": {
+    "preset": "dark"
+  }
+}
+```
+
+Available preset themes:
+
+| Preset Name     | Description                              |
+| --------------- | ---------------------------------------- |
+| `light`         | Light theme (default, optimized for light backgrounds) |
+| `dark`          | Dark theme (optimized for dark backgrounds) |
+| `github-light`  | GitHub Light style theme                 |
+| `github-dark`   | GitHub Dark style theme                  |
+| `monokai`       | Monokai-style theme                      |
+| `dracula`       | Dracula-style theme                      |
+| `ansi-light`    | ANSI light theme (standard 16 colors) |
+| `ansi-dark`     | ANSI dark theme (standard 16 colors)  |
+
+**Custom Theme Colors**
+
+The recommended way is to use `colors` — a simplified palette of 16 base colors. The system automatically derives the full theme:
+
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "colors": {
+      "Background": "#ffffff",
+      "Foreground": "#1F2328",
+      "Gray": "#8b949e",
+      "LightBlue": "#0969da",
+      "AccentBlue": "#ff6600",
+      "AccentPurple": "#8250df",
+      "AccentCyan": "#0550ae",
+      "AccentGreen": "#1a7f37",
+      "AccentYellow": "#fa8c16",
+      "AccentRed": "#d1242f",
+      "AccentYellowDim": "#9a6700",
+      "AccentRedDim": "#a40e26",
+      "DiffAdded": "#dafbe1",
+      "DiffRemoved": "#ffebe9",
+      "Comment": "#6e7781"
+    }
+  }
+}
+```
+
+You can also combine `colors` with `overrides` to fine-tune specific tokens:
+
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "colors": { "Background": "#1a1a2e", "Foreground": "#e0e0e0", "..." : "..." },
+    "overrides": {
+      "agent": { "streaming": "#ffcc00" }
+    }
+  }
+}
+```
+
+Advanced: use `base` to inherit from another preset, with `overrides` to tweak:
+
+```json
+{
+  "theme": {
+    "preset": "custom",
+    "base": "dark",
+    "overrides": {
+      "brand": { "primary": "#ff6600" }
+    }
+  }
+}
+```
+
+**Runtime Theme Switching**
+
+In the CLI, use the `/theme` command to open the theme picker. Browse with arrow keys, confirm with Space or Enter:
+
+```
+/theme    # Open theme picker
+```
+
+As you browse in the picker, the theme is previewed in real-time. Press Esc to cancel and revert to the original theme. Once confirmed, the selection is automatically saved to `settings.json` and takes effect immediately.
+
 #### `debugLogEnabled` — Debug Log
 
 Set to `true` to enable detailed debug logging (default `false`), useful for troubleshooting API calls and tool execution.
