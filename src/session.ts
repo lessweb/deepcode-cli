@@ -2428,13 +2428,22 @@ ${skillMd}
       return;
     }
 
-    // Find the last assistant message body for the BODY env variable.
+    // Find the latest user question and assistant answer for the desktop tip.
+    let question: string | undefined;
     let body: string | undefined;
     const messages = this.listSessionMessages(sessionId);
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i];
-      if (msg && msg.role === "user" && msg.content) {
+      if (!msg) {
+        continue;
+      }
+      if (!question && msg.role === "user" && msg.content?.trim()) {
+        question = msg.content;
+      }
+      if (!body && msg.role === "assistant" && msg.content?.trim()) {
         body = msg.content;
+      }
+      if (question && body) {
         break;
       }
     }
@@ -2442,6 +2451,7 @@ ${skillMd}
     const context = {
       status: session.status,
       failReason: session.failReason ?? undefined,
+      question,
       body,
       title: session.summary ?? undefined,
     };

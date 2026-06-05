@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptions } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
 
@@ -21,6 +22,7 @@ export function formatDurationSeconds(durationMs: number): string {
 export type NotifyContext = {
   status?: string;
   failReason?: string;
+  question?: string;
   body?: string;
   title?: string;
 };
@@ -36,6 +38,7 @@ export function buildNotifyEnv(
   };
   delete env.STATUS;
   delete env.FAIL_REASON;
+  delete env.QUESTION;
   delete env.BODY;
   delete env.TITLE;
 
@@ -44,6 +47,9 @@ export function buildNotifyEnv(
   }
   if (context.failReason) {
     env.FAIL_REASON = context.failReason;
+  }
+  if (context.question) {
+    env.QUESTION = context.question;
   }
   if (context.body) {
     env.BODY = context.body;
@@ -109,14 +115,36 @@ export function resolveBuiltinNotifyPath(): string | null {
     return null;
   }
   try {
-    const root =
+    const moduleDir =
       typeof __dirname !== "undefined"
-        ? path.resolve(__dirname, "..")
-        : path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-    return path.join(root, "templates", "tools", "deepcode-notify.ps1");
+        ? path.resolve(__dirname)
+        : path.resolve(path.dirname(fileURLToPath(import.meta.url)));
+    const candidates = [
+      path.resolve(moduleDir, "..", "templates", "tools", "deepcode-notify.ps1"),
+      path.resolve(moduleDir, "..", "..", "templates", "tools", "deepcode-notify.ps1"),
+    ];
+    return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
   } catch {
     return null;
   }
+}
+
+function getBuiltinNotifyEnv(
+  durationMs: number,
+  configuredEnv: Record<string, string>,
+  context: NotifyContext,
+  workingDirectory?: string
+): NodeJS.ProcessEnv {
+  const env = buildNotifyEnv(durationMs, { ...process.env, ...configuredEnv }, context);
+  env.DEEPCODE_NOTIFY_PROCESS_PID ??= String(process.pid);
+  env.DEEPCODE_NOTIFY_PARENT_PID ??= String(process.ppid);
+
+  const debugEnabled = env.DEEPCODE_NOTIFY_DEBUG === "1" || env.DEEPCODE_NOTIFY_DEBUG === "true";
+  if (debugEnabled && !env.DEEPCODE_NOTIFY_DEBUG_LOG) {
+    env.DEEPCODE_NOTIFY_DEBUG_LOG = path.join(workingDirectory ?? process.cwd(), ".deepcode", "notify.log");
+  }
+
+  return env;
 }
 
 /**
@@ -142,7 +170,7 @@ export function launchBuiltinNotify(
   const options = {
     cwd: workingDirectory,
     detached: false,
-    env: buildNotifyEnv(durationMs, { ...process.env, ...configuredEnv }, context),
+    env: getBuiltinNotifyEnv(durationMs, configuredEnv, context, workingDirectory),
     stdio: "ignore" as const,
   };
 

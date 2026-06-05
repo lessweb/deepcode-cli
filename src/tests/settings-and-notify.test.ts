@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import {
   buildNotifyEnv,
   formatDurationSeconds,
+  launchBuiltinNotify,
   launchNotifyScript,
+  resolveBuiltinNotifyPath,
   type NotifyContext,
   type NotifySpawn,
 } from "../common/notify";
@@ -433,14 +435,16 @@ test("buildNotifyEnv injects DURATION without context", () => {
   assert.equal(env.DURATION, "2");
   assert.equal(env.STATUS, undefined);
   assert.equal(env.FAIL_REASON, undefined);
+  assert.equal(env.QUESTION, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
 });
 
-test("buildNotifyEnv injects STATUS, FAIL_REASON, BODY, and TITLE from context", () => {
+test("buildNotifyEnv injects STATUS, FAIL_REASON, QUESTION, BODY, and TITLE from context", () => {
   const context: NotifyContext = {
     status: "failed",
     failReason: "API key not found",
+    question: "Can you fix the login bug?",
     body: "Hello, this is the last assistant message.",
     title: "Fix login bug",
   };
@@ -449,6 +453,7 @@ test("buildNotifyEnv injects STATUS, FAIL_REASON, BODY, and TITLE from context",
   assert.equal(env.DURATION, "5");
   assert.equal(env.STATUS, "failed");
   assert.equal(env.FAIL_REASON, "API key not found");
+  assert.equal(env.QUESTION, "Can you fix the login bug?");
   assert.equal(env.BODY, "Hello, this is the last assistant message.");
   assert.equal(env.TITLE, "Fix login bug");
 });
@@ -460,6 +465,7 @@ test("buildNotifyEnv omits optional context fields when not provided", () => {
       HOME: "/tmp/home",
       STATUS: "stale-status",
       FAIL_REASON: "stale-failure",
+      QUESTION: "stale-question",
       BODY: "stale-body",
       TITLE: "stale-title",
     },
@@ -467,6 +473,7 @@ test("buildNotifyEnv omits optional context fields when not provided", () => {
   );
   assert.equal(env.STATUS, "completed");
   assert.equal(env.FAIL_REASON, undefined);
+  assert.equal(env.QUESTION, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
 });
@@ -478,22 +485,26 @@ test("buildNotifyEnv ignores empty strings in context", () => {
     {
       status: "",
       failReason: "",
+      question: "",
       body: "",
       title: "",
     }
   );
   assert.equal(env.STATUS, undefined);
   assert.equal(env.FAIL_REASON, undefined);
+  assert.equal(env.QUESTION, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
 });
 
-test("buildNotifyEnv preserves special characters in body and title", () => {
+test("buildNotifyEnv preserves special characters in question, body, and title", () => {
   const context: NotifyContext = {
+    question: "Question?\nWith tabs\tand quotes",
     body: 'Line 1\nLine 2\tindented "quoted"',
     title: "Fix: login & signup (urgent)",
   };
   const env = buildNotifyEnv(1000, {}, context);
+  assert.equal(env.QUESTION, "Question?\nWith tabs\tand quotes");
   assert.equal(env.BODY, 'Line 1\nLine 2\tindented "quoted"');
   assert.equal(env.TITLE, "Fix: login & signup (urgent)");
 });
@@ -526,6 +537,7 @@ test(
 
     const context: NotifyContext = {
       status: "completed",
+      question: "Can you finish the task?",
       body: "Task finished successfully.",
       title: "Fix login bug",
     };
@@ -540,6 +552,7 @@ test(
     assert.equal(calls[0]?.options.env?.WEBHOOK, "configured");
     assert.equal(calls[0]?.options.env?.STATUS, "completed");
     assert.equal(calls[0]?.options.env?.FAIL_REASON, undefined);
+    assert.equal(calls[0]?.options.env?.QUESTION, "Can you finish the task?");
     assert.equal(calls[0]?.options.env?.BODY, "Task finished successfully.");
     assert.equal(calls[0]?.options.env?.TITLE, "Fix login bug");
     assert.equal(calls[1]?.command, "/bin/sh");
@@ -547,7 +560,82 @@ test(
     assert.equal(calls[1]?.options.cwd, "/tmp/project");
     assert.equal(calls[1]?.options.env?.DURATION, "2");
     assert.equal(calls[1]?.options.env?.STATUS, "completed");
+    assert.equal(calls[1]?.options.env?.QUESTION, "Can you finish the task?");
     assert.equal(calls[1]?.options.env?.BODY, "Task finished successfully.");
     assert.equal(calls[1]?.options.env?.TITLE, "Fix login bug");
+  }
+);
+
+test(
+  "resolveBuiltinNotifyPath returns the bundled Windows notification script",
+  { skip: process.platform !== "win32" },
+  () => {
+    const notifyPath = resolveBuiltinNotifyPath();
+    assert.ok(notifyPath);
+    assert.match(notifyPath.replace(/\\/g, "/"), /templates\/tools\/deepcode-notify\.ps1$/);
+  }
+);
+
+test(
+  "launchBuiltinNotify starts PowerShell with context and DeepCode process ids",
+  { skip: process.platform !== "win32" },
+  () => {
+    const calls: Array<{
+      command: string;
+      args: string[];
+      options: { cwd?: string | URL; env?: NodeJS.ProcessEnv; detached?: boolean; stdio?: unknown };
+    }> = [];
+
+    const spawnProcess: NotifySpawn = (command, args, options) => {
+      calls.push({
+        command,
+        args,
+        options: {
+          cwd: options.cwd,
+          detached: options.detached,
+          env: options.env,
+          stdio: options.stdio,
+        },
+      });
+
+      return {
+        once() {
+          return this;
+        },
+        unref() {
+          return undefined;
+        },
+      };
+    };
+
+    launchBuiltinNotify(
+      2750,
+      "C:/tmp/project",
+      spawnProcess,
+      { WEBHOOK: "configured", DEEPCODE_NOTIFY_WINDOW_HWND: "1234" },
+      {
+        status: "completed",
+        question: "Can you finish the task?",
+        body: "Task finished successfully.",
+        title: "Fix login bug",
+      }
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.command, "powershell.exe");
+    assert.deepEqual(calls[0]?.args.slice(0, 4), ["-ExecutionPolicy", "Bypass", "-NoProfile", "-File"]);
+    assert.match(calls[0]?.args[4]?.replace(/\\/g, "/") ?? "", /templates\/tools\/deepcode-notify\.ps1$/);
+    assert.equal(calls[0]?.options.cwd, "C:/tmp/project");
+    assert.equal(calls[0]?.options.detached, false);
+    assert.equal(calls[0]?.options.stdio, "ignore");
+    assert.equal(calls[0]?.options.env?.DURATION, "2");
+    assert.equal(calls[0]?.options.env?.WEBHOOK, "configured");
+    assert.equal(calls[0]?.options.env?.STATUS, "completed");
+    assert.equal(calls[0]?.options.env?.QUESTION, "Can you finish the task?");
+    assert.equal(calls[0]?.options.env?.BODY, "Task finished successfully.");
+    assert.equal(calls[0]?.options.env?.TITLE, "Fix login bug");
+    assert.equal(calls[0]?.options.env?.DEEPCODE_NOTIFY_PROCESS_PID, String(process.pid));
+    assert.equal(calls[0]?.options.env?.DEEPCODE_NOTIFY_PARENT_PID, String(process.ppid));
+    assert.equal(calls[0]?.options.env?.DEEPCODE_NOTIFY_WINDOW_HWND, "1234");
   }
 );

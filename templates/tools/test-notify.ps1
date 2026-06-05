@@ -1,107 +1,444 @@
 #Requires -Version 5.1
-$ErrorActionPreference = "Continue"
+<#
+.SYNOPSIS
+  Automated smoke test for the built-in DeepCode Windows notification script.
 
-Add-Type -MemberDefinition @'
+.DESCRIPTION
+  This verifies that deepcode-notify.ps1 can compile its Win32 declarations,
+  create Windows Forms notification dependencies, and restore a minimized
+  target window. It opens a disposable WinForms window and closes it after
+  the test.
+#>
+
+param(
+  [string]$NotifyScript = (Join-Path $PSScriptRoot "deepcode-notify.ps1"),
+  [switch]$ShowBalloonSmoke,
+  [switch]$ManualClickTest,
+  [switch]$CurrentTerminalClickTest
+)
+
+$ErrorActionPreference = "Stop"
+
+function Invoke-NotifyScriptJson {
+  param([string[]]$Arguments)
+
+  $output = & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $NotifyScript @Arguments
+  if ($LASTEXITCODE -ne 0) {
+    throw "deepcode-notify.ps1 failed with exit code $LASTEXITCODE. Output: $output"
+  }
+
+  try {
+    return ($output | Out-String | ConvertFrom-Json)
+  } catch {
+    throw "deepcode-notify.ps1 did not return valid JSON. Output: $output"
+  }
+}
+
+function Start-TestWindow {
+  $testDir = Join-Path ([System.IO.Path]::GetTempPath()) "deepcode-notify-test-$PID"
+  New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+
+  $helperPath = Join-Path $testDir "window-helper.ps1"
+  $hwndPath = Join-Path $testDir "hwnd.txt"
+
+  @'
+param([string]$HwndPath)
+
+$ErrorActionPreference = "Stop"
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+
+$form = New-Object System.Windows.Forms.Form
+$form.Text = "DeepCode Notify Test Window"
+$form.Size = New-Object System.Drawing.Size(420, 180)
+$form.StartPosition = "CenterScreen"
+$form.ShowInTaskbar = $true
+$form.TopMost = $false
+
+$label = New-Object System.Windows.Forms.Label
+$label.Text = "DeepCode notification smoke test target"
+$label.Dock = "Fill"
+$label.TextAlign = "MiddleCenter"
+$form.Controls.Add($label)
+
+$form.Add_Shown({
+  $form.Handle.ToInt64().ToString() | Out-File -FilePath $HwndPath -NoNewline -Encoding ASCII
+})
+
+[System.Windows.Forms.Application]::Run($form)
+'@ | Out-File -FilePath $helperPath -Encoding UTF8
+
+  $proc = Start-Process powershell.exe -ArgumentList @(
+    "-ExecutionPolicy", "Bypass", "-NoProfile",
+    "-File", $helperPath,
+    "-HwndPath", $hwndPath
+  ) -PassThru
+
+  $deadline = (Get-Date).AddSeconds(10)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Path -LiteralPath $hwndPath) {
+      $raw = Get-Content -LiteralPath $hwndPath -Raw
+      $hwnd = [int64]0
+      if ([int64]::TryParse($raw.Trim(), [ref]$hwnd) -and $hwnd -ne 0) {
+        return @{
+          Process = $proc
+          Hwnd = $hwnd
+          Directory = $testDir
+        }
+      }
+    }
+    Start-Sleep -Milliseconds 200
+  }
+
+  try { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } catch { }
+  Remove-Item -LiteralPath $testDir -Recurse -Force -ErrorAction SilentlyContinue
+  throw "Timed out waiting for the disposable WinForms test window."
+}
+
+function Invoke-TestMouseClick {
+  param(
+    [int]$X,
+    [int]$Y
+  )
+
+  Add-Type -TypeDefinition @'
 using System;
 using System.Runtime.InteropServices;
 
-[StructLayout(LayoutKind.Sequential)]
-public struct FLASHWINFO {
-    public uint  cbSize;
-    public IntPtr hwnd;
-    public uint  dwFlags;
-    public uint  uCount;
-    public uint  dwTimeout;
+namespace DeepCodeNotifyTest {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct POINT {
+        public int X;
+        public int Y;
+    }
+
+    public static class Mouse {
+        [DllImport("user32.dll")]
+        public static extern bool SetCursorPos(int X, int Y);
+
+        [DllImport("user32.dll")]
+        public static extern bool GetCursorPos(out POINT lpPoint);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr WindowFromPoint(POINT point);
+
+        [DllImport("user32.dll")]
+        public static extern IntPtr GetAncestor(IntPtr hwnd, uint gaFlags);
+
+        [DllImport("user32.dll")]
+        public static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, UIntPtr dwExtraInfo);
+    }
+}
+'@ -ErrorAction SilentlyContinue
+
+  $moved = [DeepCodeNotifyTest.Mouse]::SetCursorPos($X, $Y)
+  Start-Sleep -Milliseconds 80
+  $point = New-Object DeepCodeNotifyTest.POINT
+  [DeepCodeNotifyTest.Mouse]::GetCursorPos([ref]$point) | Out-Null
+  $hit = [DeepCodeNotifyTest.Mouse]::WindowFromPoint($point)
+  $root = [DeepCodeNotifyTest.Mouse]::GetAncestor($hit, 2)
+  Write-Host "   Mouse moved=$moved cursor=($($point.X),$($point.Y)) hitHwnd=$($hit.ToInt64()) rootHwnd=$($root.ToInt64())"
+  [DeepCodeNotifyTest.Mouse]::mouse_event(0x0002, 0, 0, 0, [UIntPtr]::Zero)
+  Start-Sleep -Milliseconds 40
+  [DeepCodeNotifyTest.Mouse]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)
+  Write-Host "   mouse_event click sent"
+  Start-Sleep -Milliseconds 350
 }
 
-public static class DeepCodeTest {
-    [DllImport("kernel32.dll")] public static extern IntPtr GetConsoleWindow();
-    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
-    [DllImport("user32.dll")] public static extern bool FlashWindowEx(ref FLASHWINFO pwfi);
+function Get-TestWindowCenter {
+  param([int64]$Hwnd)
 
-    public static void RestoreWindow(IntPtr hwnd) {
-        ShowWindow(hwnd, 9);
-        System.Threading.Thread.Sleep(200);
-        if (IsIconic(hwnd)) {
-            ShowWindow(hwnd, 1);
-            System.Threading.Thread.Sleep(200);
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace DeepCodeNotifyTest {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    public static class WindowRect {
+        [DllImport("user32.dll")]
+        public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+    }
+}
+'@ -ErrorAction SilentlyContinue
+
+  $rect = New-Object DeepCodeNotifyTest.RECT
+  $ok = [DeepCodeNotifyTest.WindowRect]::GetWindowRect([IntPtr]::new($Hwnd), [ref]$rect)
+  if (-not $ok) {
+    throw "GetWindowRect failed for HWND $Hwnd"
+  }
+
+  return @{
+    X = [int](($rect.Left + $rect.Right) / 2)
+    Y = [int](($rect.Top + $rect.Bottom) / 2)
+  }
+}
+
+function Get-ForegroundWindowHwnd {
+  Add-Type -MemberDefinition @'
+[DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+'@ -Name Foreground -Namespace DeepCodeNotifyTest -ErrorAction SilentlyContinue
+
+  return [DeepCodeNotifyTest.Foreground]::GetForegroundWindow().ToInt64()
+}
+
+function Wait-JsonFile {
+  param(
+    [string]$Path,
+    [int]$TimeoutSeconds = 10
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if (Test-Path -LiteralPath $Path) {
+      try {
+        $raw = Get-Content -LiteralPath $Path -Raw
+        if (-not [string]::IsNullOrWhiteSpace($raw)) {
+          $json = $raw | ConvertFrom-Json
+          if ($json) {
+            return $json
+          }
         }
+      } catch { }
     }
+    Start-Sleep -Milliseconds 100
+  }
 
-    public static void FlashTaskbar(IntPtr hwnd) {
-        FLASHWINFO info = new FLASHWINFO();
-        info.cbSize    = (uint)Marshal.SizeOf(typeof(FLASHWINFO));
-        info.hwnd      = hwnd;
-        info.dwFlags   = 0x03 | 0x0C;  // FLASHW_ALL | FLASHW_TIMERNOFG
-        FlashWindowEx(ref info);
-    }
-}
-'@
-
-Write-Host "=== DeepCode Notify Test ===" -ForegroundColor Cyan
-
-$hwnd = [DeepCodeTest]::GetConsoleWindow()
-Write-Host "1. Console HWND: $hwnd"
-
-if ($hwnd -eq [IntPtr]::Zero) {
-    Write-Host "   ERROR: Must run from cmd.exe (not Git Bash)" -ForegroundColor Red
-    exit 1
+  throw "Timed out waiting for JSON file: $Path"
 }
 
-Write-Host "2. Current: iconic=$([DeepCodeTest]::IsIconic($hwnd)) foreground=$(([DeepCodeTest]::GetForegroundWindow() -eq $hwnd))"
+function Wait-ProcessExit {
+  param(
+    [System.Diagnostics.Process]$Process,
+    [int]$TimeoutSeconds = 10
+  )
 
-# Minimize & auto-restore test
-Write-Host "3. Minimizing in 2s..."
-Start-Sleep 2
-[DeepCodeTest]::ShowWindow($hwnd, 6) | Out-Null
-Start-Sleep 1
-Write-Host "   Minimized: iconic=$([DeepCodeTest]::IsIconic($hwnd))"
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  while ((Get-Date) -lt $deadline) {
+    if ($Process.HasExited) {
+      return
+    }
+    Start-Sleep -Milliseconds 100
+  }
 
-Write-Host "4. Restoring in 1s..."
-Start-Sleep 1
-[DeepCodeTest]::RestoreWindow($hwnd)
-Write-Host "   After restore: iconic=$([DeepCodeTest]::IsIconic($hwnd))"
-Write-Host "   RESULT: $(if (-not [DeepCodeTest]::IsIconic($hwnd)){'RESTORED'}else{'STILL MINIMIZED'})"
+  try { Stop-Process -Id $Process.Id -Force -ErrorAction SilentlyContinue } catch { }
+  throw "Timed out waiting for process $($Process.Id) to exit."
+}
 
-# BalloonTip click → taskbar flash test
-Write-Host ""
-Write-Host "5. BalloonTip test: click notification, then look for FLASHING taskbar icon for THIS window"
-Add-Type -AssemblyName System.Windows.Forms
+Write-Host "=== DeepCode Notify Automated Smoke Test ===" -ForegroundColor Cyan
+Write-Host "Script: $NotifyScript"
 
-$notify = New-Object System.Windows.Forms.NotifyIcon
-$notify.Icon = [System.Drawing.SystemIcons]::Information
-$notify.BalloonTipTitle = "Test - Click Me"
-$notify.BalloonTipText = "Click to flash this window's taskbar icon.`nLook for the orange flashing button!"
-$notify.Visible = $true
+if (-not (Test-Path -LiteralPath $NotifyScript)) {
+  throw "Notify script not found: $NotifyScript"
+}
 
-$clickSub = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClicked
-$dismissSub = Register-ObjectEvent -InputObject $notify -EventName BalloonTipClosed
-$notify.ShowBalloonTip(15000)
+Write-Host "1. Validating script dependencies..."
+$validate = Invoke-NotifyScriptJson @("-ValidateOnly")
+if (-not $validate.ok) {
+  throw "ValidateOnly failed: $($validate | ConvertTo-Json -Compress)"
+}
+Write-Host "   PASS: Add-Type and Windows Forms dependencies loaded"
 
-Write-Host "   BalloonTip shown (15s timeout)..."
+if ($CurrentTerminalClickTest) {
+  Write-Host "2. Current terminal click test: click the DeepCode desktop tip within 45 seconds..."
+  $testDir = Join-Path ([System.IO.Path]::GetTempPath()) "deepcode-notify-current-terminal-$PID"
+  New-Item -ItemType Directory -Path $testDir -Force | Out-Null
+  $debugLog = Join-Path $testDir "notify-current-terminal.log"
+  $resultPath = Join-Path $testDir "notify-current-terminal.json"
+
+  try {
+    $foregroundHwnd = Get-ForegroundWindowHwnd
+    $env:STATUS = "completed"
+    $env:TITLE = "DeepCode Current Terminal Test"
+    $env:QUESTION = "Current terminal click test"
+    $env:BODY = "Click this tip to focus the terminal that launched the test"
+    $env:DURATION = "1"
+    $env:DEEPCODE_NOTIFY_WINDOW_HWND = "$foregroundHwnd"
+    $env:DEEPCODE_NOTIFY_PARENT_PID = "$PID"
+    $env:DEEPCODE_NOTIFY_PROCESS_PID = "$PID"
+    $env:DEEPCODE_NOTIFY_DEBUG = "1"
+    $env:DEEPCODE_NOTIFY_DEBUG_LOG = $debugLog
+
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $NotifyScript `
+      -TimeoutSeconds 45 `
+      -ResultPath $resultPath
+
+    if ($LASTEXITCODE -ne 0) {
+      throw "Current terminal click test failed with exit code $LASTEXITCODE"
+    }
+
+    $result = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+    Write-Host "   Captured foreground HWND: $foregroundHwnd"
+    Write-Host "   Result: clicked=$($result.clicked) activated=$($result.activated) finalForeground=$($result.finalForeground) targetHwnd=$($result.targetHwnd)"
+    Write-Host "   Debug log:"
+    if (Test-Path -LiteralPath $debugLog) {
+      Get-Content -LiteralPath $debugLog | ForEach-Object { Write-Host "   $_" }
+    } else {
+      Write-Host "   <no debug log was written>"
+    }
+
+    if (-not $result.ok) {
+      throw "Current terminal click test did not focus the resolved terminal window."
+    }
+
+    Write-Host ""
+    Write-Host "RESULT: PASS" -ForegroundColor Green
+    exit 0
+  } finally {
+    Remove-Item -LiteralPath $testDir -Recurse -Force -ErrorAction SilentlyContinue
+  }
+}
+
+Write-Host "2. Validating current terminal PID resolution..."
+$previousNotifyWindowHwnd = $env:DEEPCODE_NOTIFY_WINDOW_HWND
+$previousNotifyParentPid = $env:DEEPCODE_NOTIFY_PARENT_PID
+$previousNotifyProcessPid = $env:DEEPCODE_NOTIFY_PROCESS_PID
 try {
-    $remaining = 20
-    while ($remaining -gt 0) {
-        $event = Wait-Event -Timeout $remaining
-        if (-not $event) { Write-Host "   Timeout."; break }
-        if ($event.SourceIdentifier -eq $clickSub.Name) {
-            Write-Host "   CLICKED! Restoring + flashing taskbar..."
-            [DeepCodeTest]::RestoreWindow($hwnd)
-            [DeepCodeTest]::FlashTaskbar($hwnd)
-            Write-Host "   Window should now be visible. Look for the flashing taskbar icon!" -ForegroundColor Green
-            Write-Host "   (Click the taskbar icon to stop flashing)"
-            break
-        }
-        if ($event.SourceIdentifier -eq $dismissSub.Name) { Write-Host "   Dismissed."; break }
-        Remove-Event -EventIdentifier $event.EventIdentifier
-        $remaining -= 1
-    }
+  Remove-Item Env:\DEEPCODE_NOTIFY_WINDOW_HWND -ErrorAction SilentlyContinue
+  $env:DEEPCODE_NOTIFY_PARENT_PID = "$PID"
+  $env:DEEPCODE_NOTIFY_PROCESS_PID = "$PID"
+  $pidResolve = Invoke-NotifyScriptJson @("-ValidateOnly")
+  if (-not $pidResolve.ok -or -not $pidResolve.hasTargetWindow -or [int64]$pidResolve.targetHwnd -eq 0) {
+    throw "Current terminal PID resolution failed: $($pidResolve | ConvertTo-Json -Compress)"
+  }
+  Write-Host "   PASS: targetHwnd=$($pidResolve.targetHwnd)"
 } finally {
-    Get-EventSubscriber | Unregister-Event -Force -ErrorAction SilentlyContinue
-    try { $notify.Dispose() } catch { }
+  if ($null -eq $previousNotifyWindowHwnd) {
+    Remove-Item Env:\DEEPCODE_NOTIFY_WINDOW_HWND -ErrorAction SilentlyContinue
+  } else {
+    $env:DEEPCODE_NOTIFY_WINDOW_HWND = $previousNotifyWindowHwnd
+  }
+  if ($null -eq $previousNotifyParentPid) {
+    Remove-Item Env:\DEEPCODE_NOTIFY_PARENT_PID -ErrorAction SilentlyContinue
+  } else {
+    $env:DEEPCODE_NOTIFY_PARENT_PID = $previousNotifyParentPid
+  }
+  if ($null -eq $previousNotifyProcessPid) {
+    Remove-Item Env:\DEEPCODE_NOTIFY_PROCESS_PID -ErrorAction SilentlyContinue
+  } else {
+    $env:DEEPCODE_NOTIFY_PROCESS_PID = $previousNotifyProcessPid
+  }
+}
+
+Write-Host "3. Opening disposable WinForms target..."
+$target = Start-TestWindow
+$targetHwnd = $target.Hwnd
+Write-Host "   Target HWND: $targetHwnd"
+
+try {
+  Write-Host "4. Testing minimized-window restore and taskbar flash..."
+  $selfTest = Invoke-NotifyScriptJson @("-SelfTest", "-TestWindowHwnd", "$targetHwnd")
+  if (-not $selfTest.ok) {
+    throw "SelfTest failed: $($selfTest | ConvertTo-Json -Compress)"
+  }
+
+  Write-Host "   PASS: minimized=$($selfTest.minimized) restored=$($selfTest.restored) flashed=$($selfTest.flashed) foreground=$($selfTest.foreground)"
+
+  Write-Host "5. Testing desktop tip click path with automatic click..."
+  $autoClickResultPath = Join-Path $target.Directory "toast-auto-click.json"
+  $autoClickReadyPath = Join-Path $target.Directory "toast-auto-click-ready.json"
+  $autoClickDebugLog = Join-Path $target.Directory "toast-auto-click.log"
+  $env:STATUS = "completed"
+  $env:TITLE = "DeepCode Notify Auto Click"
+  $env:QUESTION = "Automated click path test question"
+  $env:BODY = "Automated click path test"
+  $env:DURATION = "1"
+  $env:DEEPCODE_NOTIFY_WINDOW_HWND = "$targetHwnd"
+  $env:DEEPCODE_NOTIFY_DEBUG = "1"
+  $env:DEEPCODE_NOTIFY_DEBUG_LOG = $autoClickDebugLog
+
+  $notifyProc = Start-Process powershell.exe -ArgumentList @(
+    "-ExecutionPolicy", "Bypass", "-NoProfile",
+    "-File", $NotifyScript,
+    "-TimeoutSeconds", "8",
+    "-ReadyPath", $autoClickReadyPath,
+    "-ResultPath", $autoClickResultPath
+  ) -PassThru
+
+  $ready = Wait-JsonFile -Path $autoClickReadyPath -TimeoutSeconds 5
+  Write-Host "   Ready: hwnd=$($ready.hwnd) left=$($ready.left) top=$($ready.top) width=$($ready.width) height=$($ready.height) centerX=$($ready.centerX) centerY=$($ready.centerY)"
+  if ([int64]$ready.hwnd -ne 0) {
+    $center = Get-TestWindowCenter -Hwnd ([int64]$ready.hwnd)
+    Write-Host "   HWND center: x=$($center.X) y=$($center.Y)"
+  } elseif ([int]$ready.centerX -ne 0 -and [int]$ready.centerY -ne 0) {
+    $center = @{
+      X = [int]$ready.centerX
+      Y = [int]$ready.centerY
+    }
+  } else {
+    throw "Desktop tip ready data did not include a usable HWND or center point: $($ready | ConvertTo-Json -Compress)"
+  }
+  Write-Host "   Clicking tip center: x=$($center.X) y=$($center.Y)"
+  Invoke-TestMouseClick -X $center.X -Y $center.Y
+  Wait-ProcessExit -Process $notifyProc -TimeoutSeconds 10
+
+  if ($notifyProc.ExitCode -ne 0) {
+    throw "Desktop tip click failed with exit code $($notifyProc.ExitCode)"
+  }
+
+  $autoClick = Get-Content -LiteralPath $autoClickResultPath -Raw | ConvertFrom-Json
+  if (-not $autoClick.ok) {
+    if (Test-Path -LiteralPath $autoClickDebugLog) {
+      Write-Host "   Debug log:"
+      Get-Content -LiteralPath $autoClickDebugLog | ForEach-Object { Write-Host "   $_" }
+    }
+    throw "Desktop tip auto-click did not pass: $($autoClick | ConvertTo-Json -Compress)"
+  }
+  Write-Host "   PASS: clicked=$($autoClick.clicked) activated=$($autoClick.activated) finalForeground=$($autoClick.finalForeground) flashed=$($autoClick.flashed)"
+
+  if ($ShowBalloonSmoke) {
+    Write-Host "6. Showing a one-second desktop tip smoke test..."
+    $env:STATUS = "completed"
+    $env:TITLE = "DeepCode Notify Smoke"
+    $env:QUESTION = "Smoke test question"
+    $env:BODY = "Automated smoke test"
+    $env:DURATION = "1"
+    $env:DEEPCODE_NOTIFY_WINDOW_HWND = "$targetHwnd"
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $NotifyScript -TimeoutSeconds 1
+    if ($LASTEXITCODE -ne 0) {
+      throw "BalloonTip smoke failed with exit code $LASTEXITCODE"
+    }
+    Write-Host "   PASS: desktop tip path exited successfully"
+  }
+
+  if ($ManualClickTest) {
+    Write-Host "7. Manual click test: click the DeepCode desktop tip within 45 seconds..."
+    $debugLog = Join-Path $target.Directory "notify-click.log"
+    $env:STATUS = "completed"
+    $env:TITLE = "DeepCode Manual Click Test"
+    $env:QUESTION = "Manual click test question"
+    $env:BODY = "Click this notification to focus the test window"
+    $env:DURATION = "1"
+    $env:DEEPCODE_NOTIFY_WINDOW_HWND = "$targetHwnd"
+    $env:DEEPCODE_NOTIFY_DEBUG = "1"
+    $env:DEEPCODE_NOTIFY_DEBUG_LOG = $debugLog
+
+    & powershell.exe -ExecutionPolicy Bypass -NoProfile -File $NotifyScript -TimeoutSeconds 45
+    if ($LASTEXITCODE -ne 0) {
+      throw "Manual click test failed with exit code $LASTEXITCODE"
+    }
+
+    Write-Host "   Debug log:"
+    if (Test-Path -LiteralPath $debugLog) {
+      Get-Content -LiteralPath $debugLog | ForEach-Object { Write-Host "   $_" }
+    } else {
+      Write-Host "   <no debug log was written>"
+    }
+  }
+} finally {
+  if ($target) {
+    try {
+      Get-Process -Id $target.Process.Id -ErrorAction SilentlyContinue | Stop-Process -Force
+    } catch { }
+    Remove-Item -LiteralPath $target.Directory -Recurse -Force -ErrorAction SilentlyContinue
+  }
 }
 
 Write-Host ""
-Write-Host "Test complete."
+Write-Host "RESULT: PASS" -ForegroundColor Green

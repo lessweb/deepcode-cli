@@ -6,6 +6,8 @@
 
 在 `settings.json` 中配置 `notify` 字段，指向一个可执行脚本的完整路径。每次 AI 助手完成任务应答后，Deep Code 会执行该脚本，并通过环境变量注入上下文信息。
 
+在 Windows 上，如果未配置 `notify`，Deep Code 会使用内置桌面提示；点击提示会尝试聚焦启动 CLI 的终端窗口。配置自定义 `notify` 后，会优先执行你的脚本。
+
 ## 注入的环境变量
 
 | 环境变量 | 说明 |
@@ -13,6 +15,7 @@
 | `DURATION` | 会话耗时，单位秒（整数） |
 | `STATUS` | 会话状态：`"completed"` 或 `"failed"` |
 | `FAIL_REASON` | 失败原因（仅失败时设置） |
+| `QUESTION` | 最后一条用户问题的文本内容 |
 | `BODY` | 最后一条 AI 助手回复的文本内容 |
 | `TITLE` | 会话标题（对应 resume 列表中的标题） |
 
