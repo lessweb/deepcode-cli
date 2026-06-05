@@ -5,7 +5,7 @@ import * as crypto from "crypto";
 import matter from "gray-matter";
 import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
-import { launchBuiltinNotify, launchNotifyScript } from "./common/notify";
+import { captureForegroundWindowHwnd, launchBuiltinNotify, launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
 import { DEEPSEEK_V4_MODELS } from "./common/model-capabilities";
 import { readTextFileWithMetadata } from "./common/file-utils";
@@ -1199,6 +1199,8 @@ ${skillMd}
     const startedAt = Date.now();
     const { client, model, baseURL, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, env } =
       this.createOpenAIClient();
+    const builtinNotifyWindowHwnd = process.platform === "win32" && !notify ? captureForegroundWindowHwnd() : undefined;
+    const notifyEnv = builtinNotifyWindowHwnd ? { ...env, DEEPCODE_NOTIFY_WINDOW_HWND: builtinNotifyWindowHwnd } : env;
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
 
@@ -1217,7 +1219,7 @@ ${skillMd}
         ),
         false
       );
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, notifyEnv);
       return;
     }
 
@@ -1229,7 +1231,7 @@ ${skillMd}
         failReason: "interrupted",
         updateTime: now,
       }));
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, notifyEnv);
       return;
     }
 
@@ -1434,7 +1436,7 @@ ${skillMd}
       if (this.sessionControllers.get(sessionId) === sessionController) {
         this.sessionControllers.delete(sessionId);
       }
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, notifyEnv);
     }
   }
 

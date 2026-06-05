@@ -188,6 +188,29 @@ function Get-ForegroundWindowHwnd {
   return [DeepCodeNotifyTest.Foreground]::GetForegroundWindow().ToInt64()
 }
 
+function Set-TestWindowMinimized {
+  param([int64]$Hwnd)
+
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+
+namespace DeepCodeNotifyTest {
+    public static class WindowState {
+        [DllImport("user32.dll")]
+        public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        [DllImport("user32.dll")]
+        public static extern bool IsIconic(IntPtr hWnd);
+    }
+}
+'@ -ErrorAction SilentlyContinue
+
+  [DeepCodeNotifyTest.WindowState]::ShowWindow([IntPtr]::new($Hwnd), 6) | Out-Null
+  Start-Sleep -Milliseconds 300
+  return [DeepCodeNotifyTest.WindowState]::IsIconic([IntPtr]::new($Hwnd))
+}
+
 function Wait-JsonFile {
   param(
     [string]$Path,
@@ -392,8 +415,57 @@ try {
   }
   Write-Host "   PASS: clicked=$($autoClick.clicked) activated=$($autoClick.activated) finalForeground=$($autoClick.finalForeground) flashed=$($autoClick.flashed)"
 
+  Write-Host "6. Testing desktop tip click path while target is minimized..."
+  $minimizedClickResultPath = Join-Path $target.Directory "toast-minimized-click.json"
+  $minimizedClickReadyPath = Join-Path $target.Directory "toast-minimized-click-ready.json"
+  $minimizedClickDebugLog = Join-Path $target.Directory "toast-minimized-click.log"
+  $targetMinimized = Set-TestWindowMinimized -Hwnd $targetHwnd
+  if (-not $targetMinimized) {
+    throw "Failed to minimize target window before click test."
+  }
+
+  $env:STATUS = "completed"
+  $env:TITLE = "DeepCode Notify Minimized Click"
+  $env:QUESTION = "Minimized click path test question"
+  $env:BODY = "Click should restore and focus the minimized target"
+  $env:DURATION = "1"
+  $env:DEEPCODE_NOTIFY_WINDOW_HWND = "$targetHwnd"
+  $env:DEEPCODE_NOTIFY_DEBUG = "1"
+  $env:DEEPCODE_NOTIFY_DEBUG_LOG = $minimizedClickDebugLog
+
+  $minimizedNotifyProc = Start-Process powershell.exe -ArgumentList @(
+    "-ExecutionPolicy", "Bypass", "-NoProfile",
+    "-File", $NotifyScript,
+    "-TimeoutSeconds", "8",
+    "-ReadyPath", $minimizedClickReadyPath,
+    "-ResultPath", $minimizedClickResultPath
+  ) -PassThru
+
+  $minimizedReady = Wait-JsonFile -Path $minimizedClickReadyPath -TimeoutSeconds 5
+  if ([int64]$minimizedReady.hwnd -eq 0) {
+    throw "Minimized-target tip ready data did not include a usable HWND: $($minimizedReady | ConvertTo-Json -Compress)"
+  }
+  $minimizedCenter = Get-TestWindowCenter -Hwnd ([int64]$minimizedReady.hwnd)
+  Write-Host "   Clicking minimized-target tip center: x=$($minimizedCenter.X) y=$($minimizedCenter.Y)"
+  Invoke-TestMouseClick -X $minimizedCenter.X -Y $minimizedCenter.Y
+  Wait-ProcessExit -Process $minimizedNotifyProc -TimeoutSeconds 10
+
+  if ($minimizedNotifyProc.ExitCode -ne 0) {
+    throw "Minimized target click failed with exit code $($minimizedNotifyProc.ExitCode)"
+  }
+
+  $minimizedClick = Get-Content -LiteralPath $minimizedClickResultPath -Raw | ConvertFrom-Json
+  if (-not $minimizedClick.ok) {
+    if (Test-Path -LiteralPath $minimizedClickDebugLog) {
+      Write-Host "   Debug log:"
+      Get-Content -LiteralPath $minimizedClickDebugLog | ForEach-Object { Write-Host "   $_" }
+    }
+    throw "Desktop tip minimized-target click did not pass: $($minimizedClick | ConvertTo-Json -Compress)"
+  }
+  Write-Host "   PASS: clicked=$($minimizedClick.clicked) activated=$($minimizedClick.activated) finalForeground=$($minimizedClick.finalForeground) flashed=$($minimizedClick.flashed)"
+
   if ($ShowBalloonSmoke) {
-    Write-Host "6. Showing a one-second desktop tip smoke test..."
+    Write-Host "7. Showing a one-second desktop tip smoke test..."
     $env:STATUS = "completed"
     $env:TITLE = "DeepCode Notify Smoke"
     $env:QUESTION = "Smoke test question"
@@ -408,7 +480,7 @@ try {
   }
 
   if ($ManualClickTest) {
-    Write-Host "7. Manual click test: click the DeepCode desktop tip within 45 seconds..."
+    Write-Host "8. Manual click test: click the DeepCode desktop tip within 45 seconds..."
     $debugLog = Join-Path $target.Directory "notify-click.log"
     $env:STATUS = "completed"
     $env:TITLE = "DeepCode Manual Click Test"

@@ -644,6 +644,68 @@ namespace DC {
     return $path
   }
 
+  function Invoke-ToastShownSound {
+    if ($ResultPath) { return }
+
+    try {
+      [System.Media.SystemSounds]::Asterisk.Play()
+    } catch {
+      Write-NotifyDebug "toast sound failed: $($_.Exception.Message)"
+    }
+  }
+
+  function Set-ToastVisualScale {
+    param(
+      [System.Windows.Forms.Form]$ToastForm,
+      [int]$BaseLeft,
+      [int]$BaseTop,
+      [int]$BaseWidth,
+      [int]$BaseHeight,
+      [double]$Scale,
+      [double]$Opacity
+    )
+
+    try {
+      $width = [Math]::Max(1, [int][Math]::Round($BaseWidth * $Scale))
+      $height = [Math]::Max(1, [int][Math]::Round($BaseHeight * $Scale))
+      $left = $BaseLeft + [int][Math]::Round(($BaseWidth - $width) / 2)
+      $top = $BaseTop + [int][Math]::Round(($BaseHeight - $height) / 2)
+
+      $ToastForm.SetBounds($left, $top, $width, $height)
+      $ToastForm.Opacity = [Math]::Min(1, [Math]::Max(0, $Opacity))
+
+      $path = New-RoundedRectanglePath (New-Object System.Drawing.Rectangle(0, 0, $ToastForm.Width, $ToastForm.Height)) 10
+      $oldRegion = $ToastForm.Region
+      $ToastForm.Region = New-Object System.Drawing.Region($path)
+      if ($oldRegion) { $oldRegion.Dispose() }
+      $path.Dispose()
+
+      $ToastForm.Refresh()
+      [System.Windows.Forms.Application]::DoEvents()
+    } catch {
+      Write-NotifyDebug "toast animation frame failed: $($_.Exception.Message)"
+    }
+  }
+
+  function Invoke-ToastClickAnimation {
+    param([System.Windows.Forms.Form]$ToastForm)
+
+    $baseLeft = $ToastForm.Left
+    $baseTop = $ToastForm.Top
+    $baseWidth = $ToastForm.Width
+    $baseHeight = $ToastForm.Height
+
+    foreach ($frame in @(
+      @{ Scale = 0.96; Opacity = 0.96; Delay = 35 },
+      @{ Scale = 1.02; Opacity = 1.0; Delay = 45 },
+      @{ Scale = 0.94; Opacity = 0.65; Delay = 35 },
+      @{ Scale = 0.90; Opacity = 0.15; Delay = 25 }
+    )) {
+      Set-ToastVisualScale $ToastForm $baseLeft $baseTop $baseWidth $baseHeight $frame.Scale $frame.Opacity
+      Start-Sleep -Milliseconds $frame.Delay
+    }
+  }
+
   $Status = $env:STATUS
   $Title = $env:TITLE
   $Question = $env:QUESTION
@@ -874,6 +936,7 @@ namespace DC {
     }
 
     try {
+      Invoke-ToastClickAnimation $form
       $form.Hide()
       [System.Windows.Forms.Application]::DoEvents()
     } catch { }
@@ -908,6 +971,7 @@ namespace DC {
 
   $form.Add_Shown({
     Write-NotifyDebug "toast shown timeoutSeconds=$TimeoutSeconds title='$titleText'"
+    Invoke-ToastShownSound
     if ($ReadyPath) {
       try {
         $readyDir = Split-Path -Parent $ReadyPath

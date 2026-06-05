@@ -1,4 +1,4 @@
-import { spawn, type SpawnOptions } from "child_process";
+import { spawn, spawnSync, type SpawnOptions } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";
@@ -126,6 +126,41 @@ export function resolveBuiltinNotifyPath(): string | null {
     return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
   } catch {
     return null;
+  }
+}
+
+export function captureForegroundWindowHwnd(): string | undefined {
+  if (process.platform !== "win32") {
+    return undefined;
+  }
+
+  const script = [
+    "$code = @'",
+    "using System;",
+    "using System.Runtime.InteropServices;",
+    "public static class DCForeground {",
+    '  [DllImport("user32.dll")]',
+    "  public static extern IntPtr GetForegroundWindow();",
+    "}",
+    "'@",
+    "Add-Type -TypeDefinition $code",
+    "[DCForeground]::GetForegroundWindow().ToInt64()",
+  ].join("\n");
+
+  try {
+    const result = spawnSync("powershell.exe", ["-ExecutionPolicy", "Bypass", "-NoProfile", "-Command", script], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 700,
+      windowsHide: true,
+    });
+    if (result.status !== 0) {
+      return undefined;
+    }
+    const hwnd = result.stdout.trim();
+    return /^[1-9]\d*$/.test(hwnd) ? hwnd : undefined;
+  } catch {
+    return undefined;
   }
 }
 
