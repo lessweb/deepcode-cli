@@ -49,6 +49,10 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `REASONING_EFFORT`| string | Reasoning intensity                                             |
 | `DEBUG_LOG_ENABLED`| string| Enable debug log output                                         |
 | `TELEMETRY_ENABLED`| string| Enable anonymous usage reporting                                |
+| `HTTP_PROXY`       | string| HTTP proxy URL, e.g. `"http://127.0.0.1:7890"`                |
+| `HTTPS_PROXY`      | string| HTTPS proxy URL, e.g. `"http://127.0.0.1:7890"`               |
+| `SOCKS_PROXY`      | string| SOCKS5 proxy URL, e.g. `"socks5://127.0.0.1:1080"`            |
+| `NO_PROXY`         | string| Comma-separated list of hosts to bypass proxy, e.g. `"localhost,127.0.0.1,.example.com"` |
 | `<any other KEY>` | string | Custom environment variable                                     |
 
 #### `thinkingEnabled` — Thinking Mode
@@ -196,3 +200,72 @@ Applied in the following priority order (lower-numbered overridden by higher-num
 3. Project-level settings.json: `{"mcpServers":{"github":{"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"..."}}}}`
 4. Project-level settings.json: `{"env": {"MCP_GITHUB_PERSONAL_ACCESS_TOKEN": "..."}}`
 5. System environment variable: `DEEPCODE_MCP_GITHUB_PERSONAL_ACCESS_TOKEN=... deepcode`
+
+## Proxy Configuration
+
+Deep Code supports routing all network traffic (API calls, telemetry reporting, and web search) through HTTP, HTTPS, or SOCKS5 proxies.
+
+### Supported Proxy Variables
+
+| Variable       | Description                                                      | Example                                  |
+| -------------- | --------------------------------------------------------------- | ---------------------------------------- |
+| `HTTPS_PROXY`  | HTTPS proxy (highest priority)                                   | `http://127.0.0.1:7890`                  |
+| `HTTP_PROXY`   | HTTP proxy                                                      | `http://127.0.0.1:7890`                  |
+| `SOCKS_PROXY`  | SOCKS5 proxy                                                    | `socks5://127.0.0.1:1080`                |
+| `SOCKS5_PROXY` | SOCKS5 proxy (alias for `SOCKS_PROXY`)                          | `socks5://127.0.0.1:1080`                |
+| `NO_PROXY`     | Comma-separated list of hosts to bypass proxy (supports `*`, `.example.com`) | `localhost,127.0.0.1,.internal.corp` |
+
+### Configuration Methods
+
+#### 1. Shell Environment Variables (highest priority)
+
+**Bash / Zsh:**
+
+```bash
+export HTTPS_PROXY=http://127.0.0.1:7890
+export NO_PROXY=localhost,127.0.0.1
+deepcode
+```
+
+**PowerShell:**
+
+```powershell
+$env:HTTPS_PROXY = "http://127.0.0.1:7890"
+$env:NO_PROXY = "localhost,127.0.0.1"
+deepcode
+```
+
+You can also use the `DEEPCODE_` prefix:
+
+```bash
+DEEPCODE_HTTPS_PROXY=http://127.0.0.1:7890 deepcode
+```
+
+#### 2. `settings.json` `env` field
+
+```json
+{
+  "env": {
+    "HTTPS_PROXY": "http://127.0.0.1:7890",
+    "NO_PROXY": "localhost,127.0.0.1"
+  }
+}
+```
+
+### Priority
+
+Applied in the following priority order (lower-numbered overridden by higher-numbered):
+
+1. User-level `settings.json`: `{"env": {"HTTPS_PROXY": "..."}}`
+2. Project-level `settings.json`: `{"env": {"HTTPS_PROXY": "..."}}`
+3. System environment variable: `HTTPS_PROXY=... deepcode` or `DEEPCODE_HTTPS_PROXY=... deepcode`
+
+### `NO_PROXY` Matching Rules
+
+| Pattern         | Description                                                      |
+| --------------- | --------------------------------------------------------------- |
+| `*`             | Bypass proxy for all hosts                                       |
+| `localhost`     | Exact match for `localhost`                                       |
+| `127.0.0.1`     | Exact match for `127.0.0.1`                                      |
+| `.example.com`  | Matches `example.com` and all its subdomains (e.g. `api.example.com`) |
+| `example.com`   | Matches `example.com` and all its subdomains                     |

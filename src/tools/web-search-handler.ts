@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { spawn } from "child_process";
 import type OpenAI from "openai";
 import type { CreateOpenAIClient, ToolExecutionContext, ToolExecutionResult } from "./executor";
+import { proxyFetch } from "../common/proxy";
 
 const MAX_OUTPUT_CHARS = 30000;
 const MAX_CAPTURE_CHARS = 10 * 1024 * 1024;
@@ -331,7 +332,7 @@ async function runDefaultWebSearchRequest(
   const activityId = `web-search-${randomUUID()}`;
   context.onProcessStart?.(activityId, formatWebSearchActivityLabel(query));
   try {
-    const response = await fetch(DEFAULT_WEB_SEARCH_API_URL, {
+    const response = await proxyFetch(DEFAULT_WEB_SEARCH_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
