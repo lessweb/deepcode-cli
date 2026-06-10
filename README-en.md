@@ -96,7 +96,7 @@ Skills are discovered from these locations, in priority order:
 
 - `deepseek-v4-pro` (Recommended)
 - `deepseek-v4-flash`
-- Any other OpenAI-compatible model
+- Any other OpenAI-compatible model — for example, [Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=deepcode-cli) exposes 300+ models (`deepseek-ai/DeepSeek-V3-0324`, `anthropic/claude-sonnet-4.6`, and more) through a single OpenAI-compatible endpoint
 
 ## FAQ
 
@@ -130,6 +130,22 @@ Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compati
   "thinkingEnabled": true
 }
 ```
+
+### Does it support Atlas Cloud?
+
+Yes. [Atlas Cloud](https://www.atlascloud.ai/?utm_source=github&utm_medium=link&utm_campaign=deepcode-cli) is an OpenAI-compatible full-modal AI inference platform that provides a unified API for 300+ models across LLMs, image generation, and video generation. Example configuration:
+
+```json
+{
+  "env": {
+    "MODEL": "deepseek-ai/DeepSeek-V3-0324",
+    "BASE_URL": "https://api.atlascloud.ai/v1",
+    "API_KEY": "your-atlascloud-api-key"
+  }
+}
+```
+
+You can also switch to Claude, Qwen, or other models — see the full list at [Atlas Cloud Models](https://www.atlascloud.ai/zh/models/list/llm). Get your API key at the [Atlas Cloud Console](https://www.atlascloud.ai/console/coding-plan).
 
 ### How do I configure MCP?
 
