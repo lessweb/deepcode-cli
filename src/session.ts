@@ -180,6 +180,28 @@ function getTotalTokens(usage: ModelUsage | null | undefined): number {
   return typeof totalTokens === "number" ? totalTokens : 0;
 }
 
+function estimateTokensFromText(text: string | null | undefined): number {
+  if (!text) return 0;
+  const total = [...text].length;
+  const cjk = text.match(/[㐀-鿿豈-﫿぀-ヿ가-힯]/gu)?.length ?? 0;
+  return Math.ceil(cjk + (total - cjk) / 4);
+}
+
+function estimateTokensFromUnknown(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === "string") return estimateTokensFromText(value);
+  try {
+    return estimateTokensFromText(JSON.stringify(value));
+  } catch {
+    return 0;
+  }
+}
+
+// 各模型族的近似上下文窗口大小，仅用作进度条的分母。
+function getModelContextWindow(model: string): number {
+  return DEEPSEEK_V4_MODELS.has(model) ? 512 * 1024 : 128 * 1024;
+}
+
 export type SessionStatus =
   | "failed"
   | "pending"
@@ -238,6 +260,39 @@ export type SessionsIndex = {
   version: 1;
   entries: SessionEntry[];
   originalPath: string;
+};
+
+export type ContextCategoryKey =
+  | "system_prompt"
+  | "tool_definitions"
+  | "mcp_tools"
+  | "agent_instructions"
+  | "default_skills"
+  | "loaded_skills"
+  | "user_messages"
+  | "assistant_messages"
+  | "thinking"
+  | "tool_results";
+
+export type ContextCategoryUsage = {
+  key: ContextCategoryKey;
+  label: string;
+  tokens: number;
+};
+
+export type ContextStatus = {
+  model: string;
+  /** 来自最近一次 API 响应的权威活跃 token 数。 */
+  activeTokens: number;
+  /** 各分类估算 token 之和；让 UI 在尚未发起 API 调用时也能展示分项占比。 */
+  estimatedTotal: number;
+  /** 触发会话自动压缩（auto-compact）的阈值。 */
+  compactThreshold: number;
+  /** 当前模型的启发式上下文窗口大小（用作进度条的分母）。 */
+  contextWindow: number;
+  categories: ContextCategoryUsage[];
+  usagePerModel: Record<string, ModelUsage> | null;
+  messageCount: number;
 };
 
 export type SessionMessageRole = "system" | "user" | "assistant" | "tool";
@@ -386,6 +441,98 @@ export class SessionManager {
 
   getMcpStatus() {
     return this.mcpManager.getStatus();
+  }
+
+  getContextStatus(sessionId: string | null): ContextStatus {
+    const model = this.getResolvedSettings().model;
+    const compactThreshold = getCompactPromptTokenThreshold(model);
+    const contextWindow = getModelContextWindow(model);
+    const promptToolOptions = this.getPromptToolOptions();
+
+    const labels: Record<ContextCategoryKey, string> = {
+      system_prompt: "System prompt",
+      tool_definitions: "Built-in tools",
+      mcp_tools: "MCP tools",
+      agent_instructions: "Agent instructions (AGENTS.md)",
+      default_skills: "Default skills",
+      loaded_skills: "Loaded skills",
+      user_messages: "User messages",
+      assistant_messages: "Assistant replies",
+      thinking: "Thinking (reasoning)",
+      tool_results: "Tool results",
+    };
+    const tokens: Record<ContextCategoryKey, number> = {
+      system_prompt: 0,
+      tool_definitions: 0,
+      mcp_tools: 0,
+      agent_instructions: 0,
+      default_skills: 0,
+      loaded_skills: 0,
+      user_messages: 0,
+      assistant_messages: 0,
+      thinking: 0,
+      tool_results: 0,
+    };
+
+    // ── 静态（一次性）分类 —— 与会话状态无关 ─────────────────────────────────
+    tokens.system_prompt =
+      estimateTokensFromText(getSystemPrompt(this.projectRoot, promptToolOptions)) +
+      estimateTokensFromText(getRuntimeContext(this.projectRoot, promptToolOptions.model));
+    tokens.default_skills = estimateTokensFromText(getDefaultSkillPrompt());
+    tokens.agent_instructions = estimateTokensFromText(this.loadAgentInstructions());
+
+    // ── 工具定义（区分内置工具与 MCP 工具）─────────────────────────────────
+    const mcpToolNames = new Set(this.mcpToolDefinitions.map((t) => t.function.name));
+    for (const tool of getTools(promptToolOptions, this.mcpToolDefinitions)) {
+      const bucket = mcpToolNames.has(tool.function.name) ? "mcp_tools" : "tool_definitions";
+      tokens[bucket] += estimateTokensFromUnknown(tool);
+    }
+
+    // ── 会话消息 —— 按语义角色拆分 ────────────────────────────────────────
+    const messages = sessionId ? this.listSessionMessages(sessionId).filter((m) => !m.compacted) : [];
+    for (const message of messages) {
+      const params = message.messageParams as { tool_calls?: unknown; reasoning_content?: string } | null | undefined;
+      const contentTokens = estimateTokensFromText(message.content) + estimateTokensFromUnknown(message.contentParams);
+
+      if (message.meta?.skill) {
+        tokens.loaded_skills += contentTokens;
+        continue;
+      }
+      switch (message.role) {
+        case "system":
+          // 已计入 system_prompt / agent_instructions，此处跳过以避免重复计数。
+          break;
+        case "user":
+          tokens.user_messages += contentTokens;
+          break;
+        case "assistant":
+          tokens.assistant_messages += contentTokens + estimateTokensFromUnknown(params?.tool_calls);
+          tokens.thinking += estimateTokensFromText(params?.reasoning_content);
+          break;
+        case "tool":
+          tokens.tool_results += contentTokens;
+          break;
+      }
+    }
+
+    const categories: ContextCategoryUsage[] = (Object.keys(labels) as ContextCategoryKey[]).map((key) => ({
+      key,
+      label: labels[key],
+      tokens: tokens[key],
+    }));
+    const estimatedTotal = categories.reduce((sum, c) => sum + c.tokens, 0);
+    const session = sessionId ? this.getSession(sessionId) : null;
+
+    return {
+      model,
+      activeTokens: session?.activeTokens ?? 0,
+      estimatedTotal,
+      compactThreshold,
+      contextWindow,
+      categories,
+      usagePerModel: session?.usagePerModel ?? null,
+      messageCount: messages.length,
+    };
   }
 
   async reconnectMcpServer(name: string, config?: McpServerConfig): Promise<void> {

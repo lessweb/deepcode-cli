@@ -3417,6 +3417,131 @@ test("SessionManager.deleteSession does not affect other sessions", () => {
   assert.ok(messages.length > 0);
 });
 
+test("getContextStatus returns categories that sum to estimatedTotal", () => {
+  const workspace = createTempDir("deepcode-context-breakdown-");
+  const home = createTempDir("deepcode-context-home-");
+  setHomeDir(home);
+
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({ client: null, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const status = manager.getContextStatus(null);
+
+  // 没有会话时 → 会话相关分类应全部为 0，但静态开销
+  // （system prompt、tool 定义、运行时上下文）必须非 0。
+  const sumCategories = status.categories.reduce((sum, c) => sum + c.tokens, 0);
+  assert.equal(sumCategories, status.estimatedTotal);
+  assert.ok(status.estimatedTotal > 0, "static overhead should produce non-zero estimate");
+  assert.equal(status.activeTokens, 0);
+  assert.equal(status.messageCount, 0);
+
+  const userTokens = status.categories.find((c) => c.key === "user_messages")?.tokens ?? -1;
+  const builtinTokens = status.categories.find((c) => c.key === "tool_definitions")?.tokens ?? -1;
+  assert.equal(userTokens, 0);
+  assert.ok(builtinTokens > 0, "built-in tool definitions should contribute tokens");
+});
+
+test("getContextStatus threshold tracks model family", () => {
+  const workspace = createTempDir("deepcode-context-threshold-");
+  const home = createTempDir("deepcode-context-threshold-home-");
+  setHomeDir(home);
+
+  const defaultManager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({ client: null, model: "deepseek-chat", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "deepseek-chat" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  const v4Manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({ client: null, model: "deepseek-v4-pro", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "deepseek-v4-pro" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  assert.equal(defaultManager.getContextStatus(null).compactThreshold, 128 * 1024);
+  assert.equal(v4Manager.getContextStatus(null).compactThreshold, 512 * 1024);
+  assert.ok(v4Manager.getContextStatus(null).contextWindow >= 512 * 1024);
+});
+
+test("getContextStatus attributes session messages to the right categories", () => {
+  const workspace = createTempDir("deepcode-context-msgs-");
+  const home = createTempDir("deepcode-context-msgs-home-");
+  setHomeDir(home);
+
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({ client: null, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const sessionId = createSessionAndMessages(manager, "ctx-session-1", "context test");
+  const projectDir = (manager as any).getProjectStorage().projectDir;
+  const messagePath = path.join(projectDir, `${sessionId}.jsonl`);
+  const now = new Date().toISOString();
+
+  // 追加：一条 user 消息、一条带 reasoning_content 的 assistant 消息，以及一条 tool 结果
+  const userMsg = {
+    id: "u-1",
+    sessionId,
+    role: "user",
+    content: "Please add a test for the new feature.",
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  };
+  const assistantMsg = {
+    id: "a-1",
+    sessionId,
+    role: "assistant",
+    content: "Sure, here's the plan.",
+    contentParams: null,
+    messageParams: { reasoning_content: "Step one: read the file. Step two: write a test." },
+    compacted: false,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  };
+  const toolMsg = {
+    id: "t-1",
+    sessionId,
+    role: "tool",
+    content: "file contents go here ".repeat(20),
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: false,
+    createTime: now,
+    updateTime: now,
+  };
+  fs.appendFileSync(
+    messagePath,
+    `${JSON.stringify(userMsg)}\n${JSON.stringify(assistantMsg)}\n${JSON.stringify(toolMsg)}\n`,
+    "utf8"
+  );
+
+  const status = manager.getContextStatus(sessionId);
+  const get = (key: string) => status.categories.find((c) => c.key === key)?.tokens ?? 0;
+
+  assert.ok(get("user_messages") > 0, "user message should contribute tokens");
+  assert.ok(get("assistant_messages") > 0, "assistant message should contribute tokens");
+  assert.ok(get("thinking") > 0, "reasoning_content should land in thinking bucket");
+  assert.ok(get("tool_results") > 0, "tool result should land in tool_results bucket");
+  assert.ok(status.messageCount >= 4, "expected the seeded messages plus the helper-created one");
+});
+
 /**
  * Helper: creates a session and writes a few messages to it so we can test
  * that deleteSession removes both the index entry and the messages file.

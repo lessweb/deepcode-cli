@@ -13,6 +13,7 @@ import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
+import { ContextStatusView } from "./ContextStatusView";
 import { ProcessStdoutView } from "./ProcessStdoutView";
 import {
   type AskUserQuestionAnswers,
@@ -35,6 +36,7 @@ import { resolveCurrentSettings, writeModelConfigSelection } from "../../setting
 import { isCollapsedThinking } from "../core/thinking-state";
 import { ANSI_CLEAR_SCREEN } from "../constants";
 import type {
+  ContextStatus,
   LlmStreamProgress,
   MessageMeta,
   SessionEntry,
@@ -46,7 +48,7 @@ import type {
 } from "../../session";
 import { SessionManager } from "../../session";
 
-type View = "chat" | "session-list" | "undo" | "mcp-status";
+type View = "chat" | "session-list" | "undo" | "mcp-status" | "context-status";
 
 const STATUS_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -125,6 +127,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
+  const [contextStatus, setContextStatus] = useState<ContextStatus | null>(null);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
 
   rawModeRef.current = mode;
@@ -331,6 +334,11 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "context") {
+        setContextStatus(sessionManager.getContextStatus(sessionManager.getActiveSessionId()));
+        navigateToSubView("context-status");
         return;
       }
 
@@ -838,6 +846,8 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />
+      ) : view === "context-status" && contextStatus ? (
+        <ContextStatusView status={contextStatus} onCancel={() => setView("chat")} />
       ) : shouldShowQuestionPrompt && pendingQuestion && !busy ? (
         <AskUserQuestionPrompt
           questions={pendingQuestion.questions}

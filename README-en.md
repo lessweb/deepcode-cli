@@ -81,6 +81,7 @@ Skills are discovered from these locations, in priority order:
 | `/init`          | Initialize an AGENTS.md file (LLM project instructions) |
 | `/skills`        | List available skills                                   |
 | `/mcp`           | View MCP server status and available tools              |
+| `/context`       | View context window usage breakdown for the current session |
 | `/undo`          | Restore code and/or conversation to a previous point    |
 | `/exit`          | Quit (also `Ctrl+D` twice)                              |
 

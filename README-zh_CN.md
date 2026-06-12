@@ -80,6 +80,7 @@ Skills 会按以下优先级扫描：
 | `/init`     | 初始化 AGENTS.md 文件                 |
 | `/skills`   | 列出可用 skills                      |
 | `/mcp`      | 查看 MCP 服务器状态和可用工具                |
+| `/context`  | 查看当前会话的上下文窗口用量明细                 |
 | `/undo`     | 将代码和/或对话恢复到之前的状态                 |
 | `/exit`     | 退出（也可用连续 `Ctrl+D`）               |
 

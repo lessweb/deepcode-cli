@@ -10,6 +10,7 @@ export type SlashCommandKind =
   | "continue"
   | "undo"
   | "mcp"
+  | "context"
   | "raw"
   | "exit";
 
@@ -70,6 +71,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "mcp",
     label: "/mcp",
     description: "Show MCP server status and available tools",
+  },
+  {
+    kind: "context",
+    name: "context",
+    label: "/context",
+    description: "View context window usage breakdown for the current session",
   },
   {
     kind: "raw",
