@@ -56,6 +56,14 @@ type CorrectedEditStrings = {
   newString: string;
 };
 
+type EscapeCorrectionResult =
+  | {
+      ok: true;
+      newString: string;
+      changed: boolean;
+    }
+  | { ok: false };
+
 const editSchema = z.strictObject({
   file_path: z.string().optional(),
   snippet_id: z.string().min(1, "snippet_id is required."),
@@ -227,27 +235,46 @@ export async function handleEditTool(
         if (matches.length === 0) {
           const looseEscapeMatches = findLooseEscapeMatches(raw, oldString, scope);
           if (looseEscapeMatches.length === 1 && looseEscapeMatches[0]?.score === 1) {
-            const correctedStrings = await correctEscapedStringsWithLLM(
-              raw.slice(scope.startOffset, scope.endOffset),
-              oldString,
-              newString,
-              looseEscapeMatches[0].text,
-              context
-            );
+            const looseEscapeMatch = looseEscapeMatches[0];
+            const deterministicCorrection = fixNewStringEscaping(oldString, looseEscapeMatch.text, newString);
 
-            if (correctedStrings) {
-              const correctedMatches = findOccurrences(raw, correctedStrings.oldString, scope);
-              if (correctedMatches.length > 0) {
-                matches = correctedMatches;
-                matchedVia = "llm_escape_correction";
-                replacementOldString = correctedStrings.oldString;
-                replacementNewString = correctedStrings.newString;
-              }
-            }
-
-            if (matches.length === 0) {
-              matches = [looseEscapeMatches[0]];
+            if (deterministicCorrection.ok) {
+              matches = [looseEscapeMatch];
               matchedVia = "loose_escape";
+              replacementOldString = looseEscapeMatch.text;
+              replacementNewString = deterministicCorrection.newString;
+            } else {
+              const correctedStrings = await correctEscapedStringsWithLLM(
+                raw.slice(scope.startOffset, scope.endOffset),
+                oldString,
+                newString,
+                looseEscapeMatch.text,
+                context
+              );
+
+              if (correctedStrings) {
+                const correctedMatches = findOccurrences(raw, correctedStrings.oldString, scope);
+                if (correctedMatches.length > 0) {
+                  matches = correctedMatches;
+                  matchedVia = "llm_escape_correction";
+                  replacementOldString = correctedStrings.oldString;
+                  replacementNewString = correctedStrings.newString;
+                }
+              }
+
+              if (matches.length === 0) {
+                return {
+                  ok: false,
+                  name: "edit",
+                  error:
+                    "old_string escaping doesn't match the file and cannot be corrected " +
+                    "deterministically (inconsistent escaping patterns). " +
+                    "Re-read the file and use exact escaping, or use the Bash tool instead.",
+                  metadata: {
+                    scope: formatScopeMetadata(scope),
+                  },
+                };
+              }
             }
           }
         }
@@ -558,6 +585,125 @@ function applyReplacement(
 
 function stripReadResultLineTabs(value: string): string {
   return value.replaceAll("\n\t", "\n");
+}
+
+type TokenSegment = { type: "slash"; length: number } | { type: "text"; value: string };
+
+function fixNewStringEscaping(oldString: string, matchedText: string, newString: string): EscapeCorrectionResult {
+  if (oldString === matchedText) {
+    return { ok: true, newString, changed: false };
+  }
+
+  const ratios = collectLooseEscapeRatios(oldString, matchedText);
+  if (!ratios) {
+    return { ok: false };
+  }
+
+  const newTokens = tokenizeLooseEscaping(newString);
+  const canReuseLastRatio = ratios.length > 0 && ratios.every((ratio) => Math.abs(ratio - ratios[0]) < Number.EPSILON);
+
+  // Apply ratios to newString; reuse the last ratio only when the observed escaping error is uniform.
+  let result = "";
+  let slashRatioIndex = 0;
+  let lastRatio: number | null = null;
+  for (const tok of newTokens) {
+    if (tok.type === "slash") {
+      const ratio = slashRatioIndex < ratios.length ? ratios[slashRatioIndex] : lastRatio;
+      if (slashRatioIndex >= ratios.length && !canReuseLastRatio) {
+        return { ok: false };
+      }
+      if (ratio !== null) {
+        const correctedCount = Math.max(0, Math.round(tok.length * ratio));
+        result += "\\".repeat(correctedCount);
+      } else {
+        result += "\\".repeat(tok.length);
+      }
+      if (slashRatioIndex < ratios.length) {
+        lastRatio = ratios[slashRatioIndex];
+      }
+      slashRatioIndex += 1;
+    } else {
+      result += tok.value;
+    }
+  }
+
+  return {
+    ok: true,
+    newString: result,
+    changed: result !== newString,
+  };
+}
+
+function collectLooseEscapeRatios(oldString: string, matchedText: string): number[] | null {
+  const ratios: number[] = [];
+  let oldCursor = 0;
+  let matchedCursor = 0;
+
+  while (oldCursor < oldString.length) {
+    if (oldString[oldCursor] !== "\\") {
+      if (matchedCursor >= matchedText.length || matchedText[matchedCursor] !== oldString[oldCursor]) {
+        return null;
+      }
+      oldCursor += 1;
+      matchedCursor += 1;
+      continue;
+    }
+
+    const oldSlashStart = oldCursor;
+    while (oldCursor < oldString.length && oldString[oldCursor] === "\\") {
+      oldCursor += 1;
+    }
+    const oldSlashCount = oldCursor - oldSlashStart;
+
+    if (oldCursor >= oldString.length) {
+      const matchedSlashStart = matchedCursor;
+      while (matchedCursor < matchedText.length && matchedText[matchedCursor] === "\\") {
+        matchedCursor += 1;
+      }
+      const matchedSlashCount = matchedCursor - matchedSlashStart;
+      if (matchedSlashCount !== oldSlashCount) {
+        return null;
+      }
+      ratios.push(1);
+      continue;
+    }
+
+    const anchor = oldString[oldCursor];
+    const matchedSlashStart = matchedCursor;
+    while (matchedCursor < matchedText.length && matchedText[matchedCursor] === "\\") {
+      matchedCursor += 1;
+    }
+    const matchedSlashCount = matchedCursor - matchedSlashStart;
+    if (matchedCursor >= matchedText.length || matchedText[matchedCursor] !== anchor) {
+      return null;
+    }
+    ratios.push(matchedSlashCount / oldSlashCount);
+    oldCursor += 1;
+    matchedCursor += 1;
+  }
+
+  return matchedCursor === matchedText.length ? ratios : null;
+}
+
+function tokenizeLooseEscaping(value: string): TokenSegment[] {
+  const segments: TokenSegment[] = [];
+  let index = 0;
+  while (index < value.length) {
+    if (value[index] === "\\") {
+      const start = index;
+      while (index < value.length && value[index] === "\\") {
+        index += 1;
+      }
+      segments.push({ type: "slash", length: index - start });
+    } else {
+      const start = index;
+      while (index < value.length && value[index] !== "\\") {
+        index += 1;
+      }
+      segments.push({ type: "text", value: value.slice(start, index) });
+    }
+  }
+  return segments;
 }
 
 function buildCandidateMetadata(
