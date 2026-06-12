@@ -4,6 +4,7 @@ import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
 import { resolveCurrentSettings } from "../settings";
+import { getProxyDispatcher } from "./proxy";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
 // global fetch (undici) only keeps connections alive for 4 seconds, which
@@ -51,7 +52,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     };
   }
 
-  const cacheKey = `${settings.apiKey}::${settings.baseURL}`;
+  const proxyDispatcher = getProxyDispatcher(settings.baseURL);
+  const cacheKey = `${settings.apiKey}::${settings.baseURL}::${proxyDispatcher ? "proxy" : "direct"}`;
   if (cachedOpenAI && cachedOpenAIKey === cacheKey) {
     return {
       client: cachedOpenAI,
@@ -73,7 +75,7 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     apiKey: settings.apiKey,
     baseURL: settings.baseURL || undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: keepAliveAgent }),
+    fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: proxyDispatcher ?? keepAliveAgent }),
   });
   cachedOpenAIKey = cacheKey;
 
