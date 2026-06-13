@@ -72,6 +72,8 @@ When thinking mode is enabled, controls the depth of the model’s reasoning:
 
 Set a full path to a shell script. When the AI assistant finishes a round of tasks, the script is executed automatically, which can be used to send notifications (e.g., a Slack message).
 
+On Windows, when `notify` is not configured, Deep Code uses the built-in desktop tip. Clicking the tip attempts to focus the terminal window that launched the CLI. A custom `notify` script takes precedence over the built-in tip.
+
 The following context is injected as environment variables when the notify script runs:
 
 | Variable | Description |
@@ -79,6 +81,7 @@ The following context is injected as environment variables when the notify scrip
 | `DURATION` | Session duration in seconds (integer) |
 | `STATUS` | Session status: `"completed"` or `"failed"` |
 | `FAIL_REASON` | Failure reason (only set on failure) |
+| `QUESTION` | The text content of the last user question |
 | `BODY` | The text content of the last AI assistant reply |
 | `TITLE` | Session title (matches the resume list title) |
 
