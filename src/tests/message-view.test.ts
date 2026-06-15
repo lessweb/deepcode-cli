@@ -139,7 +139,7 @@ test("MessageView echoes model changes with submitted prompt wrapping", () => {
   const msg = makeSessionMessage({
     role: "system",
     content: "abcdefgh",
-    meta: { isModelChange: true },
+    meta: { settingChange: "model" },
   });
   const output = renderToString(React.createElement(MessageView, { message: msg, width: 8 }), { columns: 8 });
 

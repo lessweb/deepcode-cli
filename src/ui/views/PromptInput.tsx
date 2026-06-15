@@ -996,13 +996,13 @@ export function renderBufferWithCursor(
   }
 
   if (!isFocused || !showSimulatedCursor) {
-    return highlightPasteMarkersInText(text, validIds);
+    return highlightPasteMarkersInText(text, validIds, h);
   }
 
   return renderFocusedText(text, cursor, validIds, h);
 }
 
-function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): string {
+function highlightPasteMarkersInText(s: string, validIds: Map<number, string>, highlightColor: string): string {
   if (!s.includes("[paste #")) return s.endsWith("\n") ? `${s} ` : s;
   PASTE_MARKER_REGEX.lastIndex = 0;
   let result = "";

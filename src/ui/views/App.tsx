@@ -64,6 +64,7 @@ const StatusLine = React.memo(function StatusLine({
   busy: boolean;
   text?: string;
 }): React.ReactElement {
+  const theme = useTheme();
   const [spinnerIndex, setSpinnerIndex] = useState(0);
 
   useEffect(() => {
@@ -79,10 +80,10 @@ const StatusLine = React.memo(function StatusLine({
   }, [busy]);
 
   return (
-    <Box>
+    <Box marginLeft={2}>
       {busy ? (
         <Box marginRight={1}>
-          <Text color="yellow">{STATUS_SPINNER_FRAMES[spinnerIndex]}</Text>
+          <Text color={theme.status.warning}>{STATUS_SPINNER_FRAMES[spinnerIndex]}</Text>
         </Box>
       ) : null}
       {text ? <Text dimColor>{text}</Text> : null}
@@ -825,11 +826,6 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         }}
       </ThemeableStatic>
       {busy || statusLine ? <StatusLine busy={busy} text={statusLine} /> : null}
-      {statusLine ? (
-        <Box marginLeft={2}>
-          <Text dimColor>{statusLine}</Text>
-        </Box>
-      ) : null}
       {errorLine ? (
         <Box marginLeft={2}>
           <Text color={theme.status.danger}>Error: {errorLine}</Text>
