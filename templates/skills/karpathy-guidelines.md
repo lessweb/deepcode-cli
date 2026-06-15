@@ -1,7 +1,6 @@
 ---
 name: karpathy-guidelines
 description: Behavioral guidelines to reduce common LLM coding mistakes. Use when writing, reviewing, or refactoring code to avoid overcomplication, make surgical changes, surface assumptions, and define verifiable success criteria.
-license: MIT
 ---
 
 # Karpathy Guidelines
@@ -52,15 +51,6 @@ The test: Every changed line should trace directly to the user's request.
 
 **Define success criteria. Loop until verified.**
 
-Before implementing, define the exact observable acceptance check:
-- Command output
-- Test assertion
-- UI state
-- File diff
-- API response
-
-Do not start implementation if "works" cannot be checked objectively. If the check is unclear and would change the solution, ask before coding using AskUserQuestion tool.
-
 Transform tasks into verifiable goals:
 - "Add validation" → "Write tests for invalid inputs, then make them pass"
 - "Fix the bug" → "Write a test that reproduces it, then make it pass"
@@ -74,16 +64,3 @@ For multi-step tasks, state a brief plan:
 ```
 
 Strong success criteria let you loop independently. Weak criteria ("make it work") require constant clarification.
-
-## 5. No Proxy Success
-
-**Passing means the acceptance check passes.**
-
-Don't substitute weaker signals:
-- "No crash" unless that was the goal.
-- "Non-empty output" unless any output is valid.
-- "Looks plausible" unless the task is subjective.
-- "Some tests pass" while the target check fails.
-- "Implementation complete" without verification.
-
-Report exact pass, partial progress, or failure.

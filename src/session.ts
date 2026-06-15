@@ -1143,7 +1143,7 @@ ${agentInstructions}
     const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
     this.appendSessionMessage(sessionId, systemMessage);
 
-    const defaultSkillPrompt = getDefaultSkillPrompt();
+    const defaultSkillPrompt = getDefaultSkillPrompt({ enabledSkills: this.getResolvedSettings().enabledSkills });
     if (defaultSkillPrompt) {
       const defaultSkillMessage = this.buildSystemMessage(sessionId, defaultSkillPrompt);
       this.appendSessionMessage(sessionId, defaultSkillMessage);

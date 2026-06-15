@@ -88,6 +88,12 @@ test("getDefaultSkillPrompt loads the default skill template", () => {
   assert.equal(prompt.includes('path="templates/skills/'), false);
 });
 
+test("getDefaultSkillPrompt skips disabled default skills", () => {
+  const prompt = getDefaultSkillPrompt({ enabledSkills: { "karpathy-guidelines": false } });
+
+  assert.equal(prompt, "");
+});
+
 test("buildSkillDocumentsPrompt excludes SKILL.md frontmatter metadata", () => {
   const prompt = buildSkillDocumentsPrompt([
     {
@@ -200,8 +206,7 @@ test("runtime prompt assets live under templates", () => {
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "web-search.md")), true);
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "read.md.ejs")), true);
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "prompts", "init_command.md.ejs")), true);
-  assert.equal(fs.existsSync(path.join(repoRoot, "templates", "skills", "agent-drift-guard.md")), true);
-  assert.equal(fs.existsSync(path.join(repoRoot, "templates", "skills", "plan-and-execute.md")), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, "templates", "skills", "karpathy-guidelines.md")), true);
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "read.md")), false);
   assert.equal(fs.existsSync(path.join(repoRoot, "docs", "tools")), false);
   assert.equal(fs.existsSync(path.join(repoRoot, "docs", "prompts")), false);

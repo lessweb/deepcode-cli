@@ -100,6 +100,10 @@ type PromptToolOptions = {
   webSearchEnabled?: boolean;
 };
 
+type DefaultSkillPromptOptions = {
+  enabledSkills?: Record<string, boolean>;
+};
+
 const DEFAULT_SKILL_TEMPLATES = ["karpathy-guidelines.md"];
 const DEFAULT_SKILL_RESOURCE_FILE_LIMIT = 50;
 const SKILL_RESOURCE_EXCLUDED_DIRS = new Set([
@@ -153,13 +157,20 @@ function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): s
   return docs.join("\n\n");
 }
 
-function readDefaultSkillDocs(extensionRoot: string): Array<{ name: string; content: string }> {
+function readDefaultSkillDocs(
+  extensionRoot: string,
+  enabledSkills: Record<string, boolean> = {}
+): Array<{ name: string; content: string }> {
   const skillsDir = path.join(extensionRoot, "templates", "skills");
   return DEFAULT_SKILL_TEMPLATES.map((entry) => {
     const fullPath = path.join(skillsDir, entry);
+    const name = path.basename(entry, ".md");
+    if (enabledSkills[name] === false) {
+      return null;
+    }
     try {
       return {
-        name: path.basename(entry, ".md"),
+        name,
         content: fs.readFileSync(fullPath, "utf8").trim(),
       };
     } catch {
@@ -168,8 +179,8 @@ function readDefaultSkillDocs(extensionRoot: string): Array<{ name: string; cont
   }).filter((skill): skill is { name: string; content: string } => Boolean(skill?.content));
 }
 
-export function getDefaultSkillPrompt(): string {
-  const skillDocs = readDefaultSkillDocs(getExtensionRoot());
+export function getDefaultSkillPrompt(options: DefaultSkillPromptOptions = {}): string {
+  const skillDocs = readDefaultSkillDocs(getExtensionRoot(), options.enabledSkills);
   if (skillDocs.length === 0) {
     return "";
   }

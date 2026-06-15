@@ -1138,6 +1138,40 @@ test("createSession appends default system prompts in prefix-cache-friendly orde
   assert.equal(systemContents[3], "root project instructions");
 });
 
+test("createSession skips disabled default skills", async () => {
+  const workspace = createTempDir("deepcode-disabled-default-skill-workspace-");
+  const home = createTempDir("deepcode-disabled-default-skill-home-");
+  setHomeDir(home);
+
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: null,
+      model: "test-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+      machineId: "machine-id-disabled-default-skill",
+    }),
+    getResolvedSettings: () => ({
+      model: "test-model",
+      enabledSkills: { "karpathy-guidelines": false },
+    }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const sessionId = await manager.createSession({ text: "hello" });
+  const systemContents = manager
+    .listSessionMessages(sessionId)
+    .filter((message) => message.role === "system")
+    .map((message) => message.content ?? "");
+
+  assert.equal(systemContents.length, 2);
+  assert.match(systemContents[0] ?? "", /# Available Tools/);
+  assert.doesNotMatch(systemContents.join("\n"), /<karpathy-guidelines-skill>/);
+  assert.match(systemContents[1] ?? "", /# Local Workspace Environment/);
+});
+
 test("createSession includes agent instructions in the skill matching system prompt", async () => {
   const workspace = createTempDir("deepcode-skill-match-create-workspace-");
   const home = createTempDir("deepcode-skill-match-create-home-");
