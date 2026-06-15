@@ -1,6 +1,6 @@
 ---
 name: deepcode-self-refer
-description: 回答关于 Deep Code CLI 本身的问题——包括功能特性、配置项、斜杠命令、Skills、MCP 集成、权限、通知、会话持久化及故障排查。当用户询问如何配置或使用 Deep Code、如何设置 MCP 服务器、配置通知（如 Slack/飞书）、管理权限、查看可用技能、理解斜杠命令、配置思考模式、使用 Undo 功能，或咨询 Deep Code 与 VSCode 集成等场景时使用。
+description: Answers questions about Deep Code CLI itself — including features, configuration options, slash commands, Skills, MCP integration, permissions, notifications, session persistence, and troubleshooting. Use this when users ask how to configure or use Deep Code, how to set up an MCP server, configure notifications (such as Slack/Feishu), manage permissions, view available skills, understand slash commands, configure thinking mode, etc.
 ---
 
 # Deep Code Self-Refer
