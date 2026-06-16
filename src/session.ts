@@ -24,11 +24,13 @@ import {
   type CreateOpenAIClient,
   type ProcessTimeoutControl,
   type ProcessTimeoutInfo,
+  type ToolCall,
   type ToolCallExecution,
   type ToolExecutionHooks,
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
-import type { McpServerConfig, PermissionScope, PermissionSettings } from "./settings";
+import { RuntimeReasoningEffortManager } from "./common/reasoning-effort-manager";
+import type { McpServerConfig, PermissionScope, PermissionSettings, ReasoningEffort } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { killProcessTree } from "./common/process-tree";
@@ -170,14 +172,6 @@ function accumulateUsagePerModel(
   const modelName = model.trim() || "unknown";
   usagePerModel[modelName] = accumulateUsage(usagePerModel[modelName] ?? null, usageWithRequestCount(next))!;
   return usagePerModel;
-}
-
-function getTotalTokens(usage: ModelUsage | null | undefined): number {
-  if (!isUsageRecord(usage)) {
-    return 0;
-  }
-  const totalTokens = usage.total_tokens;
-  return typeof totalTokens === "number" ? totalTokens : 0;
 }
 
 export type SessionStatus =
@@ -343,6 +337,7 @@ export class SessionManager {
   private readonly mcpManager = new McpManager();
   private mcpToolDefinitions: ToolDefinition[] = [];
   private readonly messageConverter: OpenAIMessageConverter;
+  private static systemPromptCache = new Map<string, string>();
 
   constructor(options: SessionManagerOptions) {
     this.projectRoot = options.projectRoot;
@@ -416,6 +411,18 @@ export class SessionManager {
       tokens += /[\u3400-\u9fff\uf900-\ufaff]/u.test(char) ? 0.6 : 0.3;
     }
     return tokens;
+  }
+
+  private estimateContextTokens(messages: SessionMessage[]): number {
+    let total = 0;
+    for (const msg of messages) {
+      if (msg.compacted) continue;
+      total += msg.content?.length ?? 0;
+      if (msg.messageParams) {
+        total += JSON.stringify(msg.messageParams).length;
+      }
+    }
+    return Math.ceil(total / 4);
   }
 
   private formatEstimatedTokens(tokens: number): string {
@@ -1138,7 +1145,12 @@ ${agentInstructions}
     }
 
     const promptToolOptions = this.getPromptToolOptions();
-    const systemPrompt = getSystemPrompt(this.projectRoot, promptToolOptions);
+    const cacheKey = `${promptToolOptions.model}`;
+    let systemPrompt = SessionManager.systemPromptCache.get(cacheKey);
+    if (!systemPrompt) {
+      systemPrompt = getSystemPrompt(this.projectRoot, promptToolOptions);
+      SessionManager.systemPromptCache.set(cacheKey, systemPrompt);
+    }
     const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
     this.appendSessionMessage(sessionId, systemMessage);
 
@@ -1266,6 +1278,8 @@ ${agentInstructions}
     const startedAt = Date.now();
     const { client, model, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, env } =
       this.createOpenAIClient();
+    const effortManager = new RuntimeReasoningEffortManager();
+    let currentReasoningEffort: ReasoningEffort = reasoningEffort ?? "high";
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
 
@@ -1311,6 +1325,7 @@ ${agentInstructions}
     try {
       const maxIterations = 80000; // about 1K RMB cost
       let toolCalls: unknown[] | null = null;
+      const cachedTools = getTools(this.getPromptToolOptions(), this.mcpToolDefinitions);
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         if (this.isInterrupted(sessionId)) {
@@ -1364,14 +1379,14 @@ ${agentInstructions}
           thinkingEnabled,
           model
         );
-        const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
+        const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, currentReasoningEffort);
         const response = await this.createChatCompletionStream(
           client,
           {
             model,
             ...(temperature !== undefined ? { temperature } : {}),
             messages,
-            tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
+            tools: cachedTools,
             ...thinkingOptions,
           },
           { signal: sessionController.signal },
@@ -1429,7 +1444,7 @@ ${agentInstructions}
               toolCalls,
               usage: accumulateUsage(entry.usage, responseUsage),
               usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-              activeTokens: getTotalTokens(responseUsage),
+              activeTokens: this.estimateContextTokens(this.listSessionMessages(sessionId)),
               status: "ask_permission",
               failReason: null,
               askPermissions: permissionPlan.askPermissions,
@@ -1441,6 +1456,17 @@ ${agentInstructions}
             messagePermissions: permissionPlan?.permissions,
           });
           waitingForUser = toolAppendResult.waitingForUser;
+
+          if (toolCalls && toolCalls.length > 0 && toolAppendResult.executions.length > 0) {
+            const turnInput = {
+              toolCalls: toolCalls as ToolCall[],
+              toolExecutions: toolAppendResult.executions.map((e) => e.result),
+            };
+            const nextEffort = effortManager.evaluate(turnInput);
+            if (nextEffort !== null && nextEffort !== currentReasoningEffort) {
+              currentReasoningEffort = nextEffort;
+            }
+          }
         }
 
         if (this.isInterrupted(sessionId)) {
@@ -1455,7 +1481,7 @@ ${agentInstructions}
           toolCalls,
           usage: accumulateUsage(entry.usage, responseUsage),
           usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-          activeTokens: getTotalTokens(responseUsage),
+          activeTokens: this.estimateContextTokens(this.listSessionMessages(sessionId)),
           status: refusal ? "failed" : waitingForUser ? "waiting_for_user" : toolCalls ? "processing" : "completed",
           failReason: refusal ? refusal : entry.failReason,
           askPermissions: undefined,
@@ -1463,14 +1489,17 @@ ${agentInstructions}
         }));
 
         if (refusal) {
+          effortManager.reset();
           return;
         }
 
         if (waitingForUser) {
+          effortManager.reset();
           return;
         }
 
         if (!toolCalls) {
+          effortManager.reset();
           return;
         }
       }
@@ -1560,7 +1589,16 @@ ${agentInstructions}
     this.throwIfAborted(signal);
     const rawLlmResponse = response.choices?.[0]?.message?.content;
     const llmResponse = typeof rawLlmResponse === "string" ? rawLlmResponse : "";
-    const compactedSummary = llmResponse.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim();
+    let compactedSummary: string;
+    try {
+      const parsed = JSON.parse(llmResponse);
+      compactedSummary =
+        typeof parsed.summary === "string" && parsed.summary.trim()
+          ? `Summary: ${parsed.summary.trim()}\nKey files: ${Array.isArray(parsed.keyFiles) ? parsed.keyFiles.join(", ") : "none"}\nPending: ${Array.isArray(parsed.pendingActions) ? parsed.pendingActions.join("; ") : "none"}`
+          : llmResponse.trim();
+    } catch {
+      compactedSummary = llmResponse.trim();
+    }
 
     const now = new Date().toISOString();
     const responseUsage = response.usage ?? null;
@@ -1568,7 +1606,7 @@ ${agentInstructions}
       ...entry,
       usage: accumulateUsage(entry.usage, responseUsage),
       usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-      activeTokens: getTotalTokens(responseUsage),
+      activeTokens: this.estimateContextTokens(sessionMessages),
       updateTime: now,
     }));
 
@@ -2279,7 +2317,7 @@ ${agentInstructions}
       permissionOverrides?: UserToolPermission[];
       messagePermissions?: MessageToolPermission[];
     } = {}
-  ): Promise<{ waitingForUser: boolean }> {
+  ): Promise<{ waitingForUser: boolean; executions: ToolCallExecution[] }> {
     const hooks: ToolExecutionHooks = {
       onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
@@ -2307,7 +2345,7 @@ ${agentInstructions}
       toolExecutions.push(...executions);
     }
     if (this.isInterrupted(sessionId)) {
-      return { waitingForUser: false };
+      return { waitingForUser: false, executions: toolExecutions };
     }
     let waitingForUser = false;
     const followUpMessages: SessionMessage[] = [];
@@ -2333,7 +2371,7 @@ ${agentInstructions}
     for (const followUpMessage of followUpMessages) {
       this.appendSessionMessage(sessionId, followUpMessage);
     }
-    return { waitingForUser };
+    return { waitingForUser, executions: toolExecutions };
   }
 
   private cloneUserPromptForMeta(prompt: UserPromptContent): UserPromptContent {
