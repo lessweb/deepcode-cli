@@ -1,0 +1,42 @@
+{
+  "name": "@vegamo/deepcode-cli",
+  "version": "0.1.30",
+  "description": "Deep Code CLI - Vibe coding for the deepseek-v4 model in your terminal",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lessweb/deepcode-cli.git"
+  },
+  "homepage": "https://deepcode.vegamo.cn",
+  "bin": {
+    "deepcode": "./dist/cli.js"
+  },
+  "main": "./dist/cli.js",
+  "files": [
+    "dist/cli.js",
+    "dist/bundled/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ./ --noEmit",
+    "bundle": "node ../../scripts/esbuild.config.js",
+    "build": "npm run typecheck && npm run bundle && node ../../scripts/copy-bundle-assets.js && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
+    "prepublishOnly": "npm run build",
+    "format": "prettier --write .",
+    "test": "node src/tests/run-tests.mjs"
+  },
+  "dependencies": {
+    "@vegamo/deepcode-core": "file:../core",
+    "chalk": "^5.6.2",
+    "gradient-string": "^3.0.0",
+    "ignore": "^7.0.5",
+    "ink": "^7.0.4",
+    "ink-gradient": "^4.0.1",
+    "react": "^19.2.5"
+  }
+}

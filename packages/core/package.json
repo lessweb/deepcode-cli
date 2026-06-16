@@ -1,0 +1,39 @@
+{
+  "name": "@vegamo/deepcode-core",
+  "version": "0.1.30",
+  "description": "Deep Code core library — LLM session management, tool execution, and shared utilities",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lessweb/deepcode-cli.git"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist/**",
+    "templates/**"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p ./ --noEmit",
+    "build": "tsc -p ./",
+    "prepublishOnly": "npm run build",
+    "format": "prettier --write .",
+    "test": "node src/tests/run-tests.mjs"
+  },
+  "dependencies": {
+    "chalk": "^5.6.2",
+    "ejs": "^5.0.2",
+    "gray-matter": "^4.0.3",
+    "ignore": "^7.0.5",
+    "openai": "^6.35.0",
+    "undici": "^7.25.0",
+    "zod": "^4.4.3"
+  }
+}

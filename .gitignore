@@ -1,8 +1,11 @@
 node_modules/
 dist/
+out/
+src/generated/
 .DS_Store
 .idea/
 .vscode/
 *.tgz
 *.log
+*.vsix
 .deepcode/settings.json

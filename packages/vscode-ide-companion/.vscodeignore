@@ -1,0 +1,8 @@
+.vscode/**
+.vscodeignore
+node_modules/**
+src/**
+tsconfig*.json
+**/*.ts
+!dist/**
+!LICENSE

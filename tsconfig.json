@@ -1,21 +1,38 @@
 {
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "ignoreDeprecations": "6.0",
-    "lib": ["ES2022"],
-    "jsx": "react-jsx",
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "noImplicitAny": true,
+    "noImplicitOverride": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
     "forceConsistentCasingInFileNames": true,
+    "noPropertyAccessFromIndexSignature": true,
+    "noUnusedLocals": true,
+    "strictBindCallApply": true,
+    "strictFunctionTypes": true,
+    "strictNullChecks": true,
+    "strictPropertyInitialization": true,
     "resolveJsonModule": true,
-    "noEmit": true,
-    "isolatedModules": true,
+    "sourceMap": true,
+    "composite": true,
+    "incremental": true,
+    "declaration": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"]
+    "verbatimModuleSyntax": true,
+    "lib": ["ES2023"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "types": ["node"],
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist"]
+  "include": [],
+  "exclude": ["node_modules", "dist"],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/cli" },
+    { "path": "./packages/vscode-ide-companion" }
+  ]
 }

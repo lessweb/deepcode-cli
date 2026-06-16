@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "ignoreDeprecations": "6.0",
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true,
+    "isolatedModules": true,
+    "allowSyntheticDefaultImports": true,
+    "types": ["node"],
+    "baseUrl": ".",
+    "paths": {
+      "@vegamo/deepcode-core": ["../core/src/index.ts"],
+      "@vegamo/deepcode-core/*": ["../core/src/*"]
+    }
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "../core/src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

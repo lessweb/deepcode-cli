@@ -1,56 +1,32 @@
 {
-  "name": "@vegamo/deepcode-cli",
-  "version": "0.1.30",
-  "description": "Deep Code CLI - Vibe coding for the deepseek-v4 model in your terminal",
+  "name": "deepcode",
+  "description": "Deep Code — CLI, core library, and VSCode companion",
   "license": "MIT",
+  "packageManager": "npm@10.9.4",
   "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/lessweb/deepcode-cli.git"
-  },
-  "homepage": "https://deepcode.vegamo.cn",
-  "bin": {
-    "deepcode": "./dist/cli.js"
-  },
-  "main": "./dist/cli.js",
-  "files": [
-    "dist/cli.js",
-    "dist/bundled/**",
-    "templates/tools/**",
-    "templates/prompts/**",
-    "templates/skills/**",
-    "README.md",
-    "LICENSE"
-  ],
-  "engines": {
-    "node": ">=22"
+    "url": "git+https://github.com/lessweb/deepcode-cli.git"
   },
   "scripts": {
-    "typecheck": "tsc -p ./ --noEmit",
-    "bundle": "esbuild ./src/cli.tsx --bundle --platform=node --format=esm --target=node18 --outfile=dist/cli.js --banner:js=\"#!/usr/bin/env node\" --jsx=automatic --jsx-import-source=react --packages=external --log-override:empty-import-meta=silent && node scripts/copy_bundle_assets.js",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write 'src/**/*.{ts,tsx}'",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx}'",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "generate": "node scripts/generate-git-commit-info.js",
+    "bundle": "npm run generate && node scripts/esbuild.config.js && node scripts/copy-bundle-assets.js",
+    "lint": "eslint 'packages/*/src/**/*.{ts,tsx}' 'scripts/*.js'",
+    "lint:fix": "eslint 'packages/*/src/**/*.{ts,tsx}' 'scripts/*.js' --fix",
+    "format": "prettier --write 'packages/*/src/**/*.{ts,tsx}' 'scripts/*.js'",
+    "format:check": "prettier --check 'packages/*/src/**/*.{ts,tsx}' 'scripts/*.js'",
     "check": "npm run typecheck && npm run lint && npm run format:check",
-    "build": "npm run check && npm run bundle && node -e \"require('fs').chmodSync('dist/cli.js', 0o755)\"",
-    "test": "node src/tests/run-tests.mjs",
-    "test:single": "tsx --test",
-    "prepack": "npm run build",
+    "clean": "node scripts/clean.js",
+    "build": "node scripts/build.js",
+    "build:vscode": "node scripts/build-vscode-companion.js",
+    "start": "node scripts/start.js",
+    "build-and-start": "npm run build && npm run start",
+    "test": "npm run test --workspaces --if-present",
     "prepare": "husky"
-  },
-  "dependencies": {
-    "chalk": "^5.6.2",
-    "ejs": "^5.0.2",
-    "gradient-string": "^3.0.0",
-    "gray-matter": "^4.0.3",
-    "ignore": "^7.0.5",
-    "ink": "^7.0.4",
-    "ink-gradient": "^4.0.1",
-    "openai": "^6.35.0",
-    "react": "^19.2.5",
-    "undici": "^7.25.0",
-    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
