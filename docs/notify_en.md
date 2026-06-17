@@ -6,6 +6,8 @@ When the AI assistant finishes a round of tasks, Deep Code can automatically exe
 
 Configure the `notify` field in `settings.json` with the full path to an executable script. Every time the AI assistant completes a task response, Deep Code executes that script and injects context as environment variables.
 
+On Windows, when `notify` is not configured, Deep Code uses the built-in desktop tip. Clicking the tip attempts to focus the terminal window that launched the CLI. A custom `notify` script takes precedence over the built-in tip.
+
 ## Injected Environment Variables
 
 | Variable | Description |
@@ -13,6 +15,7 @@ Configure the `notify` field in `settings.json` with the full path to an executa
 | `DURATION` | Session duration in seconds (integer) |
 | `STATUS` | Session status: `"completed"` or `"failed"` |
 | `FAIL_REASON` | Failure reason (only set on failure) |
+| `QUESTION` | The text content of the last user question |
 | `BODY` | The text content of the last AI assistant reply |
 | `TITLE` | Session title (matches the resume list title) |
 
