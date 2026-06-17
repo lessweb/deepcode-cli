@@ -3,6 +3,8 @@ import { Box, Text } from "ink";
 import { useTerminalInput } from "../hooks";
 import type { AskPermissionRequest, AskPermissionScope, UserToolPermission } from "../../common/permissions";
 import type { PermissionScope } from "../../settings";
+import { useTheme, LIGHT_THEME } from "../theme";
+import type { ThemeTokens } from "../theme";
 
 export type PermissionPromptResult = {
   permissions: UserToolPermission[];
@@ -42,6 +44,7 @@ const ALWAYS_ALLOWED_SCOPES = new Set<AskPermissionScope>([
 ]);
 
 export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React.ReactElement | null {
+  const theme = useTheme();
   const prompts = useMemo(() => buildScopePrompts(requests), [requests]);
   const [index, setIndex] = useState(0);
   const [cursor, setCursor] = useState(0);
@@ -50,7 +53,7 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
 
   const effectiveIndex = findNextPromptIndex(prompts, index, alwaysAllows);
   const prompt = prompts[effectiveIndex] ?? null;
-  const options = prompt ? buildOptions(prompt.scope) : [];
+  const options = prompt ? buildOptions(prompt.scope, theme) : [];
 
   useEffect(() => {
     setIndex(0);
@@ -126,9 +129,9 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="yellow" paddingX={1} marginY={1}>
+    <Box flexDirection="column" borderStyle="round" borderColor={theme.status.warning} paddingX={1} marginY={1}>
       <Box marginBottom={1}>
-        <Text color="yellow" bold>
+        <Text color={theme.status.warning} bold>
           Permission required
         </Text>
         <Text dimColor>
@@ -136,15 +139,17 @@ export function PermissionPrompt({ requests, onSubmit, onCancel }: Props): React
           {Math.min(effectiveIndex + 1, prompts.length)}/{prompts.length}
         </Text>
       </Box>
-      <Text bold>{prompt.request.name}</Text>
-      <Text>{prompt.request.command}</Text>
+      <Text bold color={theme.text.primary}>
+        {prompt.request.name}
+      </Text>
+      <Text color={theme.text.primary}>{prompt.request.command}</Text>
       {prompt.request.description ? <Text dimColor>{prompt.request.description}</Text> : null}
       <Box marginTop={1}>
-        <Text>Do you want to proceed?</Text>
+        <Text color={theme.text.primary}>Do you want to proceed?</Text>
       </Box>
       <Box flexDirection="column" marginTop={1}>
         {options.map((option, optionIndex) => (
-          <Text key={option.kind} color={optionIndex === cursor ? "cyanBright" : undefined}>
+          <Text key={option.kind} color={optionIndex === cursor ? theme.brand.accent : undefined}>
             {optionIndex === cursor ? "> " : "  "}
             {optionIndex + 1}. {renderOptionLabel(option)}
           </Text>
@@ -179,14 +184,14 @@ function buildScopePrompts(requests: AskPermissionRequest[]): ScopePrompt[] {
   return prompts;
 }
 
-function buildOptions(scope: AskPermissionScope): PromptOption[] {
+function buildOptions(scope: AskPermissionScope, theme: ThemeTokens): PromptOption[] {
   const options: PromptOption[] = [{ kind: "allow", label: "Yes" }];
   if (isAlwaysAllowedScope(scope)) {
     options.push({
       kind: "always",
       label: "Yes, and always allow ",
       scopeDescription: describeScope(scope),
-      scopeColor: getScopeRiskColor(scope),
+      scopeColor: getScopeRiskColor(scope, theme),
     });
   }
   options.push({ kind: "deny", label: "No" });
@@ -226,24 +231,25 @@ function isAlwaysAllowedScope(scope: AskPermissionScope): scope is PermissionSco
   return ALWAYS_ALLOWED_SCOPES.has(scope);
 }
 
-export function getScopeRiskColor(scope: AskPermissionScope): string {
+export function getScopeRiskColor(scope: AskPermissionScope, theme?: ThemeTokens): string {
+  const t = theme ?? LIGHT_THEME;
   switch (scope) {
     case "read-in-cwd":
     case "query-git-log":
-      return "#22c55e";
+      return t.risk.low;
     case "read-out-cwd":
     case "write-in-cwd":
     case "network":
     case "mcp":
-      return "#f59e0b";
+      return t.risk.medium;
     case "write-out-cwd":
     case "delete-in-cwd":
     case "delete-out-cwd":
     case "mutate-git-log":
     case "unknown":
-      return "#ef4444";
+      return t.risk.high;
     default:
-      return "#ef4444";
+      return t.risk.critical;
   }
 }
 

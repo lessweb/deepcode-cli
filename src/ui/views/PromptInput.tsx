@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useStdout } from "ink";
 import type { DOMElement } from "ink";
 import chalk from "chalk";
+import { useTheme } from "../theme";
+import { useAppContext } from "../contexts";
 import { ARGS_SEPARATOR } from "../constants";
 import {
   EMPTY_BUFFER,
@@ -61,9 +63,10 @@ import {
 } from "../hooks";
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "../../settings";
-import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
+import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown, ThemeDropdown } from "../components";
 import type { SessionEntry, SkillInfo } from "../../session";
 import type { UserToolPermission } from "../../common/permissions";
+import type { ThemePreset } from "../theme";
 
 export type PromptSubmission = {
   text: string;
@@ -93,19 +96,24 @@ type Props = {
   placeholder?: string;
   runningProcesses?: SessionEntry["processes"];
   promptDraft?: PromptDraft | null;
+  currentPreset: ThemePreset;
   onSubmit: (submission: PromptSubmission) => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
   onRawModeChange?: (mode: string) => void;
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
+  onThemePreview?: (preset: ThemePreset) => void;
+  onThemeRevert?: () => void;
+  onThemeChange?: (preset: ThemePreset) => void;
 };
 
 const PROMPT_PREFIX_WIDTH = 2;
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine(): React.ReactElement {
+  const theme = useTheme();
   return (
     <Box width={PROMPT_PREFIX_WIDTH}>
-      <Text color="#229ac3">{"> "}</Text>
+      <Text color={theme.brand.accent}>{"> "}</Text>
     </Box>
   );
 });
@@ -123,15 +131,21 @@ export const PromptInput = React.memo(function PromptInput({
   placeholder,
   runningProcesses,
   promptDraft,
+  currentPreset,
   onSubmit,
   onModelConfigChange,
   onInterrupt,
   onToggleProcessStdout,
   onRawModeChange,
+  onThemePreview,
+  onThemeRevert,
+  onThemeChange,
 }: Props): React.ReactElement {
   const { exit } = useApp();
   const { stdout } = useStdout();
   const inputTextRef = useRef<DOMElement | null>(null);
+  const theme = useTheme();
+  const { switchTheme, hasCustomThemeConfig } = useAppContext();
   const [buffer, setBuffer] = useState<PromptBufferState>(EMPTY_BUFFER);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [selectedSkills, setSelectedSkills] = useState<SkillInfo[]>([]);
@@ -141,6 +155,7 @@ export const PromptInput = React.memo(function PromptInput({
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [openRawModelDropdown, setOpenRawModelDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [showThemeDropdown, setShowThemeDropdown] = useState(false);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
   const [hasTerminalFocus, setHasTerminalFocus] = useState(true);
@@ -170,18 +185,27 @@ export const PromptInput = React.memo(function PromptInput({
     !showSkillsDropdown &&
     !showModelDropdown &&
     !openRawModelDropdown &&
+    !showThemeDropdown &&
     fileMentionToken !== null &&
     fileMentionKey !== dismissedFileMentionKey;
   const slashItems = React.useMemo(() => buildSlashCommands(skills), [skills]);
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      showSkillsDropdown || showModelDropdown || openRawModelDropdown || showFileMentionMenu
+      showSkillsDropdown || showModelDropdown || showThemeDropdown || showFileMentionMenu || openRawModelDropdown
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
           : [],
-    [showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu, slashToken, slashItems]
+    [
+      showSkillsDropdown,
+      showModelDropdown,
+      showThemeDropdown,
+      showFileMentionMenu,
+      openRawModelDropdown,
+      slashToken,
+      slashItems,
+    ]
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
@@ -202,9 +226,16 @@ export const PromptInput = React.memo(function PromptInput({
     : busy
       ? busyStatusText
       : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
+
   const showFooterText = useMemo(
-    () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
-    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
+    () =>
+      showMenu ||
+      showSkillsDropdown ||
+      openRawModelDropdown ||
+      showModelDropdown ||
+      showThemeDropdown ||
+      showFileMentionMenu,
+    [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showThemeDropdown, showFileMentionMenu]
   );
   const inputContentWidth = Math.max(1, screenWidth - PROMPT_PREFIX_WIDTH);
 
@@ -379,7 +410,7 @@ export const PromptInput = React.memo(function PromptInput({
         setPendingExit(false);
       }
 
-      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
+      if (openRawModelDropdown || showSkillsDropdown || showModelDropdown || showThemeDropdown) {
         return;
       }
 
@@ -677,6 +708,12 @@ export const PromptInput = React.memo(function PromptInput({
       setOpenRawModelDropdown(true);
       return;
     }
+    if (item.kind === "theme") {
+      clearSlashToken();
+      setShowSkillsDropdown(false);
+      setShowThemeDropdown(true);
+      return;
+    }
     if (item.kind === "new") {
       onSubmit({ text: "", imageUrls: [], command: "new" });
       resetPromptInput();
@@ -756,20 +793,22 @@ export const PromptInput = React.memo(function PromptInput({
     clearUndoRedoStacks();
   }
 
+  const isFocused = useMemo(() => !disabled && hasTerminalFocus, [disabled, hasTerminalFocus]);
+
   const matchedCommand = slashToken ? findExactSlashCommand(slashItems, slashToken) : null;
   const inlineHint = matchedCommand?.args ? ` ${matchedCommand.args.join(ARGS_SEPARATOR)}` : "";
 
   return (
     <Box flexDirection="column" width={screenWidth}>
       {imageUrls.length > 0 ? (
-        <Box>
-          <Text color="magenta">{formatImageAttachmentStatus(imageUrls.length)}</Text>
+        <Box marginLeft={2}>
+          <Text color={theme.status.info}>{formatImageAttachmentStatus(imageUrls.length)}</Text>
           <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
         </Box>
       ) : null}
       {selectedSkills.length > 0 ? (
-        <Box>
-          <Text color="magenta" wrap="truncate-end">
+        <Box marginLeft={2}>
+          <Text color={theme.status.info} wrap="truncate-end">
             {formatSelectedSkillsStatus(selectedSkills)}
           </Text>
           <Text dimColor> (use /skills to edit)</Text>
@@ -783,7 +822,7 @@ export const PromptInput = React.memo(function PromptInput({
         borderBottom={true}
         borderLeft={false}
         borderRight={false}
-        borderDimColor
+        borderColor={isFocused ? theme.brand.accent : theme.border.default}
       >
         <PromptPrefixLine />
         <Box ref={inputTextRef} flexGrow={1} flexShrink={1} width={inputContentWidth}>
@@ -793,7 +832,8 @@ export const PromptInput = React.memo(function PromptInput({
               !disabled && hasTerminalFocus,
               placeholder,
               pastesRef.current,
-              !busy && !terminalCursorActive
+              !busy && !terminalCursorActive,
+              theme.status.warning
             )}
           </Text>
           {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
@@ -821,6 +861,20 @@ export const PromptInput = React.memo(function PromptInput({
         onModelConfigChange={onModelConfigChange}
         onStatusMessage={setStatusMessage}
       />
+      <ThemeDropdown
+        open={showThemeDropdown}
+        width={screenWidth}
+        hasCustomConfig={hasCustomThemeConfig}
+        currentPreset={currentPreset}
+        onClose={() => setShowThemeDropdown(false)}
+        onThemeChange={(preset: ThemePreset) => {
+          onThemeChange?.(preset);
+          switchTheme?.(preset);
+        }}
+        onThemePreview={onThemePreview}
+        onThemeRevert={onThemeRevert}
+        onStatusMessage={setStatusMessage}
+      />
       <FileMentionMenu
         open={showFileMentionMenu}
         width={screenWidth}
@@ -835,7 +889,7 @@ export const PromptInput = React.memo(function PromptInput({
       />
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showFooterText && (
-        <Box>
+        <Box marginLeft={2}>
           <Text dimColor>{footerText}</Text>
         </Box>
       )}
@@ -919,11 +973,13 @@ export function renderBufferWithCursor(
   isFocused: boolean,
   placeholder?: string,
   validPastes?: Map<number, string>,
-  showSimulatedCursor = true
+  showSimulatedCursor = true,
+  highlightColor?: string
 ): string {
   const text = state.text || "";
   const cursor = Math.max(0, Math.min(state.cursor, text.length));
   const validIds = validPastes ?? new Map<number, string>();
+  const h = highlightColor ?? "#faad14";
 
   if (text.length === 0 && placeholder) {
     if (!isFocused || !showSimulatedCursor) {
@@ -940,13 +996,13 @@ export function renderBufferWithCursor(
   }
 
   if (!isFocused || !showSimulatedCursor) {
-    return highlightPasteMarkersInText(text, validIds);
+    return highlightPasteMarkersInText(text, validIds, h);
   }
 
-  return renderFocusedText(text, cursor, validIds);
+  return renderFocusedText(text, cursor, validIds, h);
 }
 
-function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): string {
+function highlightPasteMarkersInText(s: string, validIds: Map<number, string>, highlightColor: string): string {
   if (!s.includes("[paste #")) return s.endsWith("\n") ? `${s} ` : s;
   PASTE_MARKER_REGEX.lastIndex = 0;
   let result = "";
@@ -955,7 +1011,7 @@ function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): 
   while ((match = PASTE_MARKER_REGEX.exec(s)) !== null) {
     result += s.slice(pos, match.index);
     const id = Number.parseInt(match[1]!, 10);
-    result += validIds.has(id) ? chalk.yellow(match[0]) : match[0];
+    result += validIds.has(id) ? chalk.hex(highlightColor)(match[0]) : match[0];
     pos = match.index + match[0].length;
   }
   result += s.slice(pos);
@@ -968,7 +1024,12 @@ function highlightPasteMarkersInText(s: string, validIds: Map<number, string>): 
  * anywhere (including inside or at the boundary of a paste marker) and the
  * marker will still be highlighted correctly.
  */
-function renderFocusedText(text: string, cursor: number, validIds: Map<number, string>): string {
+function renderFocusedText(
+  text: string,
+  cursor: number,
+  validIds: Map<number, string>,
+  highlightColor: string
+): string {
   let result = "";
   let pos = 0;
   PASTE_MARKER_REGEX.lastIndex = 0;
@@ -981,16 +1042,16 @@ function renderFocusedText(text: string, cursor: number, validIds: Map<number, s
     const isReal = validIds.has(id);
 
     // 1. Non-marker segment before this marker.
-    result += renderTextSegmentWithCursor(text, pos, markerStart, cursor, false);
+    result += renderTextSegmentWithCursor(text, pos, markerStart, cursor, false, highlightColor);
     pos = markerStart;
 
     // 2. Marker segment — highlighted only if it corresponds to a real paste.
-    result += renderTextSegmentWithCursor(text, pos, markerEnd, cursor, isReal);
+    result += renderTextSegmentWithCursor(text, pos, markerEnd, cursor, isReal, highlightColor);
     pos = markerEnd;
   }
 
   // 3. Remainder after the last marker.
-  result += renderTextSegmentWithCursor(text, pos, text.length, cursor, false);
+  result += renderTextSegmentWithCursor(text, pos, text.length, cursor, false, highlightColor);
 
   return result;
 }
@@ -1004,7 +1065,8 @@ function renderTextSegmentWithCursor(
   start: number,
   end: number,
   cursor: number,
-  highlighted: boolean
+  highlighted: boolean,
+  highlightColor: string
 ): string {
   if (start >= end) return "";
 
@@ -1013,12 +1075,12 @@ function renderTextSegmentWithCursor(
 
   // Cursor not in this segment – just return the text.
   if (cursorRel < 0 || cursorRel > segText.length) {
-    return highlighted ? chalk.yellow(segText) : segText;
+    return highlighted ? chalk.hex(highlightColor)(segText) : segText;
   }
 
   // Cursor is exactly at `end` (which equals `segText.length`).
   if (cursorRel === segText.length) {
-    return highlighted ? chalk.yellow(segText) + renderCursorCell(" ") : segText + renderCursorCell(" ");
+    return highlighted ? chalk.hex(highlightColor)(segText) + renderCursorCell(" ") : segText + renderCursorCell(" ");
   }
 
   // Cursor is somewhere inside the segment.
@@ -1034,7 +1096,7 @@ function renderTextSegmentWithCursor(
   const before = segText.slice(0, cursorRel);
   const after = segText.slice(cursorRel + 1);
   if (highlighted) {
-    return chalk.yellow(before) + renderCursorCell(at) + chalk.yellow(after);
+    return chalk.hex(highlightColor)(before) + renderCursorCell(at) + chalk.hex(highlightColor)(after);
   }
   return before + renderCursorCell(at) + after;
 }

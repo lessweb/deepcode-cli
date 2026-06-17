@@ -67,7 +67,7 @@ export function UpdatePrompt({ currentVersion, latestVersion, installCommand, on
         {options.map((option, index) => {
           const selected = index === selectedIndex;
           return (
-            <Text key={option.value} color={selected ? "green" : undefined}>
+            <Text key={option.value} color={selected ? "#229ac3" : undefined}>
               {selected ? "> " : "  "}
               {index + 1}. {option.label}
             </Text>

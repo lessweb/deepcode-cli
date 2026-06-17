@@ -1,4 +1,6 @@
 import { defaultsToThinkingMode } from "./common/model-capabilities";
+import { resolveTheme } from "./ui/theme";
+import type { ThemeTokens, ThemeSettings } from "./ui/theme";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -58,6 +60,7 @@ export type DeepcodingSettings = {
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
+  theme?: ThemeSettings;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -75,6 +78,7 @@ export type ResolvedDeepcodingSettings = {
   mcpServers?: Record<string, McpServerConfig>;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
+  theme: ThemeTokens;
 };
 
 export type ModelConfigSelection = {
@@ -393,6 +397,7 @@ export function resolveSettingsSources(
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
+    theme: resolveTheme(userSettings?.theme ?? projectSettings?.theme),
   };
 }
 

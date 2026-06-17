@@ -47,7 +47,7 @@ Create `~/.deepcode/settings.json`:
 
 The configuration file is shared with the [Deep Code VSCode extension](https://github.com/lessweb/deepcode) — configure once, use everywhere.
 
-For complete configuration details (multi-level priority, environment variables, etc.), see [docs/configuration.md](docs/configuration.md).
+For complete configuration details (multi-level priority, environment variables, etc.), see [docs/configuration_en.md](docs/configuration_en.md).
 
 ## Key Features
 
@@ -77,6 +77,7 @@ Skills are discovered from these locations, in priority order:
 | `/resume`        | Choose a previous conversation to continue              |
 | `/continue`      | Continue the active conversation or pick one to resume  |
 | `/model`         | Switch model, thinking mode, and reasoning effort       |
+| `/theme`         | Open theme picker with live preview                     |
 | `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)    |
 | `/init`          | Initialize an AGENTS.md file (LLM project instructions) |
 | `/skills`        | List available skills                                   |
@@ -108,13 +109,31 @@ Yes. Deep Code offers a full-featured VSCode extension, available on the [VSCode
 
 Deep Code supports multimodal input — you can paste images from the clipboard with `Ctrl+V`. However, `deepseek-v4` does not support multimodal yet. Some models have multimodal capabilities but impose strict limits on multi-turn dialogue requests. For multimodal input, we recommend using the Volcano Ark `Doubao-Seed-2.0-pro` model, which has the best integration.
 
-### How to automatically send a Slack message after a task completes?
+### How to send a Slack message after a task completes?
 
-Write a shell notification script that calls a Slack webhook, then set the `notify` field in `~/.deepcode/settings.json` to the full path of the script. For detailed steps, see [docs/notify_en.md](docs/notify_en.md).
+Write a shell notification script that calls a Slack webhook, then set the `notify` field in `~/.deepcode/settings.json` to the full path of the script.
+
+> 📖 See [docs/notify_en.md](docs/notify_en.md) for details.
 
 ### How do I enable web search?
 
-Deep Code comes with a built-in, free Web Search tool that works well for most use cases. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
+Deep Code comes with a built-in, free Web Search tool that works well for most use cases. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For details, refer to: https://github.com/qorzj/web_search_cli
+
+### How do I configure MCP?
+
+Deep Code supports MCP (Model Context Protocol) to connect external services such as GitHub, browsers, databases, and more. Configure the `mcpServers` field in `settings.json` to enable it, then use the `/mcp` command to view MCP server status and available tools.
+
+> 📖 See [docs/mcp_en.md](docs/mcp.md) for details.
+
+### How to configure notifications after a task completes?
+
+When the AI assistant completes a task, Deep Code can automatically execute a notification script to send the results to your specified channel (e.g., Slack, system notifications, etc.).
+
+> 📖 See [docs/notify_en.md](docs/notify_en.md) for details.
+
+### Does Deep Code only support YOLO mode?
+
+No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission_en.md](docs/permission.md) for details.
 
 ### Does it support Coding Plan?
 
@@ -131,21 +150,17 @@ Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compati
 }
 ```
 
-### How do I configure MCP?
+### How to use and customize themes?
 
-Deep Code supports MCP (Model Context Protocol) to connect external services such as GitHub, browsers, databases, and more. Configure the `mcpServers` field in `settings.json` to enable it, then use the `/mcp` command to view MCP server status and available tools.
+Deep Code CLI includes 8 built-in preset themes, supports the `/theme` command for live preview and switching, and allows full customization via `settings.json`.
 
-For detailed setup instructions, see: [docs/mcp.md](docs/mcp.md)
+**Quick switch:** Run `/theme` to open the picker. Browse with arrow keys, confirm with Enter, cancel with Esc.
 
-### How to configure Deep Code to send notifications after a task completes?
+**Available presets:** `light` (default), `dark`, `github-light`, `github-dark`, `monokai`, `dracula`, `ansi-light`, `ansi-dark`.
 
-When the AI assistant completes a task, Deep Code can automatically execute a notification script to send the task results to the specified channel (e.g., Slack, system notifications, etc.).
+**Custom themes:** Supports simplified color palette (`colors`), partial overrides (`overrides`), and full customization (`tokens`).
 
-For detailed configuration instructions, see: [docs/notify_en.md](docs/notify_en.md)
-
-### Does Deep Code only support YOLO mode?
-
-No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission.md](docs/permission.md) for details.
+> 📖 See [docs/configuration_en.md](docs/configuration_en.md) for the full configuration guide.
 
 ## Contributing
 

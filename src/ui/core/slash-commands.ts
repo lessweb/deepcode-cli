@@ -4,6 +4,7 @@ export type SlashCommandKind =
   | "skill"
   | "skills"
   | "model"
+  | "theme"
   | "new"
   | "init"
   | "resume"
@@ -36,10 +37,16 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Select model, thinking mode and effort control",
   },
   {
+    kind: "theme",
+    name: "theme",
+    label: "/theme",
+    description: "Change the theme",
+  },
+  {
     kind: "new",
     name: "new",
     label: "/new",
-    description: "Start a fresh conversation",
+    description: "Start a new session (previous session resumable with /resume)",
   },
   {
     kind: "init",

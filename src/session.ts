@@ -248,7 +248,8 @@ export type MessageMeta = {
   resultMd?: string;
   asThinking?: boolean;
   isSummary?: boolean;
-  isModelChange?: boolean;
+  /** 标记设置变更消息（模型切换、主题切换等） */
+  settingChange?: "model" | "theme" | string;
   skill?: SkillInfo;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;

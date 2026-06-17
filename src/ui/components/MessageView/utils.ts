@@ -2,6 +2,7 @@ import type { DiffPreviewLine, ToolSummary } from "./types";
 import type { SessionMessage } from "../../../session";
 import { RawMode } from "../../contexts";
 import chalk from "chalk";
+import { getCurrentThemedChalk } from "../../theme";
 
 /** Type guard that checks whether a value is a plain object (not null, not an array). */
 export function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -222,13 +223,14 @@ export function parseDiffPreview(diffPreview: string): DiffPreviewLine[] {
 }
 
 export function renderMessageToStdout(message: SessionMessage, mode: RawMode): string {
+  const tc = getCurrentThemedChalk();
   if (!message.visible) {
     return "";
   }
 
   if (message.role === "user") {
     const text = message.content || "(no content)";
-    return chalk(`> ${text}`);
+    return tc.brandPrimary(`> ${text}`);
   }
 
   if (message.role === "assistant") {
@@ -249,27 +251,27 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     const statusLine = `${chalk("✧")} ${chalk(formatStatusName(summary.name))}${params ? ` ${chalk(params)}` : ""}`;
 
     const metaResultMd = typeof message.meta?.resultMd === "string" ? message.meta.resultMd.trim() : "";
-    const result = metaResultMd ? `\n${chalk.dim("  └ Result")}\n${metaResultMd}` : "";
+    const result = metaResultMd ? `\n${tc.dim("  └ Result")}\n${metaResultMd}` : "";
 
     const planLines = getUpdatePlanPreviewLines(summary);
     if (planLines.length > 0) {
       const planText = planLines.map((line) => `  ${line}`).join("\n");
-      return `${statusLine}\n${chalk.dim("  └ Plan")}\n${planText}${result}`;
+      return `${statusLine}\n${tc.dim("  └ Plan")}\n${planText}${result}`;
     }
 
     return `${statusLine}${result}`;
   }
 
   if (message.role === "system") {
-    if (message.meta?.isModelChange) {
-      return chalk(`> ${message.content}`);
+    if (message.meta?.settingChange) {
+      return tc.brandPrimary(`> ${message.content}`);
     }
     if (message.meta?.skill && typeof message.meta.skill === "object") {
       const skillName = (message.meta.skill as { name?: unknown }).name;
       return chalk(`⚡ Loaded skill: ${typeof skillName === "string" ? skillName : ""}`);
     }
     if (message.meta?.isSummary) {
-      return chalk.dim.italic("(conversation summary inserted)");
+      return tc.dim(tc.italic("(conversation summary inserted)"));
     }
     return "";
   }
