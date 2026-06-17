@@ -1,3 +1,5 @@
+import { proxyFetch } from "./proxy";
+
 const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
 const DEFAULT_REPORT_TIMEOUT_MS = 3000;
 
@@ -20,7 +22,7 @@ export function reportNewPrompt(options: NewPromptReportOptions): void {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  void fetch(DEFAULT_NEW_PROMPT_API_URL, {
+  void proxyFetch(DEFAULT_NEW_PROMPT_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
