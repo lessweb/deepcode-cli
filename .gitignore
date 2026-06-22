@@ -1,8 +1,27 @@
-node_modules/
-dist/
+# OS metadata
 .DS_Store
+Thumbs.db
+
+# Dependency directory
+node_modules/
+# Ignore built ts files
+dist/
+out/
+
+
+# Editors
 .idea/
 .vscode/
 *.tgz
 *.log
+*.vsix
 .deepcode/settings.json
+
+# TypeScript build info files
+*.tsbuildinfo
+
+# Generated files
+packages/cli/src/generated/
+packages/core/src/generated/
+packages/vscode-ide-companion/*.vsix
+packages/vscode-ide-companion/templates/

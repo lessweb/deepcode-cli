@@ -1,0 +1,95 @@
+{
+  "name": "deepcode-vscode",
+  "version": "0.1.22",
+  "publisher": "vegamo",
+  "displayName": "Deep Code",
+  "description": "Deep Code VSCode companion — AI-assisted development in your editor",
+  "license": "MIT",
+  "type": "commonjs",
+  "main": "./out/extension.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lessweb/deepcode-cli.git"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "AI"
+  ],
+  "keywords": [
+    "deep-code",
+    "deep code",
+    "deep",
+    "code",
+    "cli",
+    "ide integration",
+    "ide companion"
+  ],
+  "icon": "resources/deepcoding_icon.png",
+  "activationEvents": [],
+  "files": [
+    "out/extension.js",
+    "resources/**",
+    "templates/**",
+    "README.md",
+    "README_cn.md",
+    "README_en.md",
+    "LICENSE"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "deepcode.openView",
+        "title": "Open Deep Code",
+        "icon": {
+          "light": "resources/deepcoding_icon.svg",
+          "dark": "resources/deepcoding_icon.svg"
+        }
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deepcode",
+          "title": "Deep Code",
+          "icon": "resources/deepcoding_icon.png"
+        }
+      ]
+    },
+    "views": {
+      "deepcode": [
+        {
+          "id": "deepcode.chatView",
+          "name": "Deep Code",
+          "icon": "resources/deepcoding_icon.png",
+          "type": "webview"
+        }
+      ]
+    },
+    "menus": {
+      "editor/title": [
+        {
+          "command": "deepcode.openView",
+          "group": "navigation@100"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p ./ --noEmit",
+    "build": "node ../../scripts/esbuild-vscode.config.js",
+    "prepublishOnly": "npm run build",
+    "package": "vsce package --no-dependencies",
+    "test": "node src/tests/run-tests.mjs"
+  },
+  "dependencies": {
+    "@vegamo/deepcode-core": "file:../core",
+    "markdown-it": "^14.2.0"
+  },
+  "devDependencies": {
+    "@types/markdown-it": "^14.1.1",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.6.0"
+  }
+}

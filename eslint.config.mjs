@@ -43,12 +43,43 @@ export default tseslint.config(
   },
   // Test files: relaxed rules
   {
-    files: ["src/tests/**/*.ts"],
+    files: ["packages/*/src/tests/**/*.ts", "packages/*/src/tests/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+      },
+    },
     rules: {
       "@typescript-eslint/no-explicit-any": "off",
       "@typescript-eslint/no-unused-vars": "off",
     },
   },
+  // Script files: Node.js environment
+  {
+    files: ["./scripts/**/*.js", "./scripts/**/*.mjs", "packages/*/scripts/**/*.js"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+      },
+    },
+  },
+  // Browser resources: VSCode webview scripts
+  {
+    files: ["packages/*/resources/**/*.js"],
+    languageOptions: {
+      globals: {
+        window: "readonly",
+        document: "readonly",
+        console: "readonly",
+        FileReader: "readonly",
+        Blob: "readonly",
+        URL: "readonly",
+        fetch: "readonly",
+      },
+    },
+  },
   // Prettier config: disable conflicting ESLint rules, MUST be last
-  prettierConfig,
+  prettierConfig
 );
