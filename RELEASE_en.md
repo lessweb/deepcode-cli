@@ -1,13 +1,14 @@
 # Release
 
-Deep Code uses two scripts to manage version releases in the monorepo:
+Deep Code uses three scripts to manage version releases in the monorepo:
 
 | Script | Command | Purpose |
 |--------|---------|---------|
 | `scripts/version.js` | `npm run release:version` | Bump all workspace package versions + regenerate lockfile |
-| `scripts/prepare-package.js` | `npm run prepare:package` | Build + quality checks + publish to npm + git commit & tag |
+| `scripts/prepare-package.js` | `npm run prepare:package` | Build CLI + quality checks + publish to npm + git commit & tag |
+| `scripts/prepare-vscode.js` | `npm run prepare:vscode` | Build VSCode extension + quality checks + publish to VS Code Marketplace + git commit & tag |
 
-Use them together: bump version first, then publish.
+Release flow: bump version first, then publish CLI and VSCode extension separately.
 
 ---
 
@@ -105,7 +106,7 @@ git tag v0.1.32
 
 ## prepare:package — Build and Publish to npm
 
-Runs quality checks, builds, publishes both npm packages, and automatically creates a git commit with tag.
+Runs quality checks, builds, publishes the CLI to npm, and automatically creates a git commit with tag.
 
 ### Basic Usage
 
@@ -122,7 +123,7 @@ npm run prepare:package -- <version> [options]
 | `--dry-run` | Preview mode, no actual writes |
 | `--force` | Skip main branch check, allow publishing from other branches |
 
-### Execution Flow (9 Steps)
+### Execution Flow (8 Steps)
 
 | Step | Action | Description |
 |------|--------|-------------|
@@ -131,10 +132,9 @@ npm run prepare:package -- <version> [options]
 | 3 | Update versions | Updates `packages/core` and `packages/cli` version fields |
 | 4 | Quality checks | `npm run check` (typecheck + eslint + prettier) |
 | 5 | Tests | `npm run test --workspaces` |
-| 6 | Build | `npm run build` (core tsc + cli esbuild bundle) |
-| 7 | Publish core | `npm publish --workspace=@vegamo/deepcode-core --access public` |
-| 8 | Publish cli | Temporarily changes cli's `@vegamo/deepcode-core` dep from `file:../core` to `^<version>`, restores after publish |
-| 9 | Git commit & tag | `chore(release): v<version>` + `git tag v<version>` |
+| 6 | Build | `npm run build` (core tsc + esbuild inlines core and all deps into `dist/cli.js`) |
+| 7 | Publish CLI | Writes `dist/package.json` with `dependencies: {}`, runs `npm publish` from `dist/` |
+| 8 | Git commit & tag | `chore(release): v<version>` + `git tag v<version>` |
 
 ### Examples
 
@@ -152,9 +152,9 @@ npm run prepare:package -- 0.1.32 --dry-run
 npm run prepare:package -- 0.1.32 --force
 ```
 
-### About the file:../core Dependency
+### About the Core Bundling Strategy
 
-The CLI package uses `"file:../core"` for the `@vegamo/deepcode-core` dependency during development (monorepo local link). When publishing to npm, the script automatically replaces it with `"^<version>"` and restores it after publishing. This is transparent — no manual handling required.
+The CLI's `package.json` keeps `"@vegamo/deepcode-core": "file:../core"` for local development (IDE type checking, monorepo workspace resolution). At build time, esbuild uses `packages: "bundle"` to inline all of core's code and its runtime dependencies (`openai`, `ejs`, `zod`, etc.) into a single `dist/cli.js` file. At publish time, the script writes a `dist/package.json` with `dependencies: {}` and publishes from the `dist/` directory, so the published CLI package has zero runtime dependencies. `@vegamo/deepcode-core` is no longer published as a separate npm package.
 
 ### After Publishing
 
@@ -169,6 +169,58 @@ Verify the release:
 ```bash
 npm view @vegamo/deepcode-cli version
 npx @vegamo/deepcode-cli --version
+```
+
+---
+
+## prepare:vscode — Build and Publish VSCode Extension to Marketplace
+
+Runs quality checks, builds, publishes the VSCode extension to the VS Code Marketplace, and automatically creates a git commit with tag.
+
+### Prerequisites
+
+Requires an Azure DevOps Personal Access Token (PAT) for marketplace authentication:
+
+1. Generate a token at https://dev.azure.com/vegamo/_usersSettings/tokens
+2. Set the environment variable `VSCE_PAT=<token>`
+
+### Basic Usage
+
+```bash
+VSCE_PAT=<token> npm run prepare:vscode -- <version> [options]
+```
+
+### Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `<version>` | **Required**. Semver version to publish |
+| `--dry-run` | Preview mode, no actual writes |
+| `--force` | Skip main branch check, allow publishing from other branches |
+
+### Execution Flow (7 Steps)
+
+| Step | Action | Description |
+|------|--------|-------------|
+| 1 | Git check | Working tree must be clean, must be on main branch |
+| 2 | VSCE_PAT check | Environment variable must be set |
+| 3 | Update versions | Updates `packages/core`, `packages/cli`, and `packages/vscode-ide-companion` version fields |
+| 4 | Quality checks | `npm run check` (typecheck + eslint + prettier) |
+| 5 | Tests | `npm run test --workspaces` |
+| 6 | Build | `npm run build:vscode` (core tsc + esbuild bundle extension + copy templates + vsce package) |
+| 7 | Publish | `vsce publish <version> --no-dependencies` to VS Code Marketplace |
+
+### Examples
+
+```bash
+# Publish stable release
+VSCE_PAT=xxx npm run prepare:vscode -- 0.1.32
+
+# Publish pre-release
+VSCE_PAT=xxx npm run prepare:vscode -- 0.1.32-beta.1
+
+# Dry run (no actual publish)
+npm run prepare:vscode -- 0.1.32 --dry-run
 ```
 
 ---
@@ -191,18 +243,22 @@ git diff
 git add -A
 git commit -m "chore(release): v0.1.32"
 
-# 5. Build + quality check + publish
+# 5. Build + quality check + publish CLI
 npm run prepare:package -- 0.1.32
 
-# 6. Push to remote
+# 6. Publish VSCode extension
+VSCE_PAT=xxx npm run prepare:vscode -- 0.1.32
+
+# 7. Push to remote
 git push && git push --tags
 ```
 
-Or simplified to two steps (`prepare:package` auto-commits and tags):
+Or simplified to three steps (`prepare:package` and `prepare:vscode` each auto-commit and tag):
 
 ```bash
 npm run release:version -- patch
 npm run prepare:package -- 0.1.32
+VSCE_PAT=xxx npm run prepare:vscode -- 0.1.32
 git push && git push --tags
 ```
 

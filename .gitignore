@@ -20,6 +20,10 @@ out/
 # TypeScript build info files
 *.tsbuildinfo
 
+# Environment variables
+.env
+.env.local
+
 # Generated files
 packages/cli/src/generated/
 packages/core/src/generated/

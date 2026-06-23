@@ -818,12 +818,15 @@ ${agentInstructions}
   private getBundledSkillsRoot(): string {
     const extensionRoot = getExtensionRoot();
     const sourceRoot = path.join(extensionRoot, "templates", "skills", "bundled");
-    const distRoot = path.join(extensionRoot, "dist", "bundled");
 
     // Source check keeps local development/tests on the checked-in templates.
     if (fs.existsSync(path.join(extensionRoot, "src", "session.ts")) && fs.existsSync(sourceRoot)) {
       return sourceRoot;
     }
+
+    // In the published bundle, getExtensionRoot() resolves to dist/ and
+    // bundled skills are copied to dist/bundled/ (not dist/templates/skills/bundled/).
+    const distRoot = path.join(extensionRoot, "bundled");
     return fs.existsSync(distRoot) ? distRoot : sourceRoot;
   }
 

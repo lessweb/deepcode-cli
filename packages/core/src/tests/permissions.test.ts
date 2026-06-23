@@ -7,6 +7,7 @@ import {
   appendProjectPermissionAllows,
   computeToolCallPermissions,
   evaluatePermissionScopes,
+  getPermissionScopesRequiringAsk,
   hasUserPermissionReplies,
   isPathInAnyDirectory,
   parseBashSideEffects,
@@ -45,6 +46,47 @@ test("evaluatePermissionScopes applies deny, ask, allow, and default mode preced
   assert.equal(evaluatePermissionScopes(["write-in-cwd"], settings), "ask");
   assert.equal(evaluatePermissionScopes([], settings), "allow");
   assert.equal(evaluatePermissionScopes(["unknown"], settings), "ask");
+});
+
+test("evaluatePermissionScopes allows unknown when defaultMode is allowAll", () => {
+  const allowAllSettings = {
+    allow: [] as const,
+    deny: [] as const,
+    ask: [] as const,
+    defaultMode: "allowAll" as const,
+  };
+  assert.equal(evaluatePermissionScopes(["unknown"], allowAllSettings), "allow");
+
+  // unknown + other scopes that would otherwise trigger ask should still ask for those scopes
+  const askNetworkSettings = {
+    allow: [] as const,
+    deny: [] as const,
+    ask: ["network" as const],
+    defaultMode: "allowAll" as const,
+  };
+  assert.equal(evaluatePermissionScopes(["unknown", "network"], askNetworkSettings), "ask");
+});
+
+test("getPermissionScopesRequiringAsk excludes unknown when defaultMode is allowAll", () => {
+  const allowAllSettings = {
+    allow: [] as const,
+    deny: [] as const,
+    ask: ["network" as const],
+    defaultMode: "allowAll" as const,
+  };
+  const result = getPermissionScopesRequiringAsk(["unknown", "network"], allowAllSettings);
+  assert.deepEqual(result, ["network"]);
+});
+
+test("getPermissionScopesRequiringAsk includes unknown when defaultMode is askAll", () => {
+  const askAllSettings = {
+    allow: [] as const,
+    deny: [] as const,
+    ask: ["network" as const],
+    defaultMode: "askAll" as const,
+  };
+  const result = getPermissionScopesRequiringAsk(["unknown", "network"], askAllSettings);
+  assert.deepEqual(result, ["unknown", "network"]);
 });
 
 test("computeToolCallPermissions maps tool calls to permission requests", () => {

@@ -273,7 +273,7 @@ export function evaluatePermissionScopes(
     defaultMode: "allowAll",
   }
 ): PermissionDecision {
-  if (scopes.includes("unknown")) {
+  if (scopes.includes("unknown") && settings.defaultMode !== "allowAll") {
     return "ask";
   }
   if (scopes.length === 0) {
@@ -304,7 +304,9 @@ export function getPermissionScopesRequiringAsk(
   const result: AskPermissionScope[] = [];
   for (const scope of scopes) {
     if (scope === "unknown") {
-      result.push(scope);
+      if (settings.defaultMode !== "allowAll") {
+        result.push(scope);
+      }
       continue;
     }
     if (settings.deny.includes(scope)) {

@@ -28,6 +28,7 @@
     "test": "npm run test --workspaces --if-present",
     "release:version": "node scripts/version.js",
     "prepare:package": "node scripts/prepare-package.js",
+    "prepare:vscode": "node scripts/prepare-vscode.js",
     "prepare": "husky && npm run build && npm run bundle"
   },
   "devDependencies": {
@@ -43,6 +44,7 @@
     "husky": "^9.1.7",
     "lint-staged": "^17.0.4",
     "prettier": "^3.8.3",
+    "react-devtools-core": "^7.0.1",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.2"

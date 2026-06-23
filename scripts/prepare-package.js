@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, copyFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -81,7 +81,7 @@ for (let i = 0; i < args.length; i++) {
 
 if (!version) {
   log(`
-Usage: node scripts/publish.js <version> [options]
+Usage: node scripts/prepare-package.js <version> [options]
 
 Arguments:
   <version>          Semver version to publish (e.g. 0.1.32, 0.2.0-beta.1)
@@ -92,9 +92,9 @@ Options:
   --force            Skip branch check (publish from non-main branch)
 
 Examples:
-  node scripts/publish.js 0.1.32
-  node scripts/publish.js 0.1.32-beta.1 --tag beta
-  node scripts/publish.js 0.1.32 --dry-run
+  node scripts/prepare-package.js 0.1.32
+  node scripts/prepare-package.js 0.1.32-beta.1 --tag beta
+  node scripts/prepare-package.js 0.1.32 --dry-run
 `);
   process.exit(1);
 }
@@ -103,7 +103,7 @@ if (!isValidSemver(version)) {
   fail(`Invalid semver version: ${version}`);
 }
 
-const TOTAL_STEPS = 9;
+const TOTAL_STEPS = 8;
 
 // ── Banner ───────────────────────────────────────────────────────────────────
 
@@ -169,9 +169,6 @@ const cliPkg = readJson(cliPkgPath);
 
 const oldVersion = corePkg.version;
 
-// Save originals for restore
-const origCliPkg = JSON.stringify(cliPkg, null, 2) + "\n";
-
 corePkg.version = version;
 cliPkg.version = version;
 
@@ -199,75 +196,88 @@ ok("All tests passed");
 
 // ── 6. Build ─────────────────────────────────────────────────────────────────
 
-step(6, TOTAL_STEPS, "Building packages...");
+step(6, TOTAL_STEPS, "Building and bundling packages...");
 
 run("npm", ["run", "build"], { dryRun });
-ok("Build complete");
+ok("Build and bundle complete");
 
-// ── 7. Publish core ──────────────────────────────────────────────────────────
+// ── 7. Prepare dist/ for publishing ──────────────────────────────────────────
 
-step(7, TOTAL_STEPS, "Publishing @vegamo/deepcode-core...");
+step(7, TOTAL_STEPS, "Preparing dist/ for publishing...");
 
-const corePublishArgs = [
-  "publish",
-  "--workspace=@vegamo/deepcode-core",
-  "--access",
-  "public",
-  "--tag",
-  tag,
-  "--registry",
-  "https://registry.npmjs.org",
-];
-if (dryRun) corePublishArgs.push("--dry-run");
+const cliRoot = join(root, "packages", "cli");
+const distDir = join(cliRoot, "dist");
+const distCliJs = join(distDir, "cli.js");
+const distChunks = join(distDir, "chunks");
+const distBundled = join(distDir, "bundled");
 
-run("npm", corePublishArgs, { dryRun, label: `npm ${corePublishArgs.join(" ")}` });
-ok(`Published @vegamo/deepcode-core@${version}`);
-
-// ── 8. Patch CLI deps & publish ──────────────────────────────────────────────
-
-step(8, TOTAL_STEPS, "Patching CLI dependencies and publishing @vegamo/deepcode-cli...");
-
-// Replace file:../core with ^version for npm
-const patchedCliPkg = readJson(cliPkgPath);
-const coreDep = patchedCliPkg.dependencies["@vegamo/deepcode-core"];
-if (coreDep && coreDep.startsWith("file:")) {
-  patchedCliPkg.dependencies["@vegamo/deepcode-core"] = `^${version}`;
-  if (!dryRun) {
-    writeJson(cliPkgPath, patchedCliPkg);
-  }
-  log(`  Patched @vegamo/deepcode-core dep: "${coreDep}" → "^${version}"`);
+if (!existsSync(distCliJs)) {
+  fail(`Bundle artifact not found: ${distCliJs}. Run "npm run build" first.`);
+}
+if (!existsSync(distChunks)) {
+  fail(`Chunks directory not found: ${distChunks}. Run "npm run build" first.`);
+}
+if (!existsSync(distBundled)) {
+  fail(`Bundled assets not found: ${distBundled}. Run "npm run build" first.`);
 }
 
-const cliPublishArgs = [
-  "publish",
-  "--workspace=@vegamo/deepcode-cli",
-  "--access",
-  "public",
-  "--tag",
-  tag,
-  "--registry",
-  "https://registry.npmjs.org",
-];
-if (dryRun) cliPublishArgs.push("--dry-run");
+// Copy README.md and LICENSE into dist/
+for (const file of ["README.md", "LICENSE"]) {
+  const src = join(root, file);
+  const dest = join(distDir, file);
+  if (existsSync(src)) {
+    if (!dryRun) {
+      copyFileSync(src, dest);
+    }
+    log(`  Copied ${file} → dist/`);
+  } else {
+    log(`  Warning: ${file} not found at ${src}`);
+  }
+}
 
-run("npm", cliPublishArgs, { dryRun, label: `npm ${cliPublishArgs.join(" ")}` });
+// Write a new package.json for publishing with empty dependencies.
+// All runtime code (including @vegamo/deepcode-core and its deps) is already
+// bundled into dist/cli.js by esbuild with packages: "bundle".
+const distPackageJson = {
+  name: cliPkg.name,
+  version: version,
+  description: cliPkg.description,
+  license: cliPkg.license,
+  type: "module",
+  main: "cli.js",
+  bin: {
+    deepcode: "cli.js",
+  },
+  files: ["cli.js", "chunks/**", "templates/**", "bundled/**", "README.md", "LICENSE"],
+  engines: cliPkg.engines,
+  dependencies: {},
+};
+
+if (!dryRun) {
+  writeJson(join(distDir, "package.json"), distPackageJson);
+}
+log("  Written dist/package.json with dependencies: {}");
+
+ok("dist/ prepared for publishing");
+
+// ── 7. Publish from dist/ ────────────────────────────────────────────────────
+
+step(8, TOTAL_STEPS, "Publishing @vegamo/deepcode-cli from dist/...");
+
+const publishArgs = ["publish", "--access", "public", "--tag", tag, "--registry", "https://registry.npmjs.org"];
+if (dryRun) publishArgs.push("--dry-run");
+
+run("npm", publishArgs, {
+  dryRun,
+  cwd: distDir,
+  label: `cd dist && npm ${publishArgs.join(" ")}`,
+});
 ok(`Published @vegamo/deepcode-cli@${version}`);
 
-// Restore file:../core for local development
-if (!dryRun) {
-  writeJson(cliPkgPath, JSON.parse(origCliPkg));
-  // But keep the new version
-  const restoredCli = readJson(cliPkgPath);
-  restoredCli.version = version;
-  writeJson(cliPkgPath, restoredCli);
-  log("  Restored @vegamo/deepcode-core dep to file:../core");
-}
-
-// ── 9. Git commit + tag ──────────────────────────────────────────────────────
-
-step(9, TOTAL_STEPS, "Creating git commit and tag...");
+// ── Git commit + tag ─────────────────────────────────────────────────────────
 
 if (!dryRun) {
+  log("\nCreating git commit and tag...");
   run("git", ["add", "packages/core/package.json", "packages/cli/package.json"], {
     label: "git add packages/*/package.json",
   });
@@ -279,8 +289,7 @@ if (!dryRun) {
   });
   ok(`Created commit and tag v${version}`);
 } else {
-  log(`  (dry-run) git add + commit "chore(release): v${version}"`);
-  log(`  (dry-run) git tag v${version}`);
+  log("\n  (dry-run) git add + commit + tag");
 }
 
 // ── Done ─────────────────────────────────────────────────────────────────────
@@ -289,9 +298,8 @@ console.log("\n=========================================");
 console.log(`  🎉  Published v${version} successfully!`);
 console.log("=========================================");
 console.log(`
-  Packages published:
-    • @vegamo/deepcode-core@${version}
-    • @vegamo/deepcode-cli@${version}
+  Package published:
+    • @vegamo/deepcode-cli@${version}  (core bundled, zero runtime dependencies)
 
   Verify:
     npm view @vegamo/deepcode-cli version
