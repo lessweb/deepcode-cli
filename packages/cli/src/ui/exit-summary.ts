@@ -4,6 +4,7 @@ import type { ModelUsage, SessionEntry } from "@vegamo/deepcode-core";
 
 type ExitSummaryInput = {
   session: SessionEntry | null;
+  sessionId?: string;
 };
 
 const ANSI_RE = /\u001b\[[0-9;]*[a-zA-Z]/g;
@@ -67,7 +68,7 @@ function extractUsageFields(usage: ModelUsage | null): UsageFields {
 }
 
 export function buildExitSummaryText(input: ExitSummaryInput): string {
-  const { session } = input;
+  const { session, sessionId } = input;
 
   const innerWidth = 98;
   const contentWidth = innerWidth - 4; // "│  " prefix + "  │" suffix → 4 chars padding
@@ -133,6 +134,12 @@ export function buildExitSummaryText(input: ExitSummaryInput): string {
   }
 
   rows.push("");
+
+  if (sessionId) {
+    const resumeHint = chalk.dim(`To continue this session, run deepcode --resume ${sessionId}`);
+    rows.push(resumeHint);
+    rows.push("");
+  }
 
   const border = borderColor("─".repeat(innerWidth));
   const top = `${borderColor("╭")}${border}${borderColor("╮")}`;

@@ -3,6 +3,7 @@ import { render } from "ink";
 import { setShellIfWindows } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate, type PackageInfo } from "./common/update-check";
 import { AppContainer } from "./ui";
+import { extractInitialPrompt, extractResumeSessionId } from "./cli-args";
 
 const args = process.argv.slice(2);
 const packageInfo = readPackageInfo();
@@ -21,6 +22,7 @@ if (args.includes("--help") || args.includes("-h")) {
       "  deepcode                              Launch the interactive TUI in the current directory",
       "  deepcode -p <prompt>                  Launch with a pre-filled prompt",
       "  deepcode --prompt <prompt>            Same as -p",
+      "  deepcode --resume [sessionId]         Resume a specific session by its ID. Use without an ID to show session picker",
       "  deepcode --version                    Print the version",
       "  deepcode --help                       Show this help",
       "",
@@ -58,15 +60,8 @@ if (args.includes("--help") || args.includes("-h")) {
   process.exit(0);
 }
 
-function extractInitialPrompt(args: string[]): string | undefined {
-  const promptIndex = args.findIndex((arg) => arg === "-p" || arg === "--prompt");
-  if (promptIndex !== -1 && promptIndex + 1 < args.length) {
-    return args[promptIndex + 1];
-  }
-  return undefined;
-}
-
 let initialPrompt = extractInitialPrompt(args);
+const resumeSessionId = extractResumeSessionId(args);
 const projectRoot = process.cwd();
 configureWindowsShell();
 
@@ -94,6 +89,7 @@ async function main(): Promise<void> {
         projectRoot={projectRoot}
         version={packageInfo.version}
         initialPrompt={appInitialPrompt}
+        resumeSessionId={resumeSessionId}
         onRestart={() => restartRef.current?.()}
       />,
       { exitOnCtrlC: false }

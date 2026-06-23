@@ -53,6 +53,7 @@ const STATUS_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", 
 type AppProps = {
   projectRoot: string;
   initialPrompt?: string;
+  resumeSessionId?: string | true;
   onRestart?: () => void;
 };
 
@@ -89,12 +90,13 @@ const StatusLine = React.memo(function StatusLine({
   );
 });
 
-function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactElement {
+function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
   const { mode, setMode } = useRawModeContext();
   const initialPromptSubmittedRef = useRef(false);
+  const resumeSessionIdRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
   const rawModeRef = useRef<RawMode>(mode);
   const writeRef = useRef(write);
@@ -288,7 +290,7 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
         setTimeout(() => {
           const activeSessionId = sessionManager.getActiveSessionId();
           const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
-          const summary = buildExitSummaryText({ session });
+          const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
           process.stdout.write("\n");
           process.stdout.write(chalk.rgb(34, 154, 195)("> /exit "));
           process.stdout.write("\n\n");
@@ -505,6 +507,21 @@ function App({ projectRoot, initialPrompt, onRestart }: AppProps): React.ReactEl
     },
     [sessionManager, resetStaticView, pendingPermissionReply, refreshSkills]
   );
+
+  useEffect(() => {
+    if (resumeSessionIdRef.current || !resumeSessionId) {
+      return;
+    }
+
+    resumeSessionIdRef.current = true;
+    if (resumeSessionId === true) {
+      // No session ID — show the session picker (same as /resume)
+      refreshSessionsList();
+      navigateToSubView("session-list");
+    } else {
+      handleSelectSession(resumeSessionId);
+    }
+  }, [handleSelectSession, navigateToSubView, refreshSessionsList, resumeSessionId]);
 
   const handleDeleteSession = useCallback(
     async (id: string): Promise<void> => {
