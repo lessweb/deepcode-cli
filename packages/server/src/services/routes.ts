@@ -84,7 +84,7 @@ export async function routeRequest(input: RouteRequestInput): Promise<void> {
     return sendJson(response, 200, await runtime.selectSession(String(body.sessionId ?? "")));
   }
   if (method === "POST" && pathname === "/prompt") {
-    const prompt = buildPromptContent(projectRoot, await readJsonBody(request));
+    const prompt = await buildPromptContent(projectRoot, await readJsonBody(request));
     return sendJson(
       response,
       prompt.ok ? 202 : 400,
@@ -152,7 +152,7 @@ export async function routeRequest(input: RouteRequestInput): Promise<void> {
   }
 
   const body = method === "POST" ? await readJsonBody(request) : {};
-  const prompt = buildPromptContent(projectRoot, { ...body, text: `/${command.name}` });
+  const prompt = await buildPromptContent(projectRoot, { ...body, text: `/${command.name}` });
   return sendJson(
     response,
     prompt.ok ? 202 : 400,
