@@ -7,23 +7,23 @@
  * and MIME inference.
  *
  * Exports:
- * - normalizeImageList(projectRoot: string, value: unknown): { ok: true; data: string[] } | { ok: false; error: string }
+ * - normalizeImageList(projectRoot: string, value: unknown): Promise<{ ok: true; data: string[] } | { ok: false; error: string }>
  */
-import * as fs from "node:fs";
+import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeProjectFilePath } from "./open-file";
 
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 
-export function normalizeImageList(
+export async function normalizeImageList(
   projectRoot: string,
   value: unknown
-): { ok: true; data: string[] } | { ok: false; error: string } {
+): Promise<{ ok: true; data: string[] } | { ok: false; error: string }> {
   const items = Array.isArray(value) ? value : value === undefined ? [] : [value];
   const imageUrls: string[] = [];
   for (const item of items) {
-    const normalized = normalizeImageItem(projectRoot, item);
+    const normalized = await normalizeImageItem(projectRoot, item);
     if (!normalized.ok) {
       return normalized;
     }
@@ -34,10 +34,10 @@ export function normalizeImageList(
   return { ok: true, data: imageUrls };
 }
 
-function normalizeImageItem(
+async function normalizeImageItem(
   projectRoot: string,
   item: unknown
-): { ok: true; data: string | null } | { ok: false; error: string } {
+): Promise<{ ok: true; data: string | null } | { ok: false; error: string }> {
   if (typeof item === "string") {
     return normalizeImageString(projectRoot, item);
   }
@@ -59,10 +59,10 @@ function normalizeImageItem(
   return { ok: false, error: "Image object requires dataUrl, url, filePath, or path" };
 }
 
-function normalizeImageString(
+async function normalizeImageString(
   projectRoot: string,
   value: string
-): { ok: true; data: string | null } | { ok: false; error: string } {
+): Promise<{ ok: true; data: string | null } | { ok: false; error: string }> {
   const trimmed = value.trim();
   if (!trimmed) {
     return { ok: true, data: null };
@@ -86,17 +86,17 @@ function normalizeImageString(
   return readImageFileAsDataUrl(projectRoot, trimmed);
 }
 
-function readImageFileAsDataUrl(
+async function readImageFileAsDataUrl(
   projectRoot: string,
   filePath: string
-): { ok: true; data: string } | { ok: false; error: string } {
+): Promise<{ ok: true; data: string } | { ok: false; error: string }> {
   const request = normalizeProjectFilePath(projectRoot, filePath);
   if (!request.ok) {
     return request;
   }
-  let stat: fs.Stats;
+  let stat;
   try {
-    stat = fs.statSync(request.data.absolutePath);
+    stat = await fs.stat(request.data.absolutePath);
   } catch {
     return { ok: false, error: `Image file not found: ${request.data.relativePath}` };
   }
@@ -110,7 +110,8 @@ function readImageFileAsDataUrl(
   if (!mime) {
     return { ok: false, error: `Unsupported image type: ${request.data.relativePath}` };
   }
-  return { ok: true, data: `data:${mime};base64,${fs.readFileSync(request.data.absolutePath).toString("base64")}` };
+  const content = await fs.readFile(request.data.absolutePath);
+  return { ok: true, data: `data:${mime};base64,${content.toString("base64")}` };
 }
 
 function getImageMimeType(filePath: string): string | null {
