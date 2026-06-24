@@ -15,8 +15,21 @@ export function isAuthorized(request: IncomingMessage, token: string): boolean {
   if (url.searchParams.get("token") === token) {
     return true;
   }
-  if (request.headers["x-deepcode-token"] === token) {
+
+  const tokenHeader = firstHeaderValue(request.headers["x-deepcode-token"]);
+  if (tokenHeader === token) {
     return true;
   }
-  return request.headers.authorization === `Bearer ${token}`;
+
+  const authorization = firstHeaderValue(request.headers.authorization);
+  if (!authorization) {
+    return false;
+  }
+
+  const [scheme, ...rest] = authorization.trim().split(/\s+/u);
+  return scheme.toLowerCase() === "bearer" && rest.join(" ") === token;
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string {
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
