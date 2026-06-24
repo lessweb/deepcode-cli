@@ -1,0 +1,35 @@
+{
+  "name": "@vegamo/deepcode-server",
+  "version": "0.1.31",
+  "description": "Deep Code local HTTP/SSE server runtime host",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lessweb/deepcode-cli.git"
+  },
+  "homepage": "https://deepcode.vegamo.cn",
+  "bin": {
+    "deepcode-server": "./dist/server.js",
+    "deepcode-headless-server": "./dist/server.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "tsc -p ./ --noEmit",
+    "build": "tsc -p ./ && node ../../scripts/rewrite-esm-imports.js server && node -e \"require('fs').chmodSync('dist/server.js', 0o755)\"",
+    "prepublishOnly": "npm run build",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "@vegamo/deepcode-core": "file:../core"
+  }
+}
