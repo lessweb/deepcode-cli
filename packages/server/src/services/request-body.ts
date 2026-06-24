@@ -36,7 +36,8 @@ export type RequestBody = {
   deltaMs?: unknown;
 };
 
-const MAX_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_BODY_BYTES = 16 * 1024 * 1024;
+const MAX_BODY_MIB = MAX_BODY_BYTES / 1024 / 1024;
 
 export async function readJsonBody(request: IncomingMessage): Promise<RequestBody> {
   const chunks: Buffer[] = [];
@@ -45,7 +46,7 @@ export async function readJsonBody(request: IncomingMessage): Promise<RequestBod
     const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
     size += buffer.length;
     if (size > MAX_BODY_BYTES) {
-      throw Object.assign(new Error("Request body too large"), { statusCode: 413 });
+      throw Object.assign(new Error(`Request body too large; limit is ${MAX_BODY_MIB} MiB`), { statusCode: 413 });
     }
     chunks.push(buffer);
   }
