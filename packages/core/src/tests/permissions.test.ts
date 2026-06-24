@@ -49,17 +49,17 @@ test("evaluatePermissionScopes applies deny, ask, allow, and default mode preced
 
 test("evaluatePermissionScopes allows unknown when defaultMode is allowAll", () => {
   const allowAllSettings = {
-    allow: [] as const,
-    deny: [] as const,
-    ask: [] as const,
+    allow: [],
+    deny: [],
+    ask: [],
     defaultMode: "allowAll" as const,
   };
   assert.equal(evaluatePermissionScopes(["unknown"], allowAllSettings), "allow");
 
   // unknown + other scopes that would otherwise trigger ask should still ask for those scopes
   const askNetworkSettings = {
-    allow: [] as const,
-    deny: [] as const,
+    allow: [],
+    deny: [],
     ask: ["network" as const],
     defaultMode: "allowAll" as const,
   };
@@ -68,8 +68,8 @@ test("evaluatePermissionScopes allows unknown when defaultMode is allowAll", () 
 
 test("getPermissionScopesRequiringAsk excludes unknown when defaultMode is allowAll", () => {
   const allowAllSettings = {
-    allow: [] as const,
-    deny: [] as const,
+    allow: [],
+    deny: [],
     ask: ["network" as const],
     defaultMode: "allowAll" as const,
   };
@@ -79,8 +79,8 @@ test("getPermissionScopesRequiringAsk excludes unknown when defaultMode is allow
 
 test("getPermissionScopesRequiringAsk includes unknown when defaultMode is askAll", () => {
   const askAllSettings = {
-    allow: [] as const,
-    deny: [] as const,
+    allow: [],
+    deny: [],
     ask: ["network" as const],
     defaultMode: "askAll" as const,
   };
