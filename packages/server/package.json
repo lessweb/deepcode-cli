@@ -26,6 +26,7 @@
   "scripts": {
     "typecheck": "tsc -p ./ --noEmit",
     "build": "tsc -p ./ && node ../../scripts/rewrite-esm-imports.js server && node -e \"require('fs').chmodSync('dist/server.js', 0o755)\"",
+    "test": "tsx --test src/tests/*.test.ts",
     "prepublishOnly": "npm run build",
     "format": "prettier --write ."
   },
