@@ -4,6 +4,7 @@ import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
 import { resolveCurrentSettings } from "../settings";
+import { APP_VERSION } from "./package-info";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
 // global fetch (undici) only keeps connections alive for 4 seconds, which
@@ -11,6 +12,7 @@ import { resolveCurrentSettings } from "../settings";
 // output between prompts.  By passing a dedicated Agent to undiciFetch we
 // keep connections reusable for three minutes after the last request.
 const keepAliveAgent = new Agent({ keepAliveTimeout: 180_000 });
+const USER_AGENT = `deepcode-cli/${APP_VERSION}`;
 
 // Module-level cache for the OpenAI client instance.  The client itself is
 // a stateless fetch wrapper, so it is safe to share across calls as long as
@@ -73,7 +75,11 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     apiKey: settings.apiKey,
     baseURL: settings.baseURL || undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: keepAliveAgent }),
+    fetch: (url: any, init: any) => {
+      const headers = new Headers(init?.headers);
+      headers.set("User-Agent", USER_AGENT);
+      return undiciFetch(url, { ...init, headers, dispatcher: keepAliveAgent });
+    },
   });
   cachedOpenAIKey = cacheKey;
 
