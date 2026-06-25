@@ -1,6 +1,7 @@
 import type { McpServerConfig } from "../settings";
 import type { McpTransport } from "./mcp-transport";
 import { StdioTransport, createMcpSpawnSpec } from "./mcp-stdio-transport";
+import { HttpTransport } from "./mcp-http-transport";
 
 export { createMcpSpawnSpec };
 export type { McpSpawnSpec } from "./mcp-stdio-transport";
@@ -317,6 +318,9 @@ export function createMcpClient(
   onNotification?: McpNotificationHandler,
   onDisconnect?: (reason: string) => void
 ): McpClient {
-  const transport: McpTransport = new StdioTransport(serverName, config.command ?? "", config.args ?? [], config.env);
+  const isRemote = config.type === "http" || (config.type !== "stdio" && !!config.url);
+  const transport: McpTransport = isRemote
+    ? new HttpTransport(serverName, { url: config.url ?? "", headers: config.headers })
+    : new StdioTransport(serverName, config.command ?? "", config.args ?? [], config.env);
   return new McpClient(serverName, transport, onNotification, onDisconnect);
 }
