@@ -2,13 +2,14 @@ import React from "react";
 import { render } from "ink";
 import { setShellIfWindows } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate, type PackageInfo } from "./common/update-check";
+import { APP_NAME, APP_VERSION } from "./common/package-info";
 import { AppContainer } from "./ui";
 
 const args = process.argv.slice(2);
-const packageInfo = readPackageInfo();
+const packageInfo: PackageInfo = { name: APP_NAME, version: APP_VERSION };
 
 if (args.includes("--version") || args.includes("-v")) {
-  process.stdout.write(`${packageInfo.version || "unknown"}\n`);
+  process.stdout.write(`${APP_VERSION}\n`);
   process.exit(0);
 }
 
@@ -127,17 +128,5 @@ function configureWindowsShell(): void {
     const message = error instanceof Error ? error.message : String(error);
     process.stderr.write(`deepcode: ${message}\n`);
     process.exit(1);
-  }
-}
-
-function readPackageInfo(): PackageInfo {
-  try {
-    const pkg = require("../package.json") as { name?: unknown; version?: unknown };
-    return {
-      name: typeof pkg.name === "string" ? pkg.name : "@vegamo/deepcode-cli",
-      version: typeof pkg.version === "string" ? pkg.version : "",
-    };
-  } catch {
-    return { name: "@vegamo/deepcode-cli", version: "" };
   }
 }
