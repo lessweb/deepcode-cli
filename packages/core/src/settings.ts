@@ -442,6 +442,24 @@ function mergeMcpServers(
   for (const name of serverNames) {
     const userConfig = userServers[name];
     const projectConfig = projectServers[name];
+
+    // Remote (Streamable HTTP) server: selected by a url or an explicit
+    // type: "http". Project settings override user settings; headers merge.
+    const url = trimString(projectConfig?.url) || trimString(userConfig?.url);
+    const type = projectConfig?.type ?? userConfig?.type;
+    if (url && type !== "stdio") {
+      const headers = {
+        ...(userConfig?.headers ?? {}),
+        ...(projectConfig?.headers ?? {}),
+      };
+      const config: McpServerConfig = { type: "http", url };
+      if (Object.keys(headers).length > 0) {
+        config.headers = headers;
+      }
+      merged[name] = config;
+      continue;
+    }
+
     const command = projectConfig?.command ?? userConfig?.command;
     if (!command) {
       continue;
