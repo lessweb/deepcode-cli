@@ -17,9 +17,18 @@ export type DeepcodingEnv = Record<string, string | undefined> & {
 export type ReasoningEffort = "high" | "max";
 
 export type McpServerConfig = {
-  command: string;
+  /**
+   * Transport kind. Defaults to "stdio" when a `command` is given and "http"
+   * when a `url` is given, so it is usually optional.
+   */
+  type?: "stdio" | "http";
+  // stdio transport (local subprocess)
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  // remote transport (Streamable HTTP)
+  url?: string;
+  headers?: Record<string, string>;
 };
 
 export type PermissionScope =

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { McpClient, createMcpSpawnSpec } from "../mcp/mcp-client";
+import { createMcpClient, createMcpSpawnSpec } from "../mcp/mcp-client";
 
 test("createMcpSpawnSpec keeps non-Windows MCP launches shell-free", () => {
   assert.deepEqual(createMcpSpawnSpec("npx", ["-y", "@playwright/mcp@latest"], "darwin"), {
@@ -93,7 +93,7 @@ test("McpClient starts a PATH-resolved cmd MCP server on Windows", { skip: proce
   );
 
   process.env.PATH = `${serverDir}${path.delimiter}${originalPath ?? ""}`;
-  const client = new McpClient("probe", "mcp-probe", []);
+  const client = createMcpClient("probe", { command: "mcp-probe", args: [] });
 
   try {
     await client.connect(5_000);
