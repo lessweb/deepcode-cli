@@ -64,8 +64,8 @@ Skills 会按以下优先级扫描：
 
 ### **为 DeepSeek 优化**
 - 专门为 DeepSeek 模型性能调优。
-- 通过使用[上下文缓存](https://api-docs.deepseek.com/guides/kv_cache)来降低成本。
-- 原生支持[思考模式](https://api-docs.deepseek.com/guides/thinking_mode)和思考强度控制。
+- 通过使用[上下文缓存](https://api-docs.deepseek.com/zh-cn/guides/kv_cache)来降低成本。
+- 原生支持[思考模式](https://api-docs.deepseek.com/zh-cn/guides/thinking_mode)和思考强度控制。
 
 ## 斜杠命令与按键功能
 
