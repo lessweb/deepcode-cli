@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import {
   buildNotifyEnv,
   formatDurationSeconds,
@@ -7,9 +10,73 @@ import {
   type NotifyContext,
   type NotifySpawn,
 } from "../common/notify";
-import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import {
+  applyModelConfigSelection,
+  buildDefaultSettings,
+  ensureUserSettingsFile,
+  getUserSettingsPath,
+  resolveSettings,
+  resolveSettingsSources,
+} from "../settings";
 
 const TEST_PROCESS_ENV = {};
+
+function withTempHome<T>(fn: () => T): T {
+  const tempHome = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-home-"));
+  const prevHome = process.env.HOME;
+  const prevUserProfile = process.env.USERPROFILE;
+  process.env.HOME = tempHome;
+  process.env.USERPROFILE = tempHome;
+  try {
+    return fn();
+  } finally {
+    if (prevHome === undefined) {
+      delete process.env.HOME;
+    } else {
+      process.env.HOME = prevHome;
+    }
+    if (prevUserProfile === undefined) {
+      delete process.env.USERPROFILE;
+    } else {
+      process.env.USERPROFILE = prevUserProfile;
+    }
+    fs.rmSync(tempHome, { recursive: true, force: true });
+  }
+}
+
+test("ensureUserSettingsFile creates a template when settings file is missing", () => {
+  withTempHome(() => {
+    const settingsPath = getUserSettingsPath();
+    assert.equal(fs.existsSync(settingsPath), false);
+
+    const result = ensureUserSettingsFile();
+
+    assert.equal(result.created, true);
+    assert.equal(result.path, settingsPath);
+    assert.equal(fs.existsSync(settingsPath), true);
+
+    const written = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+    const expected = buildDefaultSettings();
+    assert.deepEqual(written, expected);
+    assert.equal(expected.env?.API_KEY, "");
+    assert.equal(typeof expected.env?.BASE_URL, "string");
+    assert.equal(typeof expected.env?.MODEL, "string");
+  });
+});
+
+test("ensureUserSettingsFile never overwrites an existing settings file", () => {
+  withTempHome(() => {
+    const settingsPath = getUserSettingsPath();
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    const existing = { env: { API_KEY: "sk-existing", BASE_URL: "https://custom.example.com" } };
+    fs.writeFileSync(settingsPath, JSON.stringify(existing), "utf8");
+
+    const result = ensureUserSettingsFile();
+
+    assert.equal(result.created, false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(settingsPath, "utf8")), existing);
+  });
+});
 
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(
