@@ -74,6 +74,19 @@ To start with an initial prompt:
 deepcode -p "Summarize this project"
 ```
 
+### Non-Interactive Mode (Headless)
+
+For scripts, CI/CD pipelines, or Docker containers where you need automatic execution, use the `--headless` flag. In this mode, deepcode skips the interactive TUI, runs the prompt, prints the result to stdout, and exits:
+
+```bash
+deepcode --headless -p "Summarize this project"
+
+# Pipe with other tools
+deepcode --headless -p "List all API endpoints" | grep "auth"
+```
+
+`--headless` requires `-p`, and all permission operations are auto-approved in this mode.
+
 ## Try These First
 
 Start with a read-only task:
