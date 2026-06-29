@@ -62,7 +62,7 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
   const msg = message as Record<string, unknown>;
 
   if (msg.type === "ready") {
-    loadInitialSession(sessionManager, postMessage);
+    loadInitialSession(sessionManager, postMessage, renderMarkdown);
     await sendSkillsList(sessionManager, postMessage);
     return true;
   }
@@ -138,7 +138,11 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
   return false;
 }
 
-function loadInitialSession(sessionManager: ProviderDeps["sessionManager"], postMessage: PostMessageFn): void {
+function loadInitialSession(
+  sessionManager: ProviderDeps["sessionManager"],
+  postMessage: PostMessageFn,
+  renderMarkdown: (text: string) => string
+): void {
   const sessions = sessionManager.listSessions();
   const sessionsList = toSessionList(sessions);
 
@@ -152,7 +156,7 @@ function loadInitialSession(sessionManager: ProviderDeps["sessionManager"], post
   }
 
   const latestSession = sessions[0];
-  loadSession(latestSession.id, sessionManager, postMessage, (t) => t);
+  loadSession(latestSession.id, sessionManager, postMessage, renderMarkdown);
 }
 
 export function loadSession(

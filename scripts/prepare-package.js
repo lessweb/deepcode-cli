@@ -27,18 +27,20 @@ function ok(msg) {
 
 function run(cmd, args, opts = {}) {
   const label = opts.label ?? `${cmd} ${args.join(" ")}`;
-  if (opts.dryRun) {
+  if (opts.dryRun && !opts.runInDryRun) {
     log(`  (dry-run) ${label}`);
     return { status: 0, stdout: "" };
   }
   const result = spawnSync(cmd, args, {
     stdio: opts.stdio ?? "inherit",
     cwd: opts.cwd ?? root,
-    shell: true,
+    shell: false,
+    encoding: opts.encoding,
     env: { ...process.env, ...opts.env },
   });
   if (result.status !== 0) {
-    fail(`Command failed: ${label}`);
+    const output = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
+    fail(`Command failed: ${label}${output ? `\n${output}` : ""}`);
   }
   return result;
 }
@@ -53,6 +55,70 @@ function writeJson(filePath, data) {
 
 function isValidSemver(v) {
   return /^\d+\.\d+\.\d+(-[\w.]+)?(\+[\w.]+)?$/.test(v);
+}
+
+function isValidNpmTag(v) {
+  return /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v);
+}
+
+function hasPackFile(files, expectedPath) {
+  return files.includes(expectedPath);
+}
+
+function hasPackPrefix(files, expectedPrefix) {
+  return files.some((file) => file.startsWith(expectedPrefix));
+}
+
+function validatePacklist(cwd, checks, opts = {}) {
+  const label = opts.label ?? `npm pack --dry-run --json --ignore-scripts`;
+  const result = run("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
+    cwd,
+    label,
+    stdio: "pipe",
+    encoding: "utf-8",
+    runInDryRun: true,
+  });
+  const output = result.stdout.trim();
+  const packs = JSON.parse(output);
+  const pack = Array.isArray(packs) ? packs[0] : packs;
+  const files = (pack?.files ?? []).map((file) => file.path);
+  const missing = [];
+
+  for (const check of checks) {
+    const found = check.type === "prefix" ? hasPackPrefix(files, check.value) : hasPackFile(files, check.value);
+    if (!found) {
+      missing.push(check.label ?? check.value);
+    }
+  }
+
+  if (missing.length > 0) {
+    fail(`Package tarball is missing required files:\n  - ${missing.join("\n  - ")}`);
+  }
+
+  ok(`Validated package tarball (${files.length} files)`);
+}
+
+function hasGitChanges(paths) {
+  const result = spawnSync("git", ["diff", "--quiet", "--", ...paths], {
+    cwd: root,
+    shell: false,
+  });
+  if (result.status === 0) {
+    return false;
+  }
+  if (result.status === 1) {
+    return true;
+  }
+  fail("Unable to check release file changes.");
+}
+
+function gitTagExists(tagName) {
+  const result = spawnSync("git", ["rev-parse", "-q", "--verify", `refs/tags/${tagName}`], {
+    cwd: root,
+    shell: false,
+    stdio: "ignore",
+  });
+  return result.status === 0;
 }
 
 // ── Parse args ───────────────────────────────────────────────────────────────
@@ -103,6 +169,10 @@ if (!isValidSemver(version)) {
   fail(`Invalid semver version: ${version}`);
 }
 
+if (!isValidNpmTag(tag)) {
+  fail(`Invalid npm dist-tag: ${tag}`);
+}
+
 const TOTAL_STEPS = 8;
 
 // ── Banner ───────────────────────────────────────────────────────────────────
@@ -119,7 +189,7 @@ step(1, TOTAL_STEPS, "Checking git state...");
 const gitStatus = spawnSync("git", ["status", "--porcelain"], {
   cwd: root,
   encoding: "utf-8",
-  shell: true,
+  shell: false,
 });
 if (gitStatus.stdout.trim()) {
   fail("Working tree is not clean. Commit or stash changes first.");
@@ -130,7 +200,7 @@ if (!force) {
   const gitBranch = spawnSync("git", ["branch", "--show-current"], {
     cwd: root,
     encoding: "utf-8",
-    shell: true,
+    shell: false,
   });
   const branch = gitBranch.stdout.trim();
   if (branch !== "main") {
@@ -147,7 +217,7 @@ if (!dryRun) {
   const whoami = spawnSync("npm", ["whoami"], {
     cwd: root,
     encoding: "utf-8",
-    shell: true,
+    shell: false,
   });
   if (whoami.status !== 0) {
     fail("Not logged in to npm. Run `npm login` first.");
@@ -182,6 +252,12 @@ if (!dryRun) {
   log(`  (dry-run) packages/cli:  ${oldVersion} → ${version}`);
 }
 
+run("npm", ["install", "--package-lock-only", "--ignore-scripts"], {
+  dryRun,
+  label: "npm install --package-lock-only --ignore-scripts",
+});
+ok("package-lock.json is up to date");
+
 // ── 4. Quality checks ────────────────────────────────────────────────────────
 
 step(4, TOTAL_STEPS, "Running quality checks (typecheck + lint + format)...");
@@ -209,6 +285,7 @@ const cliRoot = join(root, "packages", "cli");
 const distDir = join(cliRoot, "dist");
 const distCliJs = join(distDir, "cli.js");
 const distChunks = join(distDir, "chunks");
+const distTemplates = join(distDir, "templates");
 const distBundled = join(distDir, "bundled");
 
 if (!existsSync(distCliJs)) {
@@ -217,9 +294,23 @@ if (!existsSync(distCliJs)) {
 if (!existsSync(distChunks)) {
   fail(`Chunks directory not found: ${distChunks}. Run "npm run build" first.`);
 }
+if (!existsSync(distTemplates)) {
+  fail(`Templates directory not found: ${distTemplates}. Run "npm run build" first.`);
+}
 if (!existsSync(distBundled)) {
   fail(`Bundled assets not found: ${distBundled}. Run "npm run build" first.`);
 }
+
+validatePacklist(
+  cliRoot,
+  [
+    { type: "file", value: "dist/cli.js" },
+    { type: "prefix", value: "dist/chunks/", label: "dist/chunks/*.js" },
+    { type: "prefix", value: "dist/templates/", label: "dist/templates/**" },
+    { type: "prefix", value: "dist/bundled/", label: "dist/bundled/**" },
+  ],
+  { label: "cd packages/cli && npm pack --dry-run --json --ignore-scripts" }
+);
 
 // Copy README.md and LICENSE into dist/
 for (const file of ["README.md", "LICENSE"]) {
@@ -258,9 +349,53 @@ if (!dryRun) {
 }
 log("  Written dist/package.json with dependencies: {}");
 
+if (!dryRun) {
+  validatePacklist(
+    distDir,
+    [
+      { type: "file", value: "cli.js" },
+      { type: "prefix", value: "chunks/", label: "chunks/*.js" },
+      { type: "prefix", value: "templates/", label: "templates/**" },
+      { type: "prefix", value: "bundled/", label: "bundled/**" },
+    ],
+    { label: "cd dist && npm pack --dry-run --json --ignore-scripts" }
+  );
+} else {
+  log("  (dry-run) skipped dist/package.json tarball validation because dist/package.json was not written");
+}
+
 ok("dist/ prepared for publishing");
 
-// ── 7. Publish from dist/ ────────────────────────────────────────────────────
+// ── Git commit + tag ─────────────────────────────────────────────────────────
+
+const releaseFiles = ["packages/core/package.json", "packages/cli/package.json", "package-lock.json"];
+const tagName = `v${version}`;
+
+if (!dryRun) {
+  log("\nCreating git commit and tag...");
+  if (hasGitChanges(releaseFiles)) {
+    run("git", ["add", ...releaseFiles], {
+      label: "git add packages/*/package.json package-lock.json",
+    });
+    run("git", ["commit", "-m", `chore(release): v${version}`], {
+      label: `git commit -m "chore(release): v${version}"`,
+    });
+  } else {
+    log("  No release file changes to commit; tagging current HEAD");
+  }
+
+  if (gitTagExists(tagName)) {
+    fail(`Git tag already exists: ${tagName}`);
+  }
+  run("git", ["tag", tagName], {
+    label: `git tag ${tagName}`,
+  });
+  ok(`Created tag ${tagName}`);
+} else {
+  log("\n  (dry-run) git add + commit + tag");
+}
+
+// ── 8. Publish from dist/ ────────────────────────────────────────────────────
 
 step(8, TOTAL_STEPS, "Publishing @vegamo/deepcode-cli from dist/...");
 
@@ -273,24 +408,6 @@ run("npm", publishArgs, {
   label: `cd dist && npm ${publishArgs.join(" ")}`,
 });
 ok(`Published @vegamo/deepcode-cli@${version}`);
-
-// ── Git commit + tag ─────────────────────────────────────────────────────────
-
-if (!dryRun) {
-  log("\nCreating git commit and tag...");
-  run("git", ["add", "packages/core/package.json", "packages/cli/package.json"], {
-    label: "git add packages/*/package.json",
-  });
-  run("git", ["commit", "-m", `chore(release): v${version}`], {
-    label: `git commit -m "chore(release): v${version}"`,
-  });
-  run("git", ["tag", `v${version}`], {
-    label: `git tag v${version}`,
-  });
-  ok(`Created commit and tag v${version}`);
-} else {
-  log("\n  (dry-run) git add + commit + tag");
-}
 
 // ── Done ─────────────────────────────────────────────────────────────────────
 

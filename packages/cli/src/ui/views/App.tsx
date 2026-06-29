@@ -48,6 +48,7 @@ import type {
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
+import { writeStdoutLine } from "../../utils/stdio-helpers";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -145,8 +146,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       onAssistantMessage: (message: SessionMessage) => {
         setMessages((prev) => [...prev, message]);
         if (rawModeRef.current === RawMode.Raw) {
-          process.stdout.write("\n");
-          process.stdout.write(renderMessageToStdout(message, rawModeRef.current) + "\n\n");
+          writeStdoutLine("\n");
+          writeStdoutLine(renderMessageToStdout(message, rawModeRef.current) + "\n\n");
         }
       },
       onSessionEntryUpdated: (entry) => {
@@ -196,7 +197,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const resetStaticView = useCallback(
     (loadedMessages: SessionMessage[], options?: { clearScreen?: boolean }): Promise<void> => {
       if (options?.clearScreen) {
-        process.stdout.write(ANSI_CLEAR_SCREEN);
+        writeStdoutLine(ANSI_CLEAR_SCREEN);
       }
       setMessages([]);
       setWelcomeNonce((n) => n + 1);
@@ -298,19 +299,19 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
         const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
 
-        process.stdout.write("\n");
+        writeStdoutLine("\n");
         if (showCommand) {
-          process.stdout.write(chalk.rgb(34, 154, 195)("> /exit "));
-          process.stdout.write("\n\n");
+          writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
+          writeStdoutLine("\n");
         }
         if (showSummary) {
           const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
-          process.stdout.write(summary);
-          process.stdout.write("\n\n");
+          writeStdoutLine(summary);
+          writeStdoutLine("\n");
         }
         if (resumeHint) {
-          process.stdout.write(resumeHint);
-          process.stdout.write("\n");
+          writeStdoutLine(resumeHint);
+          writeStdoutLine("\n");
         }
 
         sessionManager.dispose();
@@ -628,7 +629,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       setShowWelcome(false);
       setMessages([]);
       // Clear screen to remove stale formatted text.
-      process.stdout.write(ANSI_CLEAR_SCREEN);
+      writeStdoutLine(ANSI_CLEAR_SCREEN);
 
       setTimeout(() => {
         if (nextMode === RawMode.Raw) {
@@ -667,7 +668,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     if (mode === RawMode.Raw) {
       // In raw mode, re-render all messages directly to stdout at the new width.
       // Use process.stdout.write instead of writeRef to avoid Ink interference.
-      process.stdout.write(ANSI_CLEAR_SCREEN);
+      writeStdoutLine(ANSI_CLEAR_SCREEN);
       const activeSessionId = sessionManager.getActiveSessionId();
       const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
       renderRawModeMessages(allMessages, mode);
@@ -898,7 +899,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           );
         }}
       </Static>
-      {busy || statusLine ? <StatusLine busy={busy} text={statusLine} /> : null}
+      {(busy || statusLine) && !isExiting ? <StatusLine busy={busy} text={statusLine} /> : null}
       {errorLine ? (
         <Box>
           <Text color="red">Error: {errorLine}</Text>

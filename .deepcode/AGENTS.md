@@ -14,12 +14,17 @@ packages/
 │   ├── prompt.ts           # System prompt builder & tool definitions
 │   └── settings.ts         # Settings resolution from ~/.deepcode/settings.json
 ├── cli/src/                # Terminal UI (Ink/React)
-│   ├── cli.tsx             # Entry point — parses args (-p, -v), renders AppContainer
-│   ├── ui/views/           # Top-level screens (App, PromptInput, SessionList, PermissionPrompt, etc.)
+│   ├── cli.tsx             # Entry point — renders AppContainer
+│   ├── cli-args.ts         # CLI argument parsing (yargs: -p, -r, -v, -h)
+│   ├── common/             # Update checker
+│   ├── utils/              # stdio helpers, version, package info
+│   ├── generated/          # Build-time git commit info
+│   ├── ui/views/           # Top-level screens (App, PromptInput, SessionList, PermissionPrompt, WelcomeScreen, UpdatePrompt, McpStatusList, etc.)
 │   ├── ui/components/      # Reusable Ink components (MessageView, DropdownMenu, ModelsDropdown, etc.)
 │   ├── ui/core/            # Prompt buffer, slash commands, file mentions, clipboard, undo/redo
-│   ├── ui/hooks/           # Custom hooks (cursor, history navigation, paste handling, terminal input)
+│   ├── ui/hooks/           # Custom hooks (cursor, history navigation, paste handling, terminal input, statusline)
 │   ├── ui/contexts/        # React contexts (AppContext, RawModeContext)
+│   ├── ui/statusline/      # Pluggable statusline providers (command, module)
 │   └── tests/              # UI-focused tests with run-tests.mjs runner
 ├── vscode-ide-companion/   # VSCode extension companion
 │   └── src/                # extension.ts, provider.ts, utils.ts
@@ -45,6 +50,7 @@ All commands run from the repo root.
 | `npm run check` | Runs typecheck + lint + format:check together |
 | `npm run build` | Orchestrates full build (scripts/build.js) — compiles core + bundles CLI + copies assets |
 | `npm run bundle` | Generates git commit info + esbuild bundle + copies bundled assets |
+| `npm run build:vscode` | Builds the VSCode extension companion |
 | `npm test` | Runs all workspace tests (`npm run test --workspaces --if-present`) |
 | `npm run start` | Runs the locally built CLI (`scripts/start.js`) |
 | `npm run build-and-start` | Builds then starts the CLI |
@@ -115,9 +121,9 @@ A **file history system** (`packages/core/src/common/file-history.ts`) provides 
 
 **Slash commands**: `/skills`, `/model`, `/new`, `/init`, `/resume`, `/continue`, `/undo`, `/mcp`, `/raw`, `/exit`, plus dynamic `/skill-name` for each loaded skill.
 
-**Key UI features**: `@` file mentions in the prompt input, `Ctrl+O` to view live process stdout, `Ctrl+V` to paste images, Shift+Enter for newlines, MCP server status display, undo selector, and permission prompts.
+**Key UI features**: `@` file mentions in the prompt input, `Ctrl+O` to view live process stdout, `Ctrl+V` to paste images, `Ctrl+X` to clear images, Shift+Enter for newlines, pluggable statusline, MCP server status display, undo selector, and permission prompts.
 
-**CLI flags**: `-p <prompt>` / `--prompt` to auto-submit a prompt on launch, `-v` / `--version`, `-h` / `--help`.
+**CLI flags**: `-p <prompt>` / `--prompt` to auto-submit a prompt on launch, `-r [sessionId]` / `--resume [sessionId]` to resume a session or show the session picker, `-v` / `--version`, `-h` / `--help`.
 
 ## Agent-Specific Instructions
 
