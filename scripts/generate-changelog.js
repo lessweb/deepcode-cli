@@ -51,11 +51,18 @@ const SECTION_ORDER = SECTIONS.map((section) => section.name);
 const STABLE_TAG_RE = /^v?(\d+)\.(\d+)\.(\d+)$/;
 
 /**
- * Matches a GitHub "What's Changed" bullet, e.g.
+ * Matches a GitHub "What's Changed" bullet with a PR link, e.g.
  *
  * fix(core): do a thing by @octocat in https://github.com/o/r/pull/42
  */
 const ENTRY_RE = /^[*-]\s+(.+)\s+by\s+@([A-Za-z0-9-]+(?:\[bot\])?)\s+in\s+(https?:\/\/\S+\/pull\/(\d+))\s*$/;
+
+/**
+ * Matches a bullet without a PR link (manually added release entries), e.g.
+ *
+ * chore: optimize skill
+ */
+const SIMPLE_ENTRY_RE = /^[*-]\s+(.+?)\s*$/;
 
 // ── Pure helpers (exported for testing) ──────────────────────────────────────
 
@@ -86,13 +93,24 @@ export function parseReleaseEntries(body) {
   const entries = [];
   for (const line of (body || "").split(/\r?\n/)) {
     const match = ENTRY_RE.exec(line);
-    if (!match) continue;
-    entries.push({
-      title: match[1].trim(),
-      author: match[2],
-      prUrl: match[3],
-      prNumber: match[4],
-    });
+    if (match) {
+      entries.push({
+        title: match[1].trim(),
+        author: match[2],
+        prUrl: match[3],
+        prNumber: match[4],
+      });
+      continue;
+    }
+    const simpleMatch = SIMPLE_ENTRY_RE.exec(line);
+    if (simpleMatch) {
+      entries.push({
+        title: simpleMatch[1].trim(),
+        author: null,
+        prUrl: null,
+        prNumber: null,
+      });
+    }
   }
   return entries;
 }
@@ -109,7 +127,10 @@ export function formatEntry(entry, cat = categorize(entry.title)) {
   if (breaking) {
     text = `**BREAKING** ${text}`;
   }
-  return `- ${text} ([#${entry.prNumber}](${entry.prUrl}))`;
+  if (entry.prNumber && entry.prUrl) {
+    return `- ${text} ([#${entry.prNumber}](${entry.prUrl}))`;
+  }
+  return `- ${text}`;
 }
 
 /** Render one release as a Markdown block. */

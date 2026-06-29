@@ -87,6 +87,28 @@ test("parseReleaseEntries extracts entries from GitHub body", () => {
   assert.equal(entries[1].author, "bob");
 });
 
+test("parseReleaseEntries handles entries without PR links (manual release notes)", () => {
+  const body = [
+    "* chore(deps-dev): bump esbuild and tsx by @dependabot[bot] in https://github.com/o/r/pull/174",
+    "* chore: 优化deepcode-self-refer skill",
+    "* chore: 优化skill-digester skill",
+  ].join("\n");
+
+  const entries = parseReleaseEntries(body);
+  assert.equal(entries.length, 3);
+  // entry with PR link
+  assert.equal(entries[0].title, "chore(deps-dev): bump esbuild and tsx");
+  assert.equal(entries[0].author, "dependabot[bot]");
+  assert.equal(entries[0].prNumber, "174");
+  // entries without PR link
+  assert.equal(entries[1].title, "chore: 优化deepcode-self-refer skill");
+  assert.equal(entries[1].author, null);
+  assert.equal(entries[1].prUrl, null);
+  assert.equal(entries[1].prNumber, null);
+  assert.equal(entries[2].title, "chore: 优化skill-digester skill");
+  assert.equal(entries[2].author, null);
+});
+
 test("parseReleaseEntries handles empty body", () => {
   assert.deepEqual(parseReleaseEntries(""), []);
   assert.deepEqual(parseReleaseEntries(null), []);
@@ -119,6 +141,11 @@ test("formatEntry renders unknown type verbatim", () => {
 test("formatEntry marks breaking changes", () => {
   const entry = { title: "feat(api)!: change format", prNumber: "99", prUrl: "https://github.com/o/r/pull/99" };
   assert.match(formatEntry(entry), /\*\*BREAKING\*\*/);
+});
+
+test("formatEntry renders entry without PR link", () => {
+  const entry = { title: "chore: optimize skill", prNumber: null, prUrl: null };
+  assert.equal(formatEntry(entry), "- chore: optimize skill");
 });
 
 // ── formatRelease ────────────────────────────────────────────────────────────
