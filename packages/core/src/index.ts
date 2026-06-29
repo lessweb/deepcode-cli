@@ -14,6 +14,8 @@ export {
   modelConfigKey,
   getUserSettingsPath,
   getProjectSettingsPath,
+  buildDefaultSettings,
+  ensureUserSettingsFile,
   DEFAULT_MODEL,
   DEFAULT_BASE_URL,
 } from "./settings";
