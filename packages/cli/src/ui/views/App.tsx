@@ -48,7 +48,7 @@ import type {
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
-import { writeStdoutLine } from "../../utils/stdio-helpers";
+import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -197,7 +197,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const resetStaticView = useCallback(
     (loadedMessages: SessionMessage[], options?: { clearScreen?: boolean }): Promise<void> => {
       if (options?.clearScreen) {
-        writeStdoutLine(ANSI_CLEAR_SCREEN);
+        writeStdout(ANSI_CLEAR_SCREEN);
       }
       setMessages([]);
       setWelcomeNonce((n) => n + 1);
@@ -629,7 +629,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       setShowWelcome(false);
       setMessages([]);
       // Clear screen to remove stale formatted text.
-      writeStdoutLine(ANSI_CLEAR_SCREEN);
+      writeStdout(ANSI_CLEAR_SCREEN);
 
       setTimeout(() => {
         if (nextMode === RawMode.Raw) {
@@ -667,8 +667,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
 
     if (mode === RawMode.Raw) {
       // In raw mode, re-render all messages directly to stdout at the new width.
-      // Use process.stdout.write instead of writeRef to avoid Ink interference.
-      writeStdoutLine(ANSI_CLEAR_SCREEN);
+      // Use direct stdout instead of writeRef to avoid Ink interference.
+      writeStdout(ANSI_CLEAR_SCREEN);
       const activeSessionId = sessionManager.getActiveSessionId();
       const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
       renderRawModeMessages(allMessages, mode);

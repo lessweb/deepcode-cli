@@ -1,4 +1,12 @@
 /**
+ * Writes a message to stdout exactly as provided.
+ * Use for terminal control sequences or output that manages its own spacing.
+ */
+export const writeStdout = (message: string): void => {
+  process.stdout.write(message);
+};
+
+/**
  * Writes a message to stdout with a trailing newline.
  * Use for normal command output that the user expects to see.
  * Avoids double newlines if the message already ends with one.
