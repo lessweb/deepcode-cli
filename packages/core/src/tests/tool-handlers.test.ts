@@ -998,6 +998,22 @@ test("Read returns an acknowledgement for images and attaches the image as a fol
   );
 });
 
+test("Read rejects fractional PDF page ranges", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "sample.pdf");
+  fs.writeFileSync(filePath, makePdfWithPages(4), "utf8");
+
+  for (const pages of ["1.9", "2.1-3.9"]) {
+    const readResult = await handleReadTool(
+      { file_path: filePath, pages },
+      createContext("pdf-fractional-pages", workspace)
+    );
+
+    assert.equal(readResult.ok, false);
+    assert.match(readResult.error ?? "", /must be an integer/);
+  }
+});
+
 function createContext(
   sessionId: string,
   projectRoot: string,
@@ -1022,6 +1038,11 @@ function createTempWorkspace(): string {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-tools-"));
   tempDirs.push(dir);
   return dir;
+}
+
+function makePdfWithPages(pageCount: number): string {
+  const pages = Array.from({ length: pageCount }, (_, index) => `${index + 1} 0 obj << /Type /Page >> endobj`);
+  return ["%PDF-1.4", ...pages, "%%EOF", ""].join("\n");
 }
 
 async function readSnippet(

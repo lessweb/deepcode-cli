@@ -552,11 +552,13 @@ function parsePositiveInt(value: string, label: string): number {
   if (!Number.isFinite(numeric)) {
     throw new Error(`${label} must be a number.`);
   }
-  const integer = Math.trunc(numeric);
-  if (integer < 1) {
+  if (!Number.isInteger(numeric)) {
+    throw new Error(`${label} must be an integer.`);
+  }
+  if (numeric < 1) {
     throw new Error(`${label} must be >= 1.`);
   }
-  return integer;
+  return numeric;
 }
 
 function readNotebook(filePath: string): string {
