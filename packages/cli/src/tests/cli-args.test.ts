@@ -28,6 +28,18 @@ test("parseArguments returns prompt after --prompt", async () => {
   assert.equal(r.prompt, "hello world");
 });
 
+test("parseArguments returns prompt from positional query", async () => {
+  const r = await parseArguments(["hello world"]);
+  assert.ok(!("message" in r));
+  assert.equal(r.prompt, "hello world");
+});
+
+test("parseArguments joins multi-word positional query", async () => {
+  const r = await parseArguments(["hello", "world"]);
+  assert.ok(!("message" in r));
+  assert.equal(r.prompt, "hello world");
+});
+
 test("parseArguments returns undefined prompt when -p is not present", async () => {
   const r = await parseArguments(["--resume"]);
   assert.ok(!("message" in r));
@@ -140,6 +152,13 @@ test("parseArguments handles -p before --resume <id>", async () => {
   assert.equal(r.prompt, "hello");
 });
 
+test("parseArguments handles --resume <id> combined with positional query", async () => {
+  const r = await parseArguments(["--resume", "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6", "hello", "again"]);
+  assert.ok(!("message" in r));
+  assert.equal(r.resume, "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6");
+  assert.equal(r.prompt, "hello again");
+});
+
 test("parseArguments --version takes precedence over --help", async () => {
   const r = await parseArguments(["--version", "--help"]);
   assert.ok(!("message" in r));
@@ -192,6 +211,17 @@ test("parseArguments exits on empty -p value", async () => {
   await withMockedExit(async (exitSpy) => {
     try {
       await parseArguments(["-p", ""]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.length >= 1);
+  });
+});
+
+test("parseArguments exits when positional query is combined with -p", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["hello", "-p", "world"]);
     } catch {
       /* expected */
     }

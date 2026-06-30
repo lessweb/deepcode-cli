@@ -140,6 +140,8 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   });
 
   const parsed = y.parseSync() as Record<string, unknown>;
+  const queryRaw = parsed.query as string | string[] | undefined;
+  const positionalPrompt = Array.isArray(queryRaw) ? queryRaw.join(" ") : queryRaw;
 
   const resumeRaw = parsed.resume as string | undefined;
   let resume: ParsedCliArgs["resume"];
@@ -152,7 +154,7 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   }
 
   return {
-    prompt: parsed.prompt as string | undefined,
+    prompt: (parsed.prompt as string | undefined) ?? positionalPrompt,
     resume,
     version: parsed.version === true,
     help: parsed.help === true,
