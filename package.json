@@ -26,10 +26,13 @@
     "start": "node scripts/start.js",
     "build-and-start": "npm run build && npm run start",
     "test": "npm run test --workspaces --if-present",
+    "test:scripts": "node --test scripts/__tests__/*.test.js",
     "release:version": "node scripts/version.js",
     "prepare:package": "node scripts/prepare-package.js",
     "prepare:vscode": "node scripts/prepare-vscode.js",
-    "prepare": "husky && npm run build && npm run bundle"
+    "changelog": "node scripts/generate-changelog.js",
+    "prepare": "husky && npm run build && npm run bundle",
+    "pre-commit": "node scripts/pre-commit.js"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
