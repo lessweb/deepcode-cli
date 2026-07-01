@@ -293,7 +293,7 @@ export const PromptInput = React.memo(function PromptInput({
     if (!statusMessage) {
       return;
     }
-    const timer = setTimeout(() => setStatusMessage(null), 8000);
+    const timer = setTimeout(() => setStatusMessage(null), 2500);
     return () => clearTimeout(timer);
   }, [statusMessage]);
 
