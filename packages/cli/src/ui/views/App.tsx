@@ -983,6 +983,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}
           onExitShortcut={handleExitShortcut}
+          keybinds={resolvedSettings.keybinds}
           placeholder="Type your message..."
           statusLineSegments={statusLineSegments}
           statusLineSeparator={resolvedSettings.statusline.separator}

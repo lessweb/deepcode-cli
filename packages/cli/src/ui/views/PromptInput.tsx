@@ -36,6 +36,7 @@ import {
 } from "../core/prompt-undo-redo";
 import { buildSlashCommands, filterSlashCommands, findExactSlashCommand } from "../core/slash-commands";
 import type { SlashCommandItem } from "../core/slash-commands";
+import { buildKeybindMatchers } from "../core/keybinds";
 import {
   filterFileMentionItems,
   getCurrentFileMentionToken,
@@ -60,7 +61,8 @@ import {
   useTerminalFocusReporting,
 } from "../hooks";
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
-import type { ModelConfigSelection, PermissionScope } from "@vegamo/deepcode-core";
+import type { ModelConfigSelection, PermissionScope, KeybindMap } from "@vegamo/deepcode-core";
+import { readSettings, writeSettings, readProjectSettings, writeProjectSettings } from "@vegamo/deepcode-core";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
 import type { SessionEntry, SkillInfo } from "@vegamo/deepcode-core";
 import type { UserToolPermission } from "@vegamo/deepcode-core";
@@ -102,6 +104,7 @@ type Props = {
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
   onExitShortcut?: () => void;
+  keybinds?: KeybindMap;
 };
 
 const PROMPT_PREFIX_WIDTH = 2;
@@ -135,6 +138,7 @@ export const PromptInput = React.memo(function PromptInput({
   onToggleProcessStdout,
   onExitShortcut,
   onRawModeChange,
+  keybinds,
 }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const inputTextRef = useRef<DOMElement | null>(null);
@@ -179,6 +183,10 @@ export const PromptInput = React.memo(function PromptInput({
     fileMentionToken !== null &&
     fileMentionKey !== dismissedFileMentionKey;
   const slashItems = React.useMemo(() => buildSlashCommands(skills), [skills]);
+  const keybindMatchers = React.useMemo(
+    () => (keybinds && Object.keys(keybinds).length > 0 ? buildKeybindMatchers(keybinds) : []),
+    [keybinds]
+  );
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
@@ -319,6 +327,20 @@ export const PromptInput = React.memo(function PromptInput({
 
       if (disabled) {
         return;
+      }
+
+      // Check custom keybinds before hardcoded shortcuts.
+      // Only match when no dropdown/menu is open to avoid conflicts.
+      if (!openRawModelDropdown && !showSkillsDropdown && !showModelDropdown && !showMenu && !showFileMentionMenu) {
+        for (const { match, action } of keybindMatchers) {
+          if (match(input, key)) {
+            const item = slashItems.find((s) => s.name === action);
+            if (item) {
+              handleSlashSelection(item);
+              return;
+            }
+          }
+        }
       }
 
       if (key.escape) {
@@ -713,12 +735,105 @@ export const PromptInput = React.memo(function PromptInput({
       resetPromptInput();
       return;
     }
+    if (item.kind === "keybind") {
+      handleKeybindCommand();
+      return;
+    }
     if (item.kind === "exit") {
       onSubmit({ text: "/exit", imageUrls: [], command: "exit" });
       setBuffer(EMPTY_BUFFER);
       clearUndoRedoStacks();
       return;
     }
+  }
+
+  function handleKeybindCommand(): void {
+    const parts = buffer.text.trim().split(/\s+/);
+    const subcommand = parts[1] ?? "list";
+    const existingProjectSettings = readProjectSettings(projectRoot);
+
+    if (subcommand === "list") {
+      clearSlashToken();
+      const kbs = keybinds ?? {};
+      const entries = Object.entries(kbs);
+      if (entries.length === 0) {
+        setStatusMessage("No custom keybinds configured. Use /keybind add <shortcut> <action>");
+      } else {
+        const lines = entries.map(([shortcut, action]) => `  ${shortcut} → /${action}`);
+        setStatusMessage(`Keybinds:\n${lines.join("\n")}`);
+      }
+      return;
+    }
+
+    if (subcommand === "add") {
+      const shortcut = parts[2];
+      const action = parts[3];
+      if (!shortcut || !action) {
+        setStatusMessage("Usage: /keybind add <shortcut> <action>  (e.g. /keybind add ctrl+e exit)");
+        clearSlashToken();
+        return;
+      }
+      // Validate the shortcut string
+      if (!/^(ctrl|shift|meta)(\+(ctrl|shift|meta))*\+[a-z0-9-]$/i.test(shortcut)) {
+        setStatusMessage(
+          `Invalid shortcut "${shortcut}". Format: ctrl+key, ctrl+shift+key (modifiers: ctrl, shift, meta)`
+        );
+        clearSlashToken();
+        return;
+      }
+      // Validate action is a known slash command or skill
+      const knownNames = new Set(slashItems.map((s) => s.name));
+      if (!knownNames.has(action)) {
+        setStatusMessage(`Unknown action "/${action}". Use a slash command or skill name.`);
+        clearSlashToken();
+        return;
+      }
+
+      const useProject = existingProjectSettings !== null;
+      const rawSettings = useProject ? existingProjectSettings : readSettings();
+      const current: Record<string, string> = { ...(rawSettings?.keybinds ?? {}) };
+      current[shortcut] = action;
+      const updated = { ...(rawSettings ?? {}), keybinds: current };
+      if (useProject) {
+        writeProjectSettings(updated, projectRoot);
+      } else {
+        writeSettings(updated);
+      }
+      setStatusMessage(`Keybind added: ${shortcut} → /${action}`);
+      clearSlashToken();
+      return;
+    }
+
+    if (subcommand === "remove") {
+      const shortcut = parts[2];
+      if (!shortcut) {
+        setStatusMessage("Usage: /keybind remove <shortcut>");
+        clearSlashToken();
+        return;
+      }
+
+      const useProject = existingProjectSettings !== null;
+      const rawSettings = useProject ? existingProjectSettings : readSettings();
+      const current: Record<string, string> = { ...(rawSettings?.keybinds ?? {}) };
+      if (!(shortcut in current)) {
+        setStatusMessage(`Keybind "${shortcut}" not found.`);
+        clearSlashToken();
+        return;
+      }
+      delete current[shortcut];
+      const updated = { ...(rawSettings ?? {}), keybinds: current };
+      if (useProject) {
+        writeProjectSettings(updated, projectRoot);
+      } else {
+        writeSettings(updated);
+      }
+      setStatusMessage(`Keybind removed: ${shortcut}`);
+      clearSlashToken();
+      return;
+    }
+
+    setStatusMessage(`Unknown subcommand "${subcommand}". Use: add, remove, list`);
+    clearSlashToken();
   }
 
   function submitCurrentBuffer(): void {
