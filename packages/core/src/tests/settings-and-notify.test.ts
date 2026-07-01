@@ -482,6 +482,60 @@ test("applyModelConfigSelection leaves settings untouched when the effective sel
   assert.equal(result.settings.model, undefined);
 });
 
+// ------ keybinds ------
+
+test("resolveSettingsSources defaults keybinds to empty object", () => {
+  const resolved = resolveSettingsSources(
+    {},
+    null,
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.deepEqual(resolved.keybinds, {});
+});
+
+test("resolveSettingsSources reads keybinds from user settings", () => {
+  const resolved = resolveSettingsSources(
+    { keybinds: { "ctrl+e": "exit", "ctrl+n": "new" } },
+    null,
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.deepEqual(resolved.keybinds, { "ctrl+e": "exit", "ctrl+n": "new" });
+});
+
+test("resolveSettingsSources merges keybinds with project precedence", () => {
+  const resolved = resolveSettingsSources(
+    { keybinds: { "ctrl+e": "exit", "ctrl+s": "skills" } },
+    { keybinds: { "ctrl+e": "new", "ctrl+p": "plan" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.deepEqual(resolved.keybinds, {
+    "ctrl+e": "new",
+    "ctrl+s": "skills",
+    "ctrl+p": "plan",
+  });
+});
+
+test("resolveSettingsSources filters invalid keybind entries", () => {
+  const resolved = resolveSettingsSources(
+    {
+      keybinds: {
+        "ctrl+e": "exit",
+        "": "exit",
+        invalid: "" as never,
+        "ctrl+x": 123 as never,
+        "ctrl+g": null as never,
+      },
+    },
+    null,
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.deepEqual(resolved.keybinds, { "ctrl+e": "exit" });
+});
+
 test("formatDurationSeconds preserves sub-second precision and trims trailing zeros", () => {
   assert.equal(formatDurationSeconds(0), "0");
   assert.equal(formatDurationSeconds(1250), "1");
