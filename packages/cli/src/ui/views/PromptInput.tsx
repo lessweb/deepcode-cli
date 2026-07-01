@@ -74,7 +74,7 @@ export type PromptSubmission = {
   selectedSkills?: SkillInfo[];
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
-  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit";
+  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "keybind" | "exit";
 };
 
 export type PromptDraft = {
@@ -293,7 +293,7 @@ export const PromptInput = React.memo(function PromptInput({
     if (!statusMessage) {
       return;
     }
-    const timer = setTimeout(() => setStatusMessage(null), 2500);
+    const timer = setTimeout(() => setStatusMessage(null), 8000);
     return () => clearTimeout(timer);
   }, [statusMessage]);
 
@@ -738,7 +738,18 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
     if (item.kind === "keybind") {
-      handleKeybindCommand();
+      const parts = buffer.text.trim().split(/\s+/);
+      if (parts.length > 1) {
+        // Has args: process add/remove/list subcommand
+        handleKeybindCommand();
+      } else if (parts[0] && parts[0] !== "/keybind") {
+        // Partial match from menu (e.g. /key): auto-complete to /keybind
+        setBuffer({ text: "/keybind ", cursor: "/keybind ".length });
+        clearUndoRedoStacks();
+      } else {
+        // Exact match with no args: show usage hint
+        setStatusMessage("Usage: /keybind add <shortcut> <action> | remove <shortcut> | list");
+      }
       return;
     }
     if (item.kind === "exit") {
@@ -750,20 +761,19 @@ export const PromptInput = React.memo(function PromptInput({
   }
 
   function handleKeybindCommand(): void {
-    const parts = buffer.text.trim().split(/\s+/);
+    const rawParts = buffer.text.trim().split(/\s+/);
+    const isGlobal = rawParts.includes("--global");
+    const parts = rawParts.filter((p) => p !== "--global");
     const subcommand = parts[1] ?? "list";
     const existingProjectSettings = readProjectSettings(projectRoot);
+    const useProject = existingProjectSettings !== null;
+    const userSettings = readSettings();
+    const kbs = keybinds ?? {};
+    const levelLabel = isGlobal ? " (global)" : useProject ? " (project)" : " (global)";
 
     if (subcommand === "list") {
-      clearSlashToken();
-      const kbs = keybinds ?? {};
-      const entries = Object.entries(kbs);
-      if (entries.length === 0) {
-        setStatusMessage("No custom keybinds configured. Use /keybind add <shortcut> <action>");
-      } else {
-        const lines = entries.map(([shortcut, action]) => `  ${shortcut} → /${action}`);
-        setStatusMessage(`Keybinds:\n${lines.join("\n")}`);
-      }
+      onSubmit({ text: "/keybind list", imageUrls: [], command: "keybind" });
+      resetPromptInput();
       return;
     }
 
@@ -786,52 +796,76 @@ export const PromptInput = React.memo(function PromptInput({
       // Validate action is a known slash command or skill
       const knownNames = new Set(slashItems.map((s) => s.name));
       if (!knownNames.has(action)) {
-        setStatusMessage(`Unknown action "/${action}". Use a slash command or skill name.`);
+        const available = slashItems
+          .filter((s) => s.kind !== "skill")
+          .map((s) => s.name)
+          .slice(0, 10)
+          .join(", ");
+        setStatusMessage(`Unknown action "/${action}". Available: ${available}…`);
         clearSlashToken();
         return;
       }
 
-      const useProject = existingProjectSettings !== null;
-      const rawSettings = useProject ? existingProjectSettings : readSettings();
+      // Check duplicates across all levels (merged)
+      const existingMerged = kbs[shortcut];
+      if (existingMerged === action) {
+        setStatusMessage(`Keybind already set: ${shortcut} → /${action}`);
+        clearSlashToken();
+        return;
+      }
+
+      // Determine write target
+      const rawSettings = isGlobal ? userSettings : useProject ? existingProjectSettings : userSettings;
       const current: Record<string, string> = { ...(rawSettings?.keybinds ?? {}) };
       current[shortcut] = action;
       const updated = { ...(rawSettings ?? {}), keybinds: current };
-      if (useProject) {
-        writeProjectSettings(updated, projectRoot);
-      } else {
+      if (isGlobal || !useProject) {
         writeSettings(updated);
+      } else {
+        writeProjectSettings(updated, projectRoot);
       }
       onKeybindsChanged?.();
-      setStatusMessage(`Keybind added: ${shortcut} → /${action}`);
+      if (existingMerged) {
+        setStatusMessage(`Keybind updated: ${shortcut} → /${action} (was /${existingMerged})${levelLabel}`);
+      } else {
+        setStatusMessage(`Keybind added: ${shortcut} → /${action}${levelLabel}`);
+      }
       clearSlashToken();
       return;
     }
 
     if (subcommand === "remove") {
       const shortcut = parts[2];
+      const rawSettings = isGlobal ? userSettings : useProject ? existingProjectSettings : userSettings;
+      const current: Record<string, string> = { ...(rawSettings?.keybinds ?? {}) };
+      const existingShortcuts = Object.keys(kbs);
       if (!shortcut) {
-        setStatusMessage("Usage: /keybind remove <shortcut>");
+        if (existingShortcuts.length === 0) {
+          setStatusMessage("No custom keybinds to remove.");
+        } else {
+          const list = existingShortcuts.map((s) => `${s} → /${kbs[s]}`).join(", ");
+          setStatusMessage(`Usage: /keybind remove <shortcut>\nExisting: ${list}`);
+        }
         clearSlashToken();
         return;
       }
 
-      const useProject = existingProjectSettings !== null;
-      const rawSettings = useProject ? existingProjectSettings : readSettings();
-      const current: Record<string, string> = { ...(rawSettings?.keybinds ?? {}) };
       if (!(shortcut in current)) {
-        setStatusMessage(`Keybind "${shortcut}" not found.`);
+        const list =
+          existingShortcuts.length > 0 ? existingShortcuts.map((s) => `${s} → /${kbs[s]}`).join(", ") : "(none)";
+        setStatusMessage(`Keybind "${shortcut}" not found${levelLabel}.\nExisting: ${list}`);
         clearSlashToken();
         return;
       }
       delete current[shortcut];
       const updated = { ...(rawSettings ?? {}), keybinds: current };
-      if (useProject) {
-        writeProjectSettings(updated, projectRoot);
-      } else {
+      if (isGlobal || !useProject) {
         writeSettings(updated);
+      } else {
+        writeProjectSettings(updated, projectRoot);
       }
       onKeybindsChanged?.();
-      setStatusMessage(`Keybind removed: ${shortcut}`);
+      setStatusMessage(`Keybind removed: ${shortcut}${levelLabel}`);
       clearSlashToken();
       return;
     }

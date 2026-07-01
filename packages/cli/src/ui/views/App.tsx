@@ -13,6 +13,7 @@ import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
+import { KeybindsView } from "./KeybindsView";
 import { ProcessStdoutView } from "./ProcessStdoutView";
 import {
   type AskUserQuestionAnswers,
@@ -50,7 +51,7 @@ import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 
-type View = "chat" | "session-list" | "undo" | "mcp-status";
+type View = "chat" | "session-list" | "undo" | "keybinds" | "mcp-status";
 
 const STATUS_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -359,6 +360,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "keybind") {
+        navigateToSubView("keybinds");
         return;
       }
 
@@ -945,6 +950,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
             setView("chat");
           }}
         />
+      ) : view === "keybinds" ? (
+        <KeybindsView keybinds={resolvedSettings.keybinds} projectRoot={projectRoot} onCancel={() => setView("chat")} />
       ) : view === "mcp-status" ? (
         <McpStatusList
           statuses={mcpStatuses}
