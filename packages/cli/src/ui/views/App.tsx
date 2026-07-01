@@ -500,6 +500,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     handleExit({ showCommand: false, showSummary: false });
   }, [handleExit]);
 
+  const handleKeybindsChanged = useCallback(() => {
+    const next = resolveCurrentSettings(projectRoot);
+    setResolvedSettings(next);
+  }, [projectRoot]);
+
   const reloadActiveSessionView = useCallback(
     (sessionId: string): void => {
       resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
@@ -983,6 +988,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}
           onExitShortcut={handleExitShortcut}
+          onKeybindsChanged={handleKeybindsChanged}
           keybinds={resolvedSettings.keybinds}
           placeholder="Type your message..."
           statusLineSegments={statusLineSegments}

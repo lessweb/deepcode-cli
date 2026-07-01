@@ -104,6 +104,7 @@ type Props = {
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
   onExitShortcut?: () => void;
+  onKeybindsChanged?: () => void;
   keybinds?: KeybindMap;
 };
 
@@ -138,6 +139,7 @@ export const PromptInput = React.memo(function PromptInput({
   onToggleProcessStdout,
   onExitShortcut,
   onRawModeChange,
+  onKeybindsChanged,
   keybinds,
 }: Props): React.ReactElement {
   const { stdout } = useStdout();
@@ -799,6 +801,7 @@ export const PromptInput = React.memo(function PromptInput({
       } else {
         writeSettings(updated);
       }
+      onKeybindsChanged?.();
       setStatusMessage(`Keybind added: ${shortcut} → /${action}`);
       clearSlashToken();
       return;
@@ -827,6 +830,7 @@ export const PromptInput = React.memo(function PromptInput({
       } else {
         writeSettings(updated);
       }
+      onKeybindsChanged?.();
       setStatusMessage(`Keybind removed: ${shortcut}`);
       clearSlashToken();
       return;
