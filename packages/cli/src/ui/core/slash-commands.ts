@@ -9,6 +9,7 @@ export type SlashCommandKind =
   | "resume"
   | "continue"
   | "undo"
+  | "usage"
   | "mcp"
   | "raw"
   | "exit";
@@ -64,6 +65,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "undo",
     label: "/undo",
     description: "Restore code and/or conversation to a previous point",
+  },
+  {
+    kind: "usage",
+    name: "usage",
+    label: "/usage",
+    description: "Show DeepSeek API balance / credits",
   },
   {
     kind: "mcp",
