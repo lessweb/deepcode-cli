@@ -120,6 +120,27 @@ Controls whether skills are included during skill scanning. Keys are resolved sk
 - Setting a skill to `false` hides every skill with that resolved `name`, across project and user skill roots.
 - Project settings override user settings per skill. If the project setting omits a skill, the user setting is used.
 
+#### `keybinds` — Custom Keybinds
+
+Bind keyboard shortcuts to slash commands (e.g. `/exit`, `/new`, `/skills`) or skill names, triggering actions without typing `/`.
+
+```json
+{
+  "keybinds": {
+    "ctrl+e": "exit",
+    "ctrl+n": "new",
+    "ctrl+s": "skills",
+    "ctrl+m": "model"
+  }
+}
+```
+
+- Shortcut format: `ctrl+key`, `ctrl+shift+key`, or `meta+key` (e.g. `ctrl+e`, `ctrl+shift+i`, `meta+b`).
+- Letter matching is case-insensitive (`ctrl+e` matches both `Ctrl+E` and `Ctrl+Shift+E` with exact modifier match).
+- Project settings override user settings per shortcut. If a shortcut exists in both, the project value wins.
+- Custom keybinds only fire when no dropdown/menu is open, to avoid conflicts with menu navigation.
+- You can also manage keybinds at runtime via `/keybind add|remove|list`.
+
 #### `mcpServers` — MCP Servers
 
 Configuration for MCP (Model Context Protocol) servers. The value is a key-value pair, where the key is the service name and the value is a server configuration object.

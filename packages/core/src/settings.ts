@@ -45,6 +45,8 @@ export type PermissionSettings = {
 
 export type EnabledSkillsSettings = Record<string, boolean>;
 
+export type KeybindMap = Record<string, string>;
+
 export type StatusLineProviderConfig =
   | {
       type: "command";
@@ -94,6 +96,7 @@ export type DeepcodingSettings = {
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
   statusline?: StatusLineSettings;
+  keybinds?: KeybindMap;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -112,6 +115,7 @@ export type ResolvedDeepcodingSettings = {
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
   statusline: ResolvedStatusLineSettings;
+  keybinds: KeybindMap;
 };
 
 export type ModelConfigSelection = {
@@ -250,6 +254,30 @@ function mergeEnabledSkills(
   return {
     ...normalizeEnabledSkills(userSettings?.enabledSkills),
     ...normalizeEnabledSkills(projectSettings?.enabledSkills),
+  };
+}
+
+function normalizeKeybinds(value: unknown): KeybindMap {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+  const result: KeybindMap = {};
+  for (const [shortcut, action] of Object.entries(value)) {
+    if (!shortcut || typeof action !== "string" || !action) {
+      continue;
+    }
+    result[shortcut] = action;
+  }
+  return result;
+}
+
+function mergeKeybinds(
+  userSettings: DeepcodingSettings | null | undefined,
+  projectSettings: DeepcodingSettings | null | undefined
+): KeybindMap {
+  return {
+    ...normalizeKeybinds(userSettings?.keybinds),
+    ...normalizeKeybinds(projectSettings?.keybinds),
   };
 }
 
@@ -547,6 +575,7 @@ export function resolveSettingsSources(
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),
+    keybinds: mergeKeybinds(userSettings, projectSettings),
   };
 }
 

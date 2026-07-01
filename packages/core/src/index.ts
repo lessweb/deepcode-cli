@@ -29,6 +29,7 @@ export type {
   StatusLineSettings,
   ResolvedStatusLineSettings,
   StatusLineProviderConfig,
+  KeybindMap,
 } from "./settings";
 
 // Session
