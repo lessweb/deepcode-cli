@@ -35,6 +35,7 @@ import { resolveCurrentSettings, writeModelConfigSelection } from "@vegamo/deepc
 import { useStatusLine } from "../hooks";
 import type { SessionInfo } from "../statusline";
 import { isCollapsedThinking } from "../core/thinking-state";
+import { BUILTIN_SLASH_COMMANDS, findExactSlashCommand } from "../core/slash-commands";
 import { ANSI_CLEAR_SCREEN } from "../constants";
 import type {
   LlmStreamProgress,
@@ -321,6 +322,78 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     [exit, sessionManager]
   );
 
+  const handleUsage = useCallback(async () => {
+    const settings = resolveCurrentSettings(projectRoot);
+    const baseURL = settings.baseURL.toLowerCase();
+    if (!baseURL.includes("api.deepseek.com")) {
+      setErrorLine(`/usage is only compatible with DeepSeek API. Current base URL: ${settings.baseURL}`);
+      return;
+    }
+    if (!settings.apiKey) {
+      setErrorLine("No API key configured. Set DEEPCODE_API_KEY env var or apiKey in settings.json.");
+      return;
+    }
+
+    setBusy(true);
+    setErrorLine(null);
+    try {
+      const response = await fetch("https://api.deepseek.com/user/balance", {
+        headers: { Authorization: `Bearer ${settings.apiKey}` },
+      });
+      if (!response.ok) {
+        setErrorLine(`Failed to fetch balance: HTTP ${response.status} ${response.statusText || ""}`.trim());
+        return;
+      }
+      const data = (await response.json()) as {
+        is_available: boolean;
+        balance_infos?: Array<{
+          currency: string;
+          total_balance: string;
+          granted_balance: string;
+          topped_up_balance: string;
+        }>;
+      };
+
+      const statusIcon = data.is_available ? "🟢" : "🔴";
+      const statusText = data.is_available ? "Available" : "Not available";
+      let content = `/usage\n└ API status: ${statusIcon} ${statusText}`;
+
+      if (data.balance_infos && data.balance_infos.length > 0) {
+        for (const info of data.balance_infos) {
+          content += `\n  ${info.currency}: total ${info.total_balance} (granted ${info.granted_balance}, topped up ${info.topped_up_balance})`;
+        }
+      } else {
+        content += `\n  No balance info returned.`;
+      }
+
+      const now = new Date().toISOString();
+      const activeSessionId = sessionManager.getActiveSessionId();
+      if (activeSessionId) {
+        sessionManager.addSessionSystemMessage(activeSessionId, content, true);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            sessionId: "local",
+            role: "system" as const,
+            content,
+            contentParams: null,
+            messageParams: null,
+            compacted: false,
+            visible: true,
+            createTime: now,
+            updateTime: now,
+          },
+        ]);
+      }
+    } catch (error) {
+      setErrorLine(`Failed to fetch balance: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [projectRoot, sessionManager]);
+
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
       if (submission.command === "exit") {
@@ -359,6 +432,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "usage") {
+        void handleUsage();
         return;
       }
 
@@ -420,6 +497,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       sessionManager,
       pendingPermissionReply,
       handleExit,
+      handleUsage,
       onRestart,
       refreshSkills,
       refreshSessionsList,
@@ -551,10 +629,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       // Step 2: Submit prompt if provided
       if (initialPrompt && initialPrompt.trim()) {
         initialPromptSubmittedRef.current = true;
+        const trimmed = initialPrompt.trim();
+        const slashToken = trimmed.split(/\s+/, 1)[0];
+        const match = findExactSlashCommand(BUILTIN_SLASH_COMMANDS, slashToken);
+        const command = match && match.kind !== "skill" ? (match.kind as PromptSubmission["command"]) : undefined;
         handleSubmit({
-          text: initialPrompt,
+          text: trimmed,
           imageUrls: [],
           selectedSkills: undefined,
+          command,
         });
       }
     }

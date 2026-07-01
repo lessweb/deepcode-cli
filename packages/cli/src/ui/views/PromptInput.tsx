@@ -72,7 +72,7 @@ export type PromptSubmission = {
   selectedSkills?: SkillInfo[];
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
-  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit";
+  command?: "new" | "resume" | "continue" | "undo" | "usage" | "mcp" | "exit";
 };
 
 export type PromptDraft = {
@@ -705,6 +705,11 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "undo") {
       onSubmit({ text: "/undo", imageUrls: [], command: "undo" });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "usage") {
+      onSubmit({ text: "/usage", imageUrls: [], command: "usage" });
       resetPromptInput();
       return;
     }
