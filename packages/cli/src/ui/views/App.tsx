@@ -13,6 +13,7 @@ import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
+import { UsageView, type UsageData } from "./UsageView";
 import { ProcessStdoutView } from "./ProcessStdoutView";
 import {
   type AskUserQuestionAnswers,
@@ -51,7 +52,7 @@ import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 
-type View = "chat" | "session-list" | "undo" | "mcp-status";
+type View = "chat" | "session-list" | "undo" | "usage" | "mcp-status";
 
 const STATUS_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -133,6 +134,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
 
   rawModeRef.current = mode;
@@ -344,55 +346,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         setErrorLine(`Failed to fetch balance: HTTP ${response.status} ${response.statusText || ""}`.trim());
         return;
       }
-      const data = (await response.json()) as {
-        is_available: boolean;
-        balance_infos?: Array<{
-          currency: string;
-          total_balance: string;
-          granted_balance: string;
-          topped_up_balance: string;
-        }>;
-      };
-
-      const statusIcon = data.is_available ? "🟢" : "🔴";
-      const statusText = data.is_available ? "Available" : "Not available";
-      let content = `/usage\n└ API status: ${statusIcon} ${statusText}`;
-
-      if (data.balance_infos && data.balance_infos.length > 0) {
-        for (const info of data.balance_infos) {
-          content += `\n  ${info.currency}: total ${info.total_balance} (granted ${info.granted_balance}, topped up ${info.topped_up_balance})`;
-        }
-      } else {
-        content += `\n  No balance info returned.`;
-      }
-
-      const now = new Date().toISOString();
-      const activeSessionId = sessionManager.getActiveSessionId();
-      if (activeSessionId) {
-        sessionManager.addSessionSystemMessage(activeSessionId, content, true);
-      } else {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: crypto.randomUUID(),
-            sessionId: "local",
-            role: "system" as const,
-            content,
-            contentParams: null,
-            messageParams: null,
-            compacted: false,
-            visible: true,
-            createTime: now,
-            updateTime: now,
-          },
-        ]);
-      }
+      const data: UsageData = await response.json();
+      setUsageData(data);
+      navigateToSubView("usage");
     } catch (error) {
       setErrorLine(`Failed to fetch balance: ${error instanceof Error ? error.message : String(error)}`);
     } finally {
       setBusy(false);
     }
-  }, [projectRoot, sessionManager]);
+  }, [projectRoot, navigateToSubView]);
 
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
@@ -1032,6 +994,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />
+      ) : view === "usage" ? (
+        <UsageView data={usageData ?? { is_available: false, balance_infos: [] }} onCancel={() => setView("chat")} />
       ) : shouldShowQuestionPrompt && pendingQuestion && !busy ? (
         <AskUserQuestionPrompt
           questions={pendingQuestion.questions}
