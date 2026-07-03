@@ -58,7 +58,9 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
             paddingX={1}
           >
             <Box flexGrow={1} marginBottom={compact ? 1 : 0}>
-              <Text color={"#229ac3e6"}>{">"}_ Deep Code </Text>
+              <Text bold color={"#229ac3e6"}>
+                {">"}_ Deep Code{" "}
+              </Text>
               <Text color="gray"> (v{version || "unknown"})</Text>
             </Box>
             {!compact ? <Text> </Text> : null}

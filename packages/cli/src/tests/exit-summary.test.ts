@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildExitSummaryText } from "../ui";
+import { buildExitSummaryText, buildResumeHintText } from "../ui";
 import type { ModelUsage, SessionEntry } from "@vegamo/deepcode-core";
 
-const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;]*m/g, "");
+const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "");
 
 test("buildExitSummaryText only shows Goodbye and model usage with cached tokens", () => {
   const summary = stripAnsi(
@@ -88,6 +88,55 @@ test("buildExitSummaryText does not derive usage rows from legacy aggregate usag
   assert.match(summary, /Goodbye!/);
   assert.doesNotMatch(summary, /Model Usage/);
   assert.doesNotMatch(summary, /11,966/);
+});
+
+test("buildExitSummaryText does not show resume hint when sessionId is provided", () => {
+  const sessionId = "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6";
+  const summary = stripAnsi(
+    buildExitSummaryText({
+      session: buildSession(null),
+      sessionId,
+    })
+  );
+
+  assert.match(summary, /Goodbye!/);
+  assert.doesNotMatch(summary, /deepcode --resume 0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6/);
+  assert.doesNotMatch(summary, /To continue this session/);
+});
+
+test("buildExitSummaryText does not show resume hint when sessionId is omitted", () => {
+  const summary = stripAnsi(
+    buildExitSummaryText({
+      session: buildSession(null),
+    })
+  );
+
+  assert.match(summary, /Goodbye!/);
+  assert.doesNotMatch(summary, /deepcode --resume/);
+  assert.doesNotMatch(summary, /To continue this session/);
+});
+
+test("buildExitSummaryText does not show resume hint with null session", () => {
+  const summary = stripAnsi(
+    buildExitSummaryText({
+      session: null,
+      sessionId: "test-session-id",
+    })
+  );
+
+  assert.match(summary, /Goodbye!/);
+  assert.doesNotMatch(summary, /deepcode --resume test-session-id/);
+  assert.doesNotMatch(summary, /To continue this session/);
+});
+
+test("buildResumeHintText shows resume command when sessionId is provided", () => {
+  const hint = stripAnsi(buildResumeHintText("0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6") ?? "");
+
+  assert.equal(hint, "To continue this session, run deepcode --resume 0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6");
+});
+
+test("buildResumeHintText returns null when sessionId is omitted", () => {
+  assert.equal(buildResumeHintText(), null);
 });
 
 function buildSession(usage: ModelUsage | null, usagePerModel: Record<string, ModelUsage> | null = null): SessionEntry {

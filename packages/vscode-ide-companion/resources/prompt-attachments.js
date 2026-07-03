@@ -48,9 +48,11 @@
       throw new Error("Prompt attachment manager requires promptInput, inputWrap, and toolsLine.");
     }
 
-    let attachment = null;
+    let attachments = [];
+    let nextAttachmentId = 0;
     let previewPopup = null;
     let previewImage = null;
+    let previewAnchor = null;
 
     function ensurePreviewPopup() {
       if (previewPopup) {
@@ -68,6 +70,7 @@
       if (!previewPopup) {
         return;
       }
+      previewAnchor = null;
       previewPopup.classList.remove("show");
     }
 
@@ -101,12 +104,13 @@
       previewPopup.style.top = top + "px";
     }
 
-    function showPreview(anchor) {
+    function showPreview(anchor, attachment) {
       if (!attachment) {
         return;
       }
 
       ensurePreviewPopup();
+      previewAnchor = anchor;
       previewImage.src = attachment.dataUrl;
       previewPopup.classList.add("show");
       updatePreviewPosition(anchor);
@@ -114,24 +118,35 @@
 
     function emitChange() {
       onAttachmentChange({
-        hasAttachments: Boolean(attachment),
-        attachments: attachment ? [attachment] : [],
+        hasAttachments: attachments.length > 0,
+        attachments: attachments.slice(),
       });
     }
 
     function clear() {
-      attachment = null;
+      attachments = [];
       toolsLine.innerHTML = "";
       toolsLine.classList.remove("has-attachment");
       hidePreview();
       emitChange();
     }
 
-    function createAttachmentNode() {
+    function removeAttachment(id) {
+      const nextAttachments = attachments.filter((attachment) => attachment.id !== id);
+      if (nextAttachments.length === attachments.length) {
+        return;
+      }
+      attachments = nextAttachments;
+      render();
+      emitChange();
+    }
+
+    function createAttachmentNode(attachment) {
       const wrapper = createElement("div", "chat-attached-context-attachment show-file-icons");
       wrapper.tabIndex = 0;
       wrapper.setAttribute("role", "button");
       wrapper.setAttribute("aria-label", ATTACHMENT_LABEL + " (删除)");
+      wrapper.dataset.attachmentId = String(attachment.id);
       wrapper.draggable = true;
 
       const removeButton = createElement("a", "monaco-button codicon codicon-close");
@@ -143,7 +158,7 @@
       removeButton.addEventListener("click", (event) => {
         event.preventDefault();
         event.stopPropagation();
-        clear();
+        removeAttachment(attachment.id);
       });
 
       const iconLabel = createElement("div", "monaco-icon-label");
@@ -166,7 +181,7 @@
       wrapper.appendChild(pill);
       wrapper.appendChild(text);
 
-      const show = () => showPreview(wrapper);
+      const show = () => showPreview(wrapper, attachment);
       wrapper.addEventListener("mouseenter", show);
       wrapper.addEventListener("focus", show);
       wrapper.addEventListener("mouseleave", hidePreview);
@@ -177,7 +192,7 @@
       wrapper.addEventListener("keydown", (event) => {
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
-          clear();
+          removeAttachment(attachment.id);
         }
       });
 
@@ -186,37 +201,44 @@
 
     function render() {
       toolsLine.innerHTML = "";
-      toolsLine.classList.toggle("has-attachment", Boolean(attachment));
-      if (!attachment) {
+      toolsLine.classList.toggle("has-attachment", attachments.length > 0);
+      if (attachments.length === 0) {
         hidePreview();
         return;
       }
-      toolsLine.appendChild(createAttachmentNode());
+      for (const attachment of attachments) {
+        toolsLine.appendChild(createAttachmentNode(attachment));
+      }
+      if (previewAnchor && !toolsLine.contains(previewAnchor)) {
+        hidePreview();
+      }
     }
 
-    function setAttachmentData(data) {
+    function addAttachmentData(data) {
       if (!data?.dataUrl) {
         return false;
       }
 
-      attachment = {
+      nextAttachmentId += 1;
+      attachments.push({
+        id: nextAttachmentId,
         name: data.name || ATTACHMENT_LABEL,
         mimeType: data.mimeType || "image/png",
         dataUrl: data.dataUrl,
         label: ATTACHMENT_LABEL,
-      };
+      });
       render();
       emitChange();
       return true;
     }
 
-    async function setAttachmentFromFile(file) {
+    async function addAttachmentFromFile(file) {
       if (!isImageFile(file)) {
         return false;
       }
 
       const dataUrl = await readFileAsDataUrl(file);
-      return setAttachmentData({
+      return addAttachmentData({
         name: file.name || ATTACHMENT_LABEL,
         mimeType: file.type || "image/png",
         dataUrl,
@@ -232,7 +254,7 @@
 
       event.preventDefault();
       try {
-        await setAttachmentFromFile(file);
+        await addAttachmentFromFile(file);
       } catch (error) {
         console.error("Failed to attach pasted image.", error);
       }
@@ -241,18 +263,16 @@
     promptInput.addEventListener("paste", handlePaste);
 
     window.addEventListener("resize", () => {
-      const attachmentNode = toolsLine.querySelector(".chat-attached-context-attachment");
-      if (previewPopup?.classList.contains("show") && attachmentNode) {
-        updatePreviewPosition(attachmentNode);
+      if (previewPopup?.classList.contains("show") && previewAnchor) {
+        updatePreviewPosition(previewAnchor);
       }
     });
 
     window.addEventListener(
       "scroll",
       () => {
-        const attachmentNode = toolsLine.querySelector(".chat-attached-context-attachment");
-        if (previewPopup?.classList.contains("show") && attachmentNode) {
-          updatePreviewPosition(attachmentNode);
+        if (previewPopup?.classList.contains("show") && previewAnchor) {
+          updatePreviewPosition(previewAnchor);
         }
       },
       true
@@ -261,10 +281,10 @@
     return {
       clear,
       hasAttachments() {
-        return Boolean(attachment);
+        return attachments.length > 0;
       },
       getImageUrls() {
-        return attachment ? [attachment.dataUrl] : [];
+        return attachments.map((attachment) => attachment.dataUrl);
       },
     };
   }

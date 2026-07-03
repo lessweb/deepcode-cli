@@ -26,6 +26,9 @@ export type {
   PermissionDefaultMode,
   McpServerConfig,
   ReasoningEffort,
+  StatusLineSettings,
+  ResolvedStatusLineSettings,
+  StatusLineProviderConfig,
 } from "./settings";
 
 // Session

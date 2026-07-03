@@ -12,6 +12,7 @@ import {
   isPathInAnyDirectory,
   parseBashSideEffects,
 } from "../common/permissions";
+import type { PermissionScope, PermissionSettings } from "../settings";
 
 const tempDirs: string[] = [];
 
@@ -32,11 +33,11 @@ test("parseBashSideEffects accepts valid scopes and normalizes unsafe values to 
 });
 
 test("evaluatePermissionScopes applies deny, ask, allow, and default mode precedence", () => {
-  const settings = {
-    allow: ["read-in-cwd" as const],
-    deny: ["write-out-cwd" as const],
-    ask: ["network" as const],
-    defaultMode: "askAll" as const,
+  const settings: Required<PermissionSettings> = {
+    allow: ["read-in-cwd"] as PermissionScope[],
+    deny: ["write-out-cwd"] as PermissionScope[],
+    ask: ["network"] as PermissionScope[],
+    defaultMode: "askAll",
   };
 
   assert.equal(evaluatePermissionScopes(["write-out-cwd"], settings), "deny");
@@ -48,41 +49,41 @@ test("evaluatePermissionScopes applies deny, ask, allow, and default mode preced
 });
 
 test("evaluatePermissionScopes allows unknown when defaultMode is allowAll", () => {
-  const allowAllSettings = {
-    allow: [],
-    deny: [],
-    ask: [],
-    defaultMode: "allowAll" as const,
+  const allowAllSettings: Required<PermissionSettings> = {
+    allow: [] as PermissionScope[],
+    deny: [] as PermissionScope[],
+    ask: [] as PermissionScope[],
+    defaultMode: "allowAll",
   };
   assert.equal(evaluatePermissionScopes(["unknown"], allowAllSettings), "allow");
 
   // unknown + other scopes that would otherwise trigger ask should still ask for those scopes
-  const askNetworkSettings = {
-    allow: [],
-    deny: [],
-    ask: ["network" as const],
-    defaultMode: "allowAll" as const,
+  const askNetworkSettings: Required<PermissionSettings> = {
+    allow: [] as PermissionScope[],
+    deny: [] as PermissionScope[],
+    ask: ["network"] as PermissionScope[],
+    defaultMode: "allowAll",
   };
   assert.equal(evaluatePermissionScopes(["unknown", "network"], askNetworkSettings), "ask");
 });
 
 test("getPermissionScopesRequiringAsk excludes unknown when defaultMode is allowAll", () => {
-  const allowAllSettings = {
-    allow: [],
-    deny: [],
-    ask: ["network" as const],
-    defaultMode: "allowAll" as const,
+  const allowAllSettings: Required<PermissionSettings> = {
+    allow: [] as PermissionScope[],
+    deny: [] as PermissionScope[],
+    ask: ["network"] as PermissionScope[],
+    defaultMode: "allowAll",
   };
   const result = getPermissionScopesRequiringAsk(["unknown", "network"], allowAllSettings);
   assert.deepEqual(result, ["network"]);
 });
 
 test("getPermissionScopesRequiringAsk includes unknown when defaultMode is askAll", () => {
-  const askAllSettings = {
-    allow: [],
-    deny: [],
-    ask: ["network" as const],
-    defaultMode: "askAll" as const,
+  const askAllSettings: Required<PermissionSettings> = {
+    allow: [] as PermissionScope[],
+    deny: [] as PermissionScope[],
+    ask: ["network"] as PermissionScope[],
+    defaultMode: "askAll",
   };
   const result = getPermissionScopesRequiringAsk(["unknown", "network"], askAllSettings);
   assert.deepEqual(result, ["unknown", "network"]);
@@ -94,10 +95,10 @@ test("computeToolCallPermissions maps tool calls to permission requests", () => 
     sessionId: "session-1",
     projectRoot,
     settings: {
-      allow: [],
-      deny: [],
-      ask: ["write-out-cwd", "network"],
-      defaultMode: "allowAll",
+      allow: [] as PermissionScope[],
+      deny: [] as PermissionScope[],
+      ask: ["write-out-cwd", "network"] as PermissionScope[],
+      defaultMode: "allowAll" as const,
     },
     resolveSnippetPath: () => path.join(projectRoot, "src", "file.ts"),
     toolCalls: [
@@ -142,10 +143,10 @@ test("computeToolCallPermissions only asks for scopes not already allowed", () =
     sessionId: "session-1",
     projectRoot,
     settings: {
-      allow: ["read-in-cwd"],
-      deny: [],
-      ask: [],
-      defaultMode: "askAll",
+      allow: ["read-in-cwd"] as PermissionScope[],
+      deny: [] as PermissionScope[],
+      ask: [] as PermissionScope[],
+      defaultMode: "askAll" as const,
     },
     toolCalls: [
       {
@@ -180,10 +181,10 @@ test("computeToolCallPermissions allows read tool calls under skill scan paths",
     projectRoot,
     readPermissionExemptPaths: [skillRoot],
     settings: {
-      allow: [],
-      deny: [],
-      ask: [],
-      defaultMode: "askAll",
+      allow: [] as PermissionScope[],
+      deny: [] as PermissionScope[],
+      ask: [] as PermissionScope[],
+      defaultMode: "askAll" as const,
     },
     toolCalls: [
       {

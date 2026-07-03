@@ -7,12 +7,18 @@ const AppContainer: React.FC<{
   projectRoot: string;
   version: string;
   initialPrompt: string | undefined;
+  resumeSessionId: string | true | undefined;
   onRestart: () => void;
-}> = ({ version, projectRoot, initialPrompt, onRestart }) => {
+}> = ({ version, projectRoot, initialPrompt, resumeSessionId, onRestart }) => {
   return (
     <AppContext.Provider value={{ version: version }}>
       <RawModeProvider>
-        <App initialPrompt={initialPrompt} projectRoot={projectRoot} onRestart={onRestart} />
+        <App
+          initialPrompt={initialPrompt}
+          resumeSessionId={resumeSessionId}
+          projectRoot={projectRoot}
+          onRestart={onRestart}
+        />
       </RawModeProvider>
     </AppContext.Provider>
   );

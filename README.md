@@ -159,14 +159,18 @@ cd deepcode-cli
 # 安装依赖
 npm install
 
-# 本地开发（类型检查 + lint + 格式检查 + 构建）
-npm run build
-
 # 运行测试
 npm test
 
-# 链接到全局（即本地全局安装）
+# CLI本地开发（类型检查 + lint + 格式检查 + 构建）
+npm run build
+
+# CLI链接到全局（即本地全局安装）
 npm link
+
+# VSCode插件本地开发
+npm run build:vscode
+
 ```
 
 - 提交 PR 前请确保 `npm run check` 通过（类型检查 + lint + 格式检查）

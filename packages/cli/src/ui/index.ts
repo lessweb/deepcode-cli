@@ -90,4 +90,4 @@ export {
   type FileMentionToken,
 } from "./core/file-mentions";
 export { findExpandedThinkingId, isCollapsedThinking } from "./core/thinking-state";
-export { buildExitSummaryText } from "./exit-summary";
+export { buildExitSummaryText, buildResumeHintText } from "./exit-summary";

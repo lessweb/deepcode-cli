@@ -206,7 +206,11 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
                   )}
                 </Box>
               ) : null}
-              {option.description ? <Text dimColor> {option.description}</Text> : null}
+              {option.description ? (
+                <Box marginLeft={3}>
+                  <Text dimColor> {option.description}</Text>
+                </Box>
+              ) : null}
             </Box>
           );
         })}

@@ -65,6 +65,16 @@ export default tseslint.config(
       },
     },
   },
+  // Statusline plugins: Node.js environment
+  {
+    files: [".deepcode/plugins/**/*.mjs", ".deepcode/plugins/**/*.js"],
+    languageOptions: {
+      globals: {
+        process: "readonly",
+        console: "readonly",
+      },
+    },
+  },
   // Browser resources: VSCode webview scripts
   {
     files: ["packages/*/resources/**/*.js"],

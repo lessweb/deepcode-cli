@@ -13,6 +13,7 @@ import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
 
 const PROMPT_ECHO_PREFIX_WIDTH = 2;
+const PROMPT_ECHO_MARGIN_LEFT = 1;
 
 export function MessageView({ message, collapsed, width = 80 }: MessageViewProps): React.ReactElement | null {
   const { mode } = useRawModeContext();
@@ -131,7 +132,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
 }
 
 export function getPromptEchoContentWidth(width: number): number {
-  return Math.max(1, width - PROMPT_ECHO_PREFIX_WIDTH);
+  return Math.max(1, width - PROMPT_ECHO_MARGIN_LEFT - PROMPT_ECHO_PREFIX_WIDTH);
 }
 
 function PromptEchoLine({
@@ -144,8 +145,9 @@ function PromptEchoLine({
   attachmentCount?: number;
 }): React.ReactElement {
   const contentWidth = getPromptEchoContentWidth(width);
+  const containerWidth = Math.max(1, width - PROMPT_ECHO_MARGIN_LEFT);
   return (
-    <Box marginBottom={1} marginY={0} width={Math.max(1, width)} flexDirection="row">
+    <Box marginBottom={1} marginLeft={PROMPT_ECHO_MARGIN_LEFT} marginY={0} width={containerWidth} flexDirection="row">
       <Box width={PROMPT_ECHO_PREFIX_WIDTH}>
         <Text color="#229ac3">{"> "}</Text>
       </Box>

@@ -45,6 +45,41 @@ export type PermissionSettings = {
 
 export type EnabledSkillsSettings = Record<string, boolean>;
 
+export type StatusLineProviderConfig =
+  | {
+      type: "command";
+      id?: string;
+      command: string;
+      cwd?: string;
+      timeoutMs?: number;
+      color?: string;
+      newLine?: boolean;
+      maxLength?: number;
+    }
+  | {
+      type: "module";
+      id?: string;
+      path: string;
+      timeoutMs?: number;
+      color?: string;
+      newLine?: boolean;
+      maxLength?: number;
+    };
+
+export type StatusLineSettings = {
+  enabled?: boolean;
+  refreshMs?: number;
+  separator?: string;
+  providers?: StatusLineProviderConfig[];
+};
+
+export type ResolvedStatusLineSettings = {
+  enabled: boolean;
+  refreshMs: number;
+  separator: string;
+  providers: StatusLineProviderConfig[];
+};
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   model?: string;
@@ -58,6 +93,7 @@ export type DeepcodingSettings = {
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
+  statusline?: StatusLineSettings;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -75,6 +111,7 @@ export type ResolvedDeepcodingSettings = {
   mcpServers?: Record<string, McpServerConfig>;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
+  statusline: ResolvedStatusLineSettings;
 };
 
 export type ModelConfigSelection = {
@@ -213,6 +250,122 @@ function mergeEnabledSkills(
   return {
     ...normalizeEnabledSkills(userSettings?.enabledSkills),
     ...normalizeEnabledSkills(projectSettings?.enabledSkills),
+  };
+}
+
+const DEFAULT_STATUSLINE_REFRESH_MS = 2000;
+const MIN_STATUSLINE_REFRESH_MS = 500;
+const DEFAULT_STATUSLINE_SEPARATOR = " · ";
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeStatusLineProvider(value: unknown): StatusLineProviderConfig | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+  const type = value["type"];
+  const idRaw = trimString(value["id"]);
+  const id = idRaw || undefined;
+  const timeoutRaw = value["timeoutMs"];
+  const timeoutMs =
+    typeof timeoutRaw === "number" && Number.isFinite(timeoutRaw) && timeoutRaw > 0
+      ? Math.floor(timeoutRaw)
+      : undefined;
+  const colorRaw = trimString(value["color"]);
+  const color = colorRaw || undefined;
+  const maxLengthRaw = value["maxLength"];
+  const maxLength =
+    typeof maxLengthRaw === "number" && Number.isFinite(maxLengthRaw) && maxLengthRaw > 0
+      ? Math.floor(maxLengthRaw)
+      : undefined;
+  const newLine = value["newLine"] === true ? true : undefined;
+
+  if (type === "command") {
+    const command = trimString(value["command"]);
+    if (!command) {
+      return null;
+    }
+    const cwdRaw = trimString(value["cwd"]);
+    return {
+      type: "command",
+      id,
+      command,
+      cwd: cwdRaw || undefined,
+      timeoutMs,
+      color,
+      newLine,
+      maxLength,
+    };
+  }
+  if (type === "module") {
+    const modulePath = trimString(value["path"]);
+    if (!modulePath) {
+      return null;
+    }
+    return {
+      type: "module",
+      id,
+      path: modulePath,
+      timeoutMs,
+      color,
+      newLine,
+      maxLength,
+    };
+  }
+  return null;
+}
+
+function normalizeStatusLine(value: unknown): StatusLineSettings | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+  const result: StatusLineSettings = {};
+  const enabled = parseBoolean(value["enabled"]);
+  if (enabled !== undefined) {
+    result.enabled = enabled;
+  }
+  const refreshRaw = value["refreshMs"];
+  if (typeof refreshRaw === "number" && Number.isFinite(refreshRaw) && refreshRaw >= MIN_STATUSLINE_REFRESH_MS) {
+    result.refreshMs = Math.floor(refreshRaw);
+  }
+  const separator = value["separator"];
+  if (typeof separator === "string") {
+    result.separator = separator;
+  }
+  const providers = value["providers"];
+  if (Array.isArray(providers)) {
+    const normalized: StatusLineProviderConfig[] = [];
+    for (const entry of providers) {
+      const provider = normalizeStatusLineProvider(entry);
+      if (provider) {
+        normalized.push(provider);
+      }
+    }
+    result.providers = normalized;
+  }
+  return result;
+}
+
+function mergeStatusLine(
+  userSettings: DeepcodingSettings | null | undefined,
+  projectSettings: DeepcodingSettings | null | undefined
+): ResolvedStatusLineSettings {
+  const userConfig = normalizeStatusLine(userSettings?.statusline) ?? {};
+  const projectConfig = normalizeStatusLine(projectSettings?.statusline) ?? {};
+  const userProviders = userConfig.providers ?? [];
+  const projectProviders = projectConfig.providers ?? [];
+  const projectIds = new Set(projectProviders.map((p) => p.id));
+  const providers = [...userProviders.filter((p) => !projectIds.has(p.id)), ...projectProviders];
+  const enabled = projectConfig.enabled ?? userConfig.enabled ?? providers.length > 0;
+  const refreshMs = projectConfig.refreshMs ?? userConfig.refreshMs ?? DEFAULT_STATUSLINE_REFRESH_MS;
+  const separator = projectConfig.separator ?? userConfig.separator ?? DEFAULT_STATUSLINE_SEPARATOR;
+  return {
+    enabled,
+    refreshMs,
+    separator,
+    providers,
   };
 }
 
@@ -393,6 +546,7 @@ export function resolveSettingsSources(
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
+    statusline: mergeStatusLine(userSettings, projectSettings),
   };
 }
 
@@ -508,9 +662,12 @@ export function writeModelConfigSelection(
 }
 
 export function resolveCurrentSettings(projectRoot: string = process.cwd()): ResolvedDeepcodingSettings {
+  const userPath = path.resolve(getUserSettingsPath());
+  const projectPath = path.resolve(getProjectSettingsPath(projectRoot));
+  const sameFile = userPath === projectPath;
   return resolveSettingsSources(
     readSettings(),
-    readProjectSettings(projectRoot),
+    sameFile ? null : readProjectSettings(projectRoot),
     {
       model: DEFAULT_MODEL,
       baseURL: DEFAULT_BASE_URL,

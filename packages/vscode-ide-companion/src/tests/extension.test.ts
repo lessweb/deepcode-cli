@@ -82,6 +82,18 @@ test("ready message triggers loadInitialSession and sendSkillsList", async () =>
   assert.ok(types.includes("skillsList"), `Expected skillsList, got: ${types.join(", ")}`);
 });
 
+test("ready message renders markdown for initial session messages", async () => {
+  const deps = createDeps({
+    messages: [{ role: "assistant", content: "**bold**", visible: true }],
+  });
+
+  await handleWebviewMessage({ type: "ready" }, deps);
+
+  const loadMsg = deps.messages.find((m: any) => m.type === "loadSession") as any;
+  assert.ok(loadMsg, "Should send loadSession");
+  assert.equal(loadMsg.messages[0].html, "<p>**bold**</p>");
+});
+
 test("ready with no sessions sends initializeEmpty", async () => {
   const deps = createDeps({ sessions: [] });
   await handleWebviewMessage({ type: "ready" }, deps);
@@ -253,6 +265,26 @@ test("userPrompt with images sends userMessage with image placeholder", async ()
   const userMsg = deps.messages.find((m: any) => m.type === "userMessage");
   assert.ok(userMsg, "Should send userMessage for images");
   assert.equal((userMsg as any).content, "粘贴的图像");
+});
+
+test("userPrompt passes multiple image urls to the session manager", async () => {
+  const deps = createDeps();
+  let submittedPrompt: any = null;
+  (deps.sessionManager as any).handleUserPrompt = (prompt: any) => {
+    submittedPrompt = prompt;
+    return Promise.resolve();
+  };
+
+  await handleWebviewMessage(
+    {
+      type: "userPrompt",
+      prompt: "",
+      images: ["data:image/png;base64,abc", "data:image/jpeg;base64,def"],
+    },
+    deps
+  );
+
+  assert.deepEqual(submittedPrompt?.imageUrls, ["data:image/png;base64,abc", "data:image/jpeg;base64,def"]);
 });
 
 test("userPrompt with permissions (continue) does not send userMessage", async () => {
