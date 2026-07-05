@@ -19,6 +19,10 @@ import {
   getTools,
   type ToolDefinition,
 } from "./prompt";
+import { AgentRegistry } from "./agents/agent-registry";
+import { SubAgentSession } from "./agents/sub-agent-session";
+import type { SubAgentResult, SubAgentProgressCallback, SubAgentProgressEvent } from "./agents/sub-agent-session";
+import { resolveAgentSkills } from "./agents/skill-resolver";
 import {
   ToolExecutor,
   type CreateOpenAIClient,
@@ -252,6 +256,19 @@ export type MessageMeta = {
   skill?: SkillInfo;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;
+  /**
+   * Name of the sub-agent that produced this message. Present on messages
+   * generated while a sub-agent (invoked via DelegateToAgent) is executing,
+   * so the UI can visually distinguish sub-agent activity from the main
+   * agent's own messages.
+   */
+  agentName?: string;
+  /**
+   * Lifecycle marker for a sub-agent-authored system message. Only set on
+   * role "system" messages tagged with `agentName`; used by the UI to pick
+   * an icon/style without re-parsing message content.
+   */
+  subAgentStatus?: "start" | "complete" | "error" | "model_fallback";
 };
 
 export type SessionMessage = {
@@ -308,6 +325,13 @@ type SessionManagerOptions = {
   onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   onMcpStatusChanged?: () => void;
   onProcessStdout?: (pid: number, chunk: string) => void;
+  /**
+   * Fired whenever a sub-agent invoked via the DelegateToAgent tool (i.e.
+   * dispatched autonomously by the main model, not via a manual /agent
+   * command) reports progress. Lets the CLI show real-time feedback
+   * instead of a plain spinner while the sub-agent is running.
+   */
+  onSubAgentProgress?: (event: SubAgentProgressEvent) => void;
 };
 
 export type LlmStreamProgress = {
@@ -334,6 +358,7 @@ export class SessionManager {
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   private readonly onMcpStatusChanged?: () => void;
   private readonly onProcessStdout?: (pid: number, chunk: string) => void;
+  private readonly onSubAgentProgress?: (event: SubAgentProgressEvent) => void;
   private activeSessionId: string | null = null;
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
@@ -343,6 +368,7 @@ export class SessionManager {
   private readonly mcpManager = new McpManager();
   private mcpToolDefinitions: ToolDefinition[] = [];
   private readonly messageConverter: OpenAIMessageConverter;
+  private readonly agentRegistry: AgentRegistry;
 
   constructor(options: SessionManagerOptions) {
     this.projectRoot = options.projectRoot;
@@ -353,11 +379,26 @@ export class SessionManager {
     this.onLlmStreamProgress = options.onLlmStreamProgress;
     this.onMcpStatusChanged = options.onMcpStatusChanged;
     this.onProcessStdout = options.onProcessStdout;
+    this.onSubAgentProgress = options.onSubAgentProgress;
     this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
     this.mcpManager.prepare(this.getResolvedSettings().mcpServers);
     this.messageConverter = new OpenAIMessageConverter({
       renderInitPrompt: () => this.renderInitCommandPrompt(),
     });
+    this.agentRegistry = new AgentRegistry(this.projectRoot);
+    this.agentRegistry.scan();
+    if (this.agentRegistry.hasAgents()) {
+      const model = this.getResolvedSettings().model;
+      this.toolExecutor.registerAgentHandler(
+        this.agentRegistry,
+        model,
+        this.getSkillScanRoots().map((r) => r.root),
+        (sessionId, event) => {
+          this.persistSubAgentProgressEvent(sessionId, event);
+          this.onSubAgentProgress?.(event);
+        }
+      );
+    }
   }
 
   /**
@@ -386,6 +427,74 @@ export class SessionManager {
 
   getMcpStatus() {
     return this.mcpManager.getStatus();
+  }
+
+  getAgentRegistry(): AgentRegistry {
+    return this.agentRegistry;
+  }
+
+  /**
+   * Invoke a sub-agent by name with the given task text.
+   * Returns the SubAgentResult containing the response or error.
+   *
+   * When `sessionId` refers to an existing session, the sub-agent's
+   * execution trace is persisted to that session's history (same as when
+   * a sub-agent is dispatched autonomously via DelegateToAgent), so it
+   * survives /resume and is distinguishable from the main agent's messages.
+   */
+  async invokeAgent(
+    agentName: string,
+    task: string,
+    signal?: AbortSignal,
+    onProgress?: SubAgentProgressCallback,
+    sessionId?: string
+  ): Promise<SubAgentResult> {
+    const manifest = this.agentRegistry.getAgent(agentName);
+    if (!manifest) {
+      const available = this.agentRegistry
+        .listAgents()
+        .map((a) => a.name)
+        .join(", ");
+      return {
+        ok: false,
+        response: "",
+        error: `Agent "${agentName}" not found. Available agents: ${available || "(none)"}`,
+      };
+    }
+
+    if (!task.trim()) {
+      return {
+        ok: false,
+        response: "",
+        error: `No task provided for agent "${agentName}". Usage: /${agentName} <task description>`,
+      };
+    }
+
+    const skillRoots = this.getSkillScanRoots().map((r) => r.root);
+    const resolvedSkills = resolveAgentSkills({
+      manifest,
+      globalSkillRoots: skillRoots,
+    });
+    const resolvedSkillPrompts = resolvedSkills.map((s) => s.content);
+
+    const parentModel = this.getResolvedSettings().model;
+    const session = new SubAgentSession({
+      manifest,
+      task,
+      projectRoot: this.projectRoot,
+      parentModel,
+      createOpenAIClient: this.createOpenAIClient,
+      resolvedSkillPrompts,
+      toolExecutor: this.toolExecutor,
+      onProgress: (event) => {
+        if (sessionId) {
+          this.persistSubAgentProgressEvent(sessionId, event);
+        }
+        onProgress?.(event);
+      },
+    });
+
+    return session.execute(signal);
   }
 
   async reconnectMcpServer(name: string, config?: McpServerConfig): Promise<void> {
@@ -1374,7 +1483,7 @@ ${agentInstructions}
             model,
             ...(temperature !== undefined ? { temperature } : {}),
             messages,
-            tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
+            tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions, this.agentRegistry),
             ...thinkingOptions,
           },
           { signal: sessionController.signal },
@@ -2244,6 +2353,105 @@ ${agentInstructions}
         id: this.generateToolCallId(),
       };
     });
+  }
+
+  /**
+   * Persists a sub-agent progress event as a durable SessionMessage so the
+   * sub-agent's own execution trace (its tool calls, thinking, errors) is
+   * kept in session history — surviving /resume — instead of only ever
+   * appearing as a transient status-line spinner.
+   *
+   * Persisted messages are:
+   * - role "system" (never "tool"): this keeps them out of
+   *   rebuildSessionStateFromHistory's tool-result scan (which only
+   *   inspects role "tool") so a sub-agent's file reads/edits never
+   *   leak into the parent session's file-state/snippet cache, and out of
+   *   OpenAIMessageConverter's tool-call pairing logic.
+   * - compacted: true: excluded from the messages sent back to the main
+   *   model (the sub-agent's own tool-call loop is not part of the
+   *   parent's conversation with the LLM — only its final text response,
+   *   which is already delivered as the DelegateToAgent tool result, is).
+   * - tagged with meta.agentName so the CLI can render them distinctly
+   *   from the main agent's own messages.
+   */
+  private persistSubAgentProgressEvent(sessionId: string, event: SubAgentProgressEvent): void {
+    // "thinking" carries no unique content (just an "still working" pulse)
+    // and fires on every round-trip; persisting it would only add noise.
+    if (event.type === "thinking" || event.type === "tool_call") {
+      return;
+    }
+    if (!this.getSession(sessionId)) {
+      return;
+    }
+
+    const message = this.buildSubAgentMessage(sessionId, event);
+    if (!message) {
+      return;
+    }
+    this.appendSessionMessage(sessionId, message);
+    this.onAssistantMessage(message, true);
+  }
+
+  private buildSubAgentMessage(sessionId: string, event: SubAgentProgressEvent): SessionMessage | null {
+    const now = new Date().toISOString();
+    const base = {
+      id: crypto.randomUUID(),
+      sessionId,
+      contentParams: null,
+      messageParams: null,
+      compacted: true,
+      createTime: now,
+      updateTime: now,
+    } as const;
+
+    switch (event.type) {
+      case "start":
+        return {
+          ...base,
+          role: "system",
+          content: `Delegating to sub-agent "${event.agentName}" (model: ${event.model})`,
+          visible: true,
+          meta: { agentName: event.agentName, subAgentStatus: "start" },
+        };
+      case "tool_result": {
+        const toolFunction = { name: event.toolName, arguments: event.toolInput };
+        return {
+          ...base,
+          role: "system",
+          content: event.output,
+          visible: !this.isInvisibleExecution(event.output),
+          meta: {
+            agentName: event.agentName,
+            function: toolFunction,
+            paramsMd: this.buildToolParamsSnippet(toolFunction),
+            resultMd: this.buildToolResultSnippet(event.output),
+          },
+        };
+      }
+      case "model_fallback":
+        return {
+          ...base,
+          role: "system",
+          content: `模型 "${event.fromModel}" 不可用，回退到 "${event.toModel}"`,
+          visible: true,
+          meta: { agentName: event.agentName, subAgentStatus: "model_fallback" },
+        };
+      case "error":
+        return {
+          ...base,
+          role: "system",
+          content: event.message,
+          visible: true,
+          meta: { agentName: event.agentName, subAgentStatus: "error" },
+        };
+      case "complete":
+        // The sub-agent's final text is already delivered to the parent
+        // conversation as the DelegateToAgent tool result — no need to
+        // duplicate it here as a separate system message.
+        return null;
+      default:
+        return null;
+    }
   }
 
   private buildToolMessage(

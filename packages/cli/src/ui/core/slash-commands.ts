@@ -1,6 +1,8 @@
-import type { SkillInfo } from "@vegamo/deepcode-core";
+import type { AgentManifest, SkillInfo } from "@vegamo/deepcode-core";
 
 export type SlashCommandKind =
+  | "agent"
+  | "agents"
   | "skill"
   | "skills"
   | "model"
@@ -23,6 +25,12 @@ export type SlashCommandItem = {
 };
 
 export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    kind: "agents",
+    name: "agents",
+    label: "/agents",
+    description: "List available sub-agents",
+  },
   {
     kind: "skills",
     name: "skills",
@@ -86,7 +94,14 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
   },
 ];
 
-export function buildSlashCommands(skills: SkillInfo[]): SlashCommandItem[] {
+export function buildSlashCommands(skills: SkillInfo[], agents: AgentManifest[] = []): SlashCommandItem[] {
+  const agentItems: SlashCommandItem[] = agents.map((agent) => ({
+    kind: "agent",
+    name: agent.name,
+    label: `/${agent.name}`,
+    description: agent.description || "(no description)",
+  }));
+
   const skillItems: SlashCommandItem[] = skills.map((skill) => ({
     kind: "skill",
     name: skill.name,
@@ -94,7 +109,8 @@ export function buildSlashCommands(skills: SkillInfo[]): SlashCommandItem[] {
     description: skill.description || "(no description)",
     skill,
   }));
-  return [...skillItems, ...BUILTIN_SLASH_COMMANDS];
+
+  return [...agentItems, ...skillItems, ...BUILTIN_SLASH_COMMANDS];
 }
 
 export function filterSlashCommands(items: SlashCommandItem[], token: string): SlashCommandItem[] {

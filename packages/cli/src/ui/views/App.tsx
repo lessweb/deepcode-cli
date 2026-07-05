@@ -13,6 +13,7 @@ import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
+import { AgentList } from "./AgentList";
 import { ProcessStdoutView } from "./ProcessStdoutView";
 import {
   type AskUserQuestionAnswers,
@@ -37,12 +38,14 @@ import type { SessionInfo } from "../statusline";
 import { isCollapsedThinking } from "../core/thinking-state";
 import { ANSI_CLEAR_SCREEN } from "../constants";
 import type {
+  AgentManifest,
   LlmStreamProgress,
   MessageMeta,
   SessionEntry,
   SessionMessage,
   SessionStatus,
   SkillInfo,
+  SubAgentProgressEvent,
   UndoTarget,
   UserPromptContent,
 } from "@vegamo/deepcode-core";
@@ -50,7 +53,38 @@ import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 
-type View = "chat" | "session-list" | "undo" | "mcp-status";
+type View = "chat" | "session-list" | "undo" | "mcp-status" | "agent-list";
+
+/**
+ * Formats a sub-agent progress event into a human-readable status line.
+ * Shared between the manual `/agent` command path and sub-agents dispatched
+ * autonomously by the main model via the DelegateToAgent tool, so both show
+ * consistent real-time feedback instead of a bare spinner.
+ */
+function formatSubAgentProgress(event: SubAgentProgressEvent): string {
+  switch (event.type) {
+    case "start":
+      return `[${event.agentName}] 启动中... (model: ${event.model})`;
+    case "thinking":
+      return `[${event.agentName}] 思考中...`;
+    case "tool_call":
+      return `[${event.agentName}] ⚡ ${event.toolName}: ${truncateForStatusLine(event.toolInput)}`;
+    case "tool_result":
+      return `[${event.agentName}] ${event.ok ? "✓" : "✗"} ${event.toolName} 完成`;
+    case "model_fallback":
+      return `[${event.agentName}] 模型 ${event.fromModel} 不可用，切换到 ${event.toModel}`;
+    case "complete":
+      return `[${event.agentName}] 执行完成`;
+    case "error":
+      return `[${event.agentName}] 错误: ${event.message}`;
+    default:
+      return "";
+  }
+}
+
+function truncateForStatusLine(value: string, maxLength = 100): string {
+  return value.length > maxLength ? `${value.slice(0, maxLength)}...` : value;
+}
 
 const STATUS_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -110,6 +144,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const [view, setView] = useState<View>("chat");
   const [busy, setBusy] = useState(false);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [agents, setAgents] = useState<AgentManifest[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [undoTargets, setUndoTargets] = useState<UndoTarget[]>([]);
@@ -132,6 +167,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
+  const [agentList, setAgentList] = useState<AgentManifest[]>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
 
   rawModeRef.current = mode;
@@ -179,6 +215,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         const text = typeof chunk === "string" ? chunk : String(chunk);
         const available = MAX_STDOUT_BUFFER - current.length;
         buf.set(pid, current + text.slice(0, available));
+      },
+      onSubAgentProgress: (event) => {
+        setStatusLine(formatSubAgentProgress(event));
       },
     });
   }, [projectRoot]);
@@ -241,6 +280,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     [sessionManager]
   );
 
+  const refreshAgents = useCallback((): void => {
+    const registry = sessionManager.getAgentRegistry();
+    setAgents(registry.listAgents());
+  }, [sessionManager]);
+
   /**
    * Reset the app to the welcome screen.
    */
@@ -264,7 +308,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   useEffect(() => {
     refreshSessionsList();
     void refreshSkills();
-  }, [refreshSessionsList, refreshSkills]);
+    refreshAgents();
+  }, [refreshSessionsList, refreshSkills, refreshAgents]);
 
   // Eagerly create the OpenAI client on mount so the TCP+TLS connection
   // warmup (fire-and-forget inside createOpenAIClient) starts before the
@@ -359,6 +404,74 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "agents") {
+        const registry = sessionManager.getAgentRegistry();
+        setAgentList(registry.listAgents());
+        navigateToSubView("agent-list");
+        return;
+      }
+      if (submission.command === "agent") {
+        const agentName = submission.agentName;
+        if (!agentName) {
+          setErrorLine("No agent name specified.");
+          return;
+        }
+        const registry = sessionManager.getAgentRegistry();
+        const manifest = registry.getAgent(agentName);
+        if (!manifest) {
+          const available = registry
+            .listAgents()
+            .map((a) => a.name)
+            .join(", ");
+          setErrorLine(
+            `Agent "${agentName}" not found.${available ? ` Available agents: ${available}` : " No agents discovered."}`
+          );
+          return;
+        }
+        const taskText = submission.text || "";
+        if (!taskText.trim()) {
+          setErrorLine(`No task provided for agent "${agentName}". Usage: /${agentName} <task description>`);
+          return;
+        }
+
+        // Display user message and set busy state
+        setMessages((prev) => [...prev, buildSyntheticUserMessage(`/${agentName} ${taskText}`, 0)]);
+        setBusy(true);
+        setErrorLine(null);
+
+        try {
+          const result = await sessionManager.invokeAgent(agentName, taskText, undefined, (event) => {
+            setStatusLine(formatSubAgentProgress(event));
+          });
+          if (result.ok) {
+            const now = new Date().toISOString();
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: `local-${Math.random().toString(36).slice(2)}`,
+                sessionId: "local",
+                role: "assistant",
+                content: result.response,
+                contentParams: null,
+                messageParams: null,
+                compacted: false,
+                visible: true,
+                createTime: now,
+                updateTime: now,
+                meta: { agentName },
+              },
+            ]);
+          } else {
+            setErrorLine(result.error ?? `Agent "${agentName}" execution failed.`);
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          setErrorLine(`Agent "${agentName}" error: ${message}`);
+        } finally {
+          setBusy(false);
+        }
         return;
       }
 
@@ -965,6 +1078,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />
+      ) : view === "agent-list" ? (
+        <AgentList agents={agentList} onCancel={() => setView("chat")} />
       ) : shouldShowQuestionPrompt && pendingQuestion && !busy ? (
         <AskUserQuestionPrompt
           questions={pendingQuestion.questions}
@@ -986,6 +1101,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           projectRoot={projectRoot}
           screenWidth={screenWidth}
           skills={skills}
+          agents={agents}
           modelConfig={resolvedSettings}
           promptHistory={promptHistory}
           busy={busy}

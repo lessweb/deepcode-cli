@@ -62,7 +62,7 @@ import {
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "@vegamo/deepcode-core";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
-import type { SessionEntry, SkillInfo } from "@vegamo/deepcode-core";
+import type { SessionEntry, SkillInfo, AgentManifest } from "@vegamo/deepcode-core";
 import type { UserToolPermission } from "@vegamo/deepcode-core";
 import type { StatusSegment } from "../statusline";
 
@@ -72,7 +72,8 @@ export type PromptSubmission = {
   selectedSkills?: SkillInfo[];
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
-  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit";
+  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit" | "agent" | "agents";
+  agentName?: string;
 };
 
 export type PromptDraft = {
@@ -84,6 +85,7 @@ export type PromptDraft = {
 type Props = {
   projectRoot: string;
   skills: SkillInfo[];
+  agents?: AgentManifest[];
   modelConfig: ModelConfigSelection;
   screenWidth: number;
   promptHistory: string[];
@@ -117,6 +119,7 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine(): React.ReactElem
 export const PromptInput = React.memo(function PromptInput({
   projectRoot,
   skills,
+  agents,
   modelConfig,
   screenWidth,
   promptHistory,
@@ -178,7 +181,7 @@ export const PromptInput = React.memo(function PromptInput({
     !openRawModelDropdown &&
     fileMentionToken !== null &&
     fileMentionKey !== dismissedFileMentionKey;
-  const slashItems = React.useMemo(() => buildSlashCommands(skills), [skills]);
+  const slashItems = React.useMemo(() => buildSlashCommands(skills, agents), [skills, agents]);
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
@@ -710,6 +713,31 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "mcp") {
       onSubmit({ text: "/mcp", imageUrls: [], command: "mcp" });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "agent") {
+      const fullText = buffer.text.trim();
+      const commandPrefix = `/${item.name}`;
+      const hasFullCommand = fullText.startsWith(commandPrefix);
+      const taskText = hasFullCommand ? fullText.slice(commandPrefix.length).trim() : "";
+
+      if (!taskText) {
+        // Selected from the dropdown before typing a task, or pressed Enter with
+        // no task yet — complete the buffer to "/agent-name " so the user can
+        // type the task text and press Enter again to actually invoke the agent.
+        const completed = `${commandPrefix} `;
+        updateBuffer(() => ({ text: completed, cursor: completed.length }));
+        clearUndoRedoStacks();
+        return;
+      }
+
+      onSubmit({ text: taskText, imageUrls: [], command: "agent", agentName: item.name });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "agents") {
+      onSubmit({ text: "/agents", imageUrls: [], command: "agents" });
       resetPromptInput();
       return;
     }
