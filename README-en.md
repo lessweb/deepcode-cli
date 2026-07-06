@@ -11,7 +11,7 @@
 [![][npm-release-shield]][npm-release-link] [![][npm-downloads-shield]][npm-downloads-link] [![][github-contributors-shield]][github-contributors-link] [![][github-forks-shield]][github-forks-link] [![][github-stars-shield]][github-stars-link]
 [![][github-issues-shield]][github-issues-link] [![][github-issues-pr-shield]][github-issues-pr-link] [![][github-license-shield]][github-license-link]
 
-English · [中文](./README.md)
+English · [中文](./README.md) · [日本語](./README-ja_JP.md)
 
 <br/>
 </div>
