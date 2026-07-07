@@ -33,9 +33,16 @@ export interface ParsedCliArgs {
   version: boolean;
   /** True when --help / -h was passed */
   help: boolean;
+  /** Sub-command dispatched before the TUI starts (currently only "login"). */
+  command?: "login";
+  /** Parsed options for the `login` sub-command, present when `command === "login"`. */
+  login?: { apiKey?: string; show: boolean; help: boolean };
 }
 
 const EPILOG = [
+  "Commands:",
+  "  login            Save your DeepSeek API key to ~/.deepcode/settings.json",
+  "",
   "Configuration:",
   "  ~/.deepcode/settings.json    User-level API key, model, base URL",
   "  ./.deepcode/settings.json    Project-level settings",
@@ -126,6 +133,55 @@ async function configureYargs(argv?: string[]) {
 }
 
 /**
+ * Parse `deepcode login` options. Only a small, fixed set of flags is
+ * accepted; anything else is rejected with a usage hint and `process.exit(1)`.
+ *
+ * Supported:
+ *   --api-key <key> | -k <key> | --api-key=<key>   Non-interactive key
+ *   --show                                         Echo the key while typing
+ *   -h | --help                                    Show login help
+ */
+function parseLoginArgs(args: string[]): ParsedCliArgs {
+  let apiKey: string | undefined;
+  let show = false;
+  let help = false;
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+
+    if (arg === "-h" || arg === "--help") {
+      help = true;
+    } else if (arg === "--show") {
+      show = true;
+    } else if (arg === "--api-key" || arg === "-k") {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith("-")) {
+        writeStderrLine(`${arg} requires a value.`);
+        writeStderrLine("Run `deepcode login --help` for usage.");
+        process.exit(1);
+      }
+      apiKey = value;
+      i++;
+    } else if (arg.startsWith("--api-key=")) {
+      apiKey = arg.slice("--api-key=".length);
+    } else {
+      writeStderrLine(`Unknown option: ${arg}`);
+      writeStderrLine("Run `deepcode login --help` for usage.");
+      process.exit(1);
+    }
+  }
+
+  return {
+    prompt: undefined,
+    resume: undefined,
+    version: false,
+    help: false,
+    command: "login",
+    login: { apiKey: apiKey?.trim() || undefined, show, help },
+  };
+}
+
+/**
  * Parse CLI arguments with validation.
  *
  * On validation failure the `.fail()` handler prints the error, shows help,
@@ -133,6 +189,14 @@ async function configureYargs(argv?: string[]) {
  * valid `ParsedCliArgs` or terminates the process.
  */
 export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
+  const rawArgv = argv ?? hideBin(process.argv);
+
+  // `login` is dispatched before yargs so it never enters the TUI parser
+  // (which is strict and would reject unknown sub-commands).
+  if (rawArgv[0] === "login") {
+    return parseLoginArgs(rawArgv.slice(1));
+  }
+
   const y = (await configureYargs(argv)).exitProcess(false).fail((msg, _err, yargs) => {
     writeStderrLine(msg || _err?.message || "Unknown error");
     yargs.showHelp();

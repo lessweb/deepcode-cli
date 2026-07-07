@@ -7,7 +7,13 @@ import {
   type NotifyContext,
   type NotifySpawn,
 } from "../common/notify";
-import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import {
+  applyModelConfigSelection,
+  buildLoginSettings,
+  resolveSettings,
+  resolveSettingsSources,
+  type DeepcodingSettings,
+} from "../settings";
 
 const TEST_PROCESS_ENV = {};
 
@@ -612,3 +618,49 @@ test(
     assert.equal(calls[1]?.options.env?.TITLE, "Fix login bug");
   }
 );
+
+// ── buildLoginSettings ────────────────────────────────────────────────────────
+
+test("buildLoginSettings writes the full default template for fresh settings", () => {
+  const result = buildLoginSettings(null, "  sk-new  ");
+
+  assert.equal(result.env?.API_KEY, "sk-new"); // trimmed
+  assert.equal(result.env?.MODEL, "deepseek-v4-pro");
+  assert.equal(result.env?.BASE_URL, "https://api.deepseek.com");
+  assert.equal(result.thinkingEnabled, true);
+  assert.equal(result.reasoningEffort, "max");
+});
+
+test("buildLoginSettings preserves existing customized fields", () => {
+  const existing: DeepcodingSettings = {
+    env: { MODEL: "deepseek-v3.2", BASE_URL: "https://custom.example.com" },
+    model: "my-model",
+    temperature: 0.5,
+    thinkingEnabled: false,
+    reasoningEffort: "high",
+    permissions: { allow: ["network"] },
+  };
+
+  const result = buildLoginSettings(existing, "sk-new");
+
+  assert.equal(result.env?.API_KEY, "sk-new"); // updated
+  assert.equal(result.env?.MODEL, "deepseek-v3.2"); // preserved
+  assert.equal(result.env?.BASE_URL, "https://custom.example.com"); // preserved
+  assert.equal(result.model, "my-model"); // preserved
+  assert.equal(result.temperature, 0.5); // preserved
+  assert.equal(result.thinkingEnabled, false); // preserved
+  assert.equal(result.reasoningEffort, "high"); // preserved
+  assert.deepEqual(result.permissions, { allow: ["network"] }); // preserved
+});
+
+test("buildLoginSettings fills missing defaults in partial existing settings", () => {
+  const existing = { env: { API_KEY: "sk-old" } }; // missing MODEL/BASE_URL/thinking
+
+  const result = buildLoginSettings(existing, "sk-new");
+
+  assert.equal(result.env?.API_KEY, "sk-new"); // overridden
+  assert.equal(result.env?.MODEL, "deepseek-v4-pro"); // filled
+  assert.equal(result.env?.BASE_URL, "https://api.deepseek.com"); // filled
+  assert.equal(result.thinkingEnabled, true); // filled
+  assert.equal(result.reasoningEffort, "max"); // filled
+});
