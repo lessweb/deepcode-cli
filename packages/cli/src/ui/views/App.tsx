@@ -13,6 +13,7 @@ import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
+import { UsageView, type UsageData } from "./UsageView";
 import { ProcessStdoutView } from "./ProcessStdoutView";
 import {
   type AskUserQuestionAnswers,
@@ -35,6 +36,7 @@ import { resolveCurrentSettings, writeModelConfigSelection } from "@vegamo/deepc
 import { useStatusLine } from "../hooks";
 import type { SessionInfo } from "../statusline";
 import { isCollapsedThinking } from "../core/thinking-state";
+import { BUILTIN_SLASH_COMMANDS, findExactSlashCommand } from "../core/slash-commands";
 import { ANSI_CLEAR_SCREEN } from "../constants";
 import type {
   LlmStreamProgress,
@@ -50,7 +52,7 @@ import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 
-type View = "chat" | "session-list" | "undo" | "mcp-status";
+type View = "chat" | "session-list" | "undo" | "usage" | "mcp-status";
 
 const STATUS_SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
@@ -132,6 +134,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
+  const [usageData, setUsageData] = useState<UsageData | null>(null);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
 
   rawModeRef.current = mode;
@@ -321,6 +324,38 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     [exit, sessionManager]
   );
 
+  const handleUsage = useCallback(async () => {
+    const settings = resolveCurrentSettings(projectRoot);
+    const baseURL = settings.baseURL.toLowerCase();
+    if (!baseURL.includes("api.deepseek.com")) {
+      setErrorLine(`/usage is only compatible with DeepSeek API. Current base URL: ${settings.baseURL}`);
+      return;
+    }
+    if (!settings.apiKey) {
+      setErrorLine("No API key configured. Set DEEPCODE_API_KEY env var or apiKey in settings.json.");
+      return;
+    }
+
+    setBusy(true);
+    setErrorLine(null);
+    try {
+      const response = await fetch("https://api.deepseek.com/user/balance", {
+        headers: { Authorization: `Bearer ${settings.apiKey}` },
+      });
+      if (!response.ok) {
+        setErrorLine(`Failed to fetch balance: HTTP ${response.status} ${response.statusText || ""}`.trim());
+        return;
+      }
+      const data: UsageData = await response.json();
+      setUsageData(data);
+      navigateToSubView("usage");
+    } catch (error) {
+      setErrorLine(`Failed to fetch balance: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  }, [projectRoot, navigateToSubView]);
+
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
       if (submission.command === "exit") {
@@ -359,6 +394,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "usage") {
+        void handleUsage();
         return;
       }
 
@@ -420,6 +459,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       sessionManager,
       pendingPermissionReply,
       handleExit,
+      handleUsage,
       onRestart,
       refreshSkills,
       refreshSessionsList,
@@ -551,10 +591,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       // Step 2: Submit prompt if provided
       if (initialPrompt && initialPrompt.trim()) {
         initialPromptSubmittedRef.current = true;
+        const trimmed = initialPrompt.trim();
+        const slashToken = trimmed.split(/\s+/, 1)[0];
+        const match = findExactSlashCommand(BUILTIN_SLASH_COMMANDS, slashToken);
+        const command = match && match.kind !== "skill" ? (match.kind as PromptSubmission["command"]) : undefined;
         handleSubmit({
-          text: initialPrompt,
+          text: trimmed,
           imageUrls: [],
           selectedSkills: undefined,
+          command,
         });
       }
     }
@@ -949,6 +994,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />
+      ) : view === "usage" ? (
+        <UsageView data={usageData ?? { is_available: false, balance_infos: [] }} onCancel={() => setView("chat")} />
       ) : shouldShowQuestionPrompt && pendingQuestion && !busy ? (
         <AskUserQuestionPrompt
           questions={pendingQuestion.questions}
