@@ -637,6 +637,36 @@ export function writeSettings(settings: DeepcodingSettings): void {
   writeSettingsFile(settingsPath, settings);
 }
 
+/**
+ * Default scaffold written to the user settings file on first run so that
+ * a freshly installed deepcode has a config file to edit instead of forcing
+ * the user to create one by hand (and guess the schema).
+ */
+export function buildDefaultSettings(): DeepcodingSettings {
+  return {
+    env: {
+      API_KEY: "",
+      BASE_URL: DEFAULT_BASE_URL,
+      MODEL: DEFAULT_MODEL,
+    },
+  };
+}
+
+/**
+ * Ensure the user settings file exists, creating a template with placeholder
+ * values when it is missing. Never overwrites an existing file.
+ *
+ * @returns the settings path and whether a new file was created.
+ */
+export function ensureUserSettingsFile(): { path: string; created: boolean } {
+  const settingsPath = getUserSettingsPath();
+  if (fs.existsSync(settingsPath)) {
+    return { path: settingsPath, created: false };
+  }
+  writeSettingsFile(settingsPath, buildDefaultSettings());
+  return { path: settingsPath, created: true };
+}
+
 export function writeProjectSettings(settings: DeepcodingSettings, projectRoot: string = process.cwd()): void {
   const settingsPath = getProjectSettingsPath(projectRoot);
   writeSettingsFile(settingsPath, settings);

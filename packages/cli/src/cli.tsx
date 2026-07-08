@@ -3,7 +3,7 @@ import { render } from "ink";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
+import { setShellIfWindows, getProjectCode, ensureUserSettingsFile } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
@@ -35,6 +35,22 @@ async function main(): Promise<void> {
   if (!process.stdin.isTTY) {
     writeStderrLine("deepcode requires an interactive terminal (TTY). Re-run from a real terminal session.\n");
     process.exit(1);
+  }
+
+  // Scaffold the user settings file on first run so a fresh install has a
+  // config file to edit instead of failing with "API key not found" and
+  // forcing the user to create ~/.deepcode/settings.json by hand.
+  try {
+    const { path: settingsPath, created } = ensureUserSettingsFile();
+    if (created) {
+      writeStdoutLine(
+        `Created a default settings file at ${settingsPath}.\n` +
+          "Set your API_KEY there (and adjust BASE_URL / MODEL if needed) before running tasks.\n"
+      );
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    writeStderrLine(`deepcode: could not initialize settings file: ${message}\n`);
   }
 
   // Validate --resume <sessionId> before entering TUI
