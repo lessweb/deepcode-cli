@@ -80,6 +80,7 @@ export {
   type SlashCommandKind,
   type SlashCommandItem,
 } from "./core/slash-commands";
+export { matchKeybind, buildKeybindMatchers, type KeybindMatcher } from "./core/keybinds";
 export {
   filterFileMentionItems,
   formatFileMentionPath,
