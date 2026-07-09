@@ -98,6 +98,14 @@ Skills are discovered from these locations, in priority order:
 - `deepseek-v4-flash`
 - Any other OpenAI-compatible model
 
+## Architecture and Benchmarks
+
+In ["Better Models: Worse Tools"](https://lucumr.pocoo.org/2026/7/4/better-models-worse-tools/), Armin Ronacher argues that tool schemas are not "neutral": models (LLMs) inherit tool-use habits formed during training and reinforcement learning, so they may perform well in one mainstream harness but become unstable with a different tool shape. This is the architectural starting point for Deep Code: it is tuned specifically for DeepSeek, so the harness itself can stay aligned with DeepSeek's behavior.
+
+Deep Code's gains come from the combined effect of tool constraints, context management, Agent Skills, permission policy, and other architectural decisions. The [deepcode-qrcode-benchmark](https://github.com/qorzj/deepcode-qrcode-benchmark) project shows that on a real and challenging Python requirement, Deep Code + DeepSeek + `/plan` mode has an effectiveness advantage over Claude Code + DeepSeek.
+
+> See also: [Deep Code Architecture](docs/architecture_en.md)
+
 ## FAQ
 
 ### Does Deep Code have a VSCode extension?
