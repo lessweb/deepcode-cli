@@ -8,6 +8,7 @@ import { fileURLToPath } from "url";
 import type { SessionMessage } from "./session";
 import { findGitBashPath, resolveShellPath } from "./common/shell-utils";
 import { supportsMultimodal } from "./common/model-capabilities";
+import type { AgentRegistry } from "./agents/agent-registry";
 
 const COMPACT_PROMPT_BASE = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
@@ -448,7 +449,11 @@ export type ToolDefinition = {
   };
 };
 
-export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDefinition[] = []): ToolDefinition[] {
+export function getTools(
+  _options: PromptToolOptions = {},
+  externalTools: ToolDefinition[] = [],
+  agentRegistry?: AgentRegistry
+): ToolDefinition[] {
   const tools: ToolDefinition[] = [
     {
       type: "function",
@@ -687,6 +692,36 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
       },
     },
   });
+
+  // Conditionally add DelegateToAgent when agents are discovered
+  if (agentRegistry?.hasAgents()) {
+    const agents = agentRegistry.listAgents();
+    const agentList = agents.map((a) => `- ${a.name}: ${a.description || "(no description)"}`).join("\n");
+
+    tools.push({
+      type: "function",
+      function: {
+        name: "DelegateToAgent",
+        description: `Delegate a task to a specialized sub-agent that runs in an isolated session. The sub-agent has access to the same tools and project context. Available agents:\n${agentList}`,
+        parameters: {
+          type: "object",
+          properties: {
+            agent_name: {
+              type: "string",
+              description: "The name of the sub-agent to invoke.",
+            },
+            task: {
+              type: "string",
+              description:
+                "The task description to send to the sub-agent as its user prompt. Be specific and include relevant context.",
+            },
+          },
+          required: ["agent_name", "task"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
 
   for (const tool of externalTools) {
     tools.push(tool);

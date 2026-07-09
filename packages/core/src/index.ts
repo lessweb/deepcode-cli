@@ -133,3 +133,25 @@ export type {
 // State types
 export type { FileState, FileSnippet, FileLineEnding } from "./common/state";
 export type { FileReadMetadata } from "./common/file-utils";
+
+// Agents
+export {
+  AgentRegistry,
+  SubAgentSession,
+  resolveAgentSkills,
+  createDelegateToAgentHandler,
+  formatAgentsList,
+} from "./agents";
+export type {
+  AgentManifest,
+  AgentScanRoot,
+  SubAgentOptions,
+  SubAgentResult,
+  SubAgentProgressEvent,
+  SubAgentProgressCallback,
+  ResolvedSkill,
+  SkillResolverOptions,
+  DelegateToAgentArgs,
+  DelegateToAgentResult,
+  DelegateHandlerOptions,
+} from "./agents";

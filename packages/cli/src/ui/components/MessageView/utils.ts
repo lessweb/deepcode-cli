@@ -271,10 +271,28 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     if (message.meta?.isSummary) {
       return chalk.dim.italic("(conversation summary inserted)");
     }
+    if (message.meta?.agentName) {
+      return renderSubAgentMessageToStdout(message);
+    }
     return "";
   }
 
   return "";
+}
+
+/** Renders a persisted sub-agent progress message for Raw-mode scrollback output. */
+function renderSubAgentMessageToStdout(message: SessionMessage): string {
+  const agentName = message.meta?.agentName ?? "agent";
+  if (message.meta?.subAgentStatus) {
+    return chalk(`✧ [${agentName}] ${message.content ?? ""}`);
+  }
+
+  const summary = buildToolSummary(message);
+  const params = formatToolStatusParams(summary);
+  const statusLine = chalk(`✧ [${agentName}] ${formatStatusName(summary.name)}${params ? ` ${params}` : ""}`);
+  const metaResultMd = typeof message.meta?.resultMd === "string" ? message.meta.resultMd.trim() : "";
+  const result = metaResultMd ? `\n${chalk.dim("  └ Result")}\n${metaResultMd}` : "";
+  return `${statusLine}${result}`;
 }
 
 export function getUpdatePlanPreviewLines(summary: ToolSummary): string[] {

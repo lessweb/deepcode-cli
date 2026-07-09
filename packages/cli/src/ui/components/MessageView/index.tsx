@@ -11,6 +11,7 @@ import {
 } from "./utils";
 import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
+import type { SessionMessage } from "@vegamo/deepcode-core";
 
 const PROMPT_ECHO_PREFIX_WIDTH = 2;
 const PROMPT_ECHO_MARGIN_LEFT = 1;
@@ -125,6 +126,9 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
         </Box>
       );
     }
+    if (message.meta?.agentName) {
+      return <SubAgentActivityLine message={message} width={width} />;
+    }
     return null;
   }
 
@@ -167,7 +171,7 @@ function StatusLine({
   params,
   width,
 }: {
-  bulletColor: "gray" | "green" | "red";
+  bulletColor: "gray" | "green" | "red" | "magenta" | "yellow";
   name: string;
   params: string;
   width: number;
@@ -214,6 +218,43 @@ function DiffPreview({ lines }: { lines: DiffPreviewLine[] }): React.ReactElemen
           </Text>
         ))}
       </Box>
+    </Box>
+  );
+}
+
+/**
+ * Renders a persisted sub-agent progress message (tagged with meta.agentName)
+ * distinctly from the main agent's own tool/thinking lines, so it's clear in
+ * the transcript which lines came from a delegated sub-agent.
+ */
+function SubAgentActivityLine({ message, width }: { message: SessionMessage; width: number }): React.ReactElement {
+  const agentName = message.meta?.agentName ?? "agent";
+  const status = message.meta?.subAgentStatus;
+
+  if (status) {
+    const bulletColor = status === "error" ? "red" : status === "model_fallback" ? "yellow" : "magenta";
+    return (
+      <Box marginLeft={1} marginBottom={1} marginY={0}>
+        <StatusLine width={width} bulletColor={bulletColor} name={`[${agentName}]`} params={message.content ?? ""} />
+      </Box>
+    );
+  }
+
+  // Sub-agent tool_result message: same visual shape as the main agent's
+  // own tool status line, but prefixed with the sub-agent's name.
+  const summary = buildToolSummary(message);
+  const diffLines = getToolDiffPreviewLines(summary);
+  const planLines = getUpdatePlanPreviewLines(summary);
+  return (
+    <Box flexDirection="column" marginLeft={1} marginBottom={1} marginY={0}>
+      <StatusLine
+        width={width}
+        bulletColor={summary.ok ? "magenta" : "red"}
+        name={`[${agentName}] ${formatStatusName(summary.name)}`}
+        params={formatToolStatusParams(summary)}
+      />
+      {diffLines.length > 0 ? <DiffPreview lines={diffLines} /> : null}
+      {planLines.length > 0 ? <PlanPreview lines={planLines} /> : null}
     </Box>
   );
 }

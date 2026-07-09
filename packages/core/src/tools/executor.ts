@@ -5,6 +5,9 @@ import { handleReadTool } from "./read-handler";
 import { handleUpdatePlanTool } from "./update-plan-handler";
 import { handleWebSearchTool } from "./web-search-handler";
 import { handleWriteTool } from "./write-handler";
+import { createDelegateToAgentHandler } from "../agents/delegate-handler";
+import type { AgentRegistry } from "../agents/agent-registry";
+import type { SubAgentProgressEvent } from "../agents/sub-agent-session";
 import type { McpManager } from "../mcp/mcp-manager";
 import type {
   CreateOpenAIClient,
@@ -74,6 +77,35 @@ export class ToolExecutor {
       }
     }
     return executions;
+  }
+
+  registerAgentHandler(
+    agentRegistry: AgentRegistry,
+    parentModel: string,
+    globalSkillRoots: string[] = [],
+    onProgress?: (sessionId: string, event: SubAgentProgressEvent) => void
+  ): void {
+    // Built per tool-call (not once at registration) so each invocation's
+    // progress events can be tagged with the sessionId that triggered it —
+    // ToolExecutionContext.sessionId is only known at call time.
+    this.toolHandlers.set("DelegateToAgent", async (args, context) => {
+      const handler = createDelegateToAgentHandler({
+        agentRegistry,
+        projectRoot: this.projectRoot,
+        parentModel,
+        createOpenAIClient: this.createOpenAIClient!,
+        toolExecutor: this,
+        globalSkillRoots,
+        onProgress: onProgress ? (event) => onProgress(context.sessionId, event) : undefined,
+      });
+      const result = await handler(args);
+      return {
+        ok: result.ok,
+        name: "DelegateToAgent",
+        output: result.output,
+        error: result.error,
+      };
+    });
   }
 
   private registerToolHandlers(): void {
