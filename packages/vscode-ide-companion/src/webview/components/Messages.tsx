@@ -1,0 +1,67 @@
+import { useRef, useEffect } from "react";
+import { ScrollArea, ScrollBar } from "@/webview/components/ui/scroll-area";
+import UserBubble from "@/webview/components/bubbles/UserBubble";
+import AssistantBubble from "@/webview/components/bubbles/AssistantBubble";
+import ThinkingBubble from "@/webview/components/bubbles/ThinkingBubble";
+import ToolBubble from "@/webview/components/bubbles/ToolBubble";
+import SystemBubble from "@/webview/components/bubbles/SystemBubble";
+import type { SessionMessage } from "@/webview/types";
+
+interface MessagesProps {
+  messages: SessionMessage[];
+  loading: boolean;
+  llmStreamProgress: unknown;
+  processes: Record<string, { startTime: string; command: string }> | null;
+}
+
+export default function Messages({ messages, loading, llmStreamProgress, processes }: MessagesProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  console.log("llmStreamProgress: ", llmStreamProgress);
+  console.log("processes: ", processes);
+
+  useEffect(() => {
+    console.log("messages:", JSON.stringify(messages));
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
+
+  return (
+    <ScrollArea className="flex-1 w-full max-w-237.5 mx-auto min-w-sm min-h-0">
+      <div className="flex flex-col gap-0 px-4 py-4">
+        {messages.map((msg, index) => {
+          const prevMsg = index > 0 ? messages[index - 1] : null;
+          const shouldConnect = prevMsg ? prevMsg.role !== "user" && msg.role !== "user" : false;
+          // console.log(`Rendering message ${index}:`, JSON.stringify(msg));
+          switch (msg.role) {
+            case "user":
+              return <UserBubble key={`msg-${index}`} content={msg.content} />;
+            case "assistant": {
+              const meta = msg.meta as { asThinking?: boolean } | undefined;
+              if (meta?.asThinking) {
+                return <ThinkingBubble key={`msg-${index}`} content={msg.content} shouldConnect={shouldConnect} />;
+              }
+              return <AssistantBubble key={`msg-${index}`} content={msg.content} shouldConnect={shouldConnect} />;
+            }
+            case "tool":
+              return (
+                <ToolBubble key={`msg-${index}`} content={msg.content} meta={msg.meta} shouldConnect={shouldConnect} />
+              );
+            case "system":
+              return (
+                <SystemBubble
+                  key={`msg-${index}`}
+                  content={msg.content}
+                  meta={msg.meta}
+                  shouldConnect={shouldConnect}
+                />
+              );
+            default:
+              return null;
+          }
+        })}
+        <div ref={bottomRef} />
+      </div>
+      <ScrollBar />
+    </ScrollArea>
+  );
+}

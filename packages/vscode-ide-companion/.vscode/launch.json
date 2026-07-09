@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug VS Code Companion",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
+      "outFiles": ["${workspaceFolder}/dist/**/*.js"],
+      "preLaunchTask": "npm: dev:webview",
+      "presentation": {
+        "group": "deepcode"
+      }
+    }
+  ]
+}

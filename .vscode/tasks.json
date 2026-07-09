@@ -1,0 +1,51 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Dev: Webview Server",
+      "type": "npm",
+      "script": "dev:webview",
+      "path": "packages/vscode-ide-companion",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "typescript",
+        "fileLocation": "relative",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*VITE.*",
+          "endsPattern": ".*ready in.*"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    },
+    {
+      "label": "Watch VS Code Companion",
+      "type": "npm",
+      "script": "watch",
+      "path": "packages/vscode-ide-companion",
+      "isBackground": true,
+      "problemMatcher": {
+        "owner": "typescript",
+        "fileLocation": "relative",
+        "pattern": {
+          "regexp": "^$"
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": ".*Watching.*",
+          "endsPattern": ".*✅.*"
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated"
+      }
+    }
+  ]
+}
