@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { CircleAlert, CircleCheckBig, Clock } from "lucide-react";
 
 interface PlanRendererProps {
   plan: string;
@@ -18,7 +19,7 @@ export default function PlanRenderer({ plan }: PlanRendererProps) {
   const lines = String(plan || "").split(/\r?\n/);
 
   return (
-    <div className="update-plan-markdown text-sm space-y-0.5">
+    <div className="update-plan-markdown text-sm space-y-0.5 py-2 px-4">
       {lines.map((raw, i) => {
         const line = raw.trimEnd();
         if (!line.trim()) {
@@ -37,8 +38,8 @@ export default function PlanRenderer({ plan }: PlanRendererProps) {
           );
         }
 
-        // Task item: - [ ] / - [x] / - [>] / - [!]
-        const taskMatch = line.match(/^(\s*)[-*]\s+\[([ xX!>])\]\s*(.*)$/);
+        // Task item: - [ ] / - [x] / - [>] / - [!] 以及 1. [ ] / 1. [x] 等
+        const taskMatch = line.match(/^(\s*)(?:\d+\.|[-*])\s+\[([ xX!>])\]\s*(.*)$/);
         if (taskMatch) {
           const indent = Math.floor((taskMatch[1] || "").replace(/\t/g, "  ").length / 2);
           const statusRaw = taskMatch[2];
@@ -47,20 +48,33 @@ export default function PlanRenderer({ plan }: PlanRendererProps) {
           else if (statusRaw === ">") status = "active";
           else if (statusRaw === "!") status = "attention";
 
-          const label = status === "done" ? "✓" : status === "active" ? ">" : status === "attention" ? "!" : "";
+          const label =
+            status === "done" ? (
+              <CircleCheckBig className="size-4" />
+            ) : status === "active" ? (
+              <Clock className="size-4" />
+            ) : status === "attention" ? (
+              <CircleAlert className="size-4" />
+            ) : (
+              <div className="size-4"></div>
+            );
           const colorClass =
             status === "done"
               ? "text-success"
               : status === "active"
-                ? "text-[var(--vscode-focusBorder)]"
+                ? "text-primary"
                 : status === "attention"
                   ? "text-warning"
                   : "text-muted-foreground";
 
           return (
-            <div key={i} className="flex items-start gap-2 py-0.5" style={{ paddingLeft: `${indent * 16}px` }}>
-              <span className={`shrink-0 font-mono text-xs ${colorClass}`}>{label || " "}</span>
-              <span dangerouslySetInnerHTML={{ __html: toInlineHtml(taskMatch[3].trim()) }} />
+            <div key={i} className="pl-2">
+              <div className="flex items-center gap-2 py-0.5" style={{ paddingLeft: `${indent * 16}px` }}>
+                <span className={`size-4 font-mono text-xs ${colorClass}`}>{label || " "}</span>
+                <div className="break-normal text-nowrap w-auto truncate flex-1">
+                  <span dangerouslySetInnerHTML={{ __html: toInlineHtml(taskMatch[3].trim()) }} />
+                </div>
+              </div>
             </div>
           );
         }
@@ -78,7 +92,7 @@ export default function PlanRenderer({ plan }: PlanRendererProps) {
         }
 
         return (
-          <p key={i} className="my-0.5">
+          <p key={i} className="my-0.5 pl-4">
             <span dangerouslySetInnerHTML={{ __html: toInlineHtml(line.trim()) }} />
           </p>
         );

@@ -74,7 +74,9 @@ describe("Messages", () => {
   });
 
   it("renders tool message", () => {
-    const messages: SessionMessage[] = [{ role: "tool", content: "Tool output", meta: { name: "readFile" } }];
+    const messages: SessionMessage[] = [
+      { role: "tool", content: "Tool output", meta: { function: { name: "readFile" } } },
+    ];
     render(<Messages {...defaultProps} messages={messages} />);
     expect(screen.getByTestId("tool-bubble")).toHaveTextContent("Tool output");
   });
@@ -96,7 +98,7 @@ describe("Messages", () => {
   });
 
   it("renders message with html content", () => {
-    const messages: SessionMessage[] = [{ role: "assistant", content: "Text", html: "<p>HTML content</p>" }];
+    const messages: SessionMessage[] = [{ role: "assistant", content: "Text" }];
     render(<Messages {...defaultProps} messages={messages} />);
     expect(screen.getByTestId("assistant-bubble")).toHaveTextContent("Text");
   });

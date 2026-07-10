@@ -15,14 +15,14 @@ export default function SkillsTags({ selectedSkills, onRemove }: SkillsTagsProps
   return (
     <InputGroupAddon className="flex flex-wrap gap-1.5" align="block-start">
       {selectedSkills.map((skill) => (
-        <Badge key={skill.name} variant="secondary" className="gap-1 text-xs">
+        <Badge key={skill.name} variant="secondary" className="h-6 gap-1 rounded-md text-xs pr-0">
           {skill.name}
           <Button
             variant="ghost"
-            className="ml-0.5 size-3 inline-flex cursor-pointer text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+            className="ml-0.5 py-2.5 size-3 inline-flex cursor-pointer text-muted-foreground hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
             onClick={() => onRemove(skill.name)}
           >
-            <X className="h-3 w-3" />
+            <X className="size-2.5" />
           </Button>
         </Badge>
       ))}

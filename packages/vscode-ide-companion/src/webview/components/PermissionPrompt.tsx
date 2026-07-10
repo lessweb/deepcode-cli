@@ -179,10 +179,13 @@ export default function PermissionPrompt({
 
         if (nextEffective >= prompts.length) {
           // Submit
-          const permissions = normalized.map((req) => ({
-            toolCallId: req.toolCallId,
-            permission: newDecisions[req.toolCallId] === "deny" ? "deny" : "allow",
-          }));
+          const permissions = normalized.map((req): { toolCallId: string; permission: "allow" | "deny" } => {
+            const decision = newDecisions[req.toolCallId];
+            return {
+              toolCallId: req.toolCallId,
+              permission: decision === "deny" ? "deny" : "allow",
+            };
+          });
           const hasDeny = permissions.some((p) => p.permission === "deny");
 
           if (hasDeny) {

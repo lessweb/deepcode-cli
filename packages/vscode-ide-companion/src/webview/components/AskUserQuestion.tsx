@@ -16,6 +16,7 @@ import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "./ui/card";
 import { buildAskUserQuestionReply } from "@/webview/utils";
+import { useChat } from "@/webview/context";
 
 interface QuestionOption {
   label: string;
@@ -66,6 +67,7 @@ const formSchema = z.object({
 export type AnswerFormValues = z.infer<typeof formSchema>;
 
 export default function AskUserQuestion({ toolData }: AskUserQuestionProps) {
+  const { actions } = useChat();
   const questions = toolData.metadata?.questions || [];
 
   const form = useForm<AnswerFormValues>({
@@ -99,8 +101,9 @@ export default function AskUserQuestion({ toolData }: AskUserQuestionProps) {
         return;
       }
       // sendUserPromptText(reply.text);
+      actions.sendPrompt(reply?.text || "");
     },
-    [form]
+    [form, actions]
   );
 
   if (questions.length === 0) {
@@ -144,7 +147,7 @@ export default function AskUserQuestion({ toolData }: AskUserQuestionProps) {
                           />
                           <FieldContent>
                             <FieldLabel htmlFor={`q-${qIdx}-${optIdx}`}>
-                              <span className="font-medium">{opt.label}</span>
+                              <span className="font-medium cursor-pointer">{opt.label}</span>
                             </FieldLabel>
                             {opt.description && (
                               <FieldDescription className="block text-xs text-muted-foreground">

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import SkillsPanel from "@/webview/components/SkillsPanel";
 import SkillsTags from "@/webview/components/SkillsTags";
 import ContextMeter from "@/webview/components/ContextMeter";
+import { PromptAttachments, usePromptAttachments } from "@/webview/components/PromptAttachments";
 import type { ActiveEditor, SkillInfo, TokenTelemetry } from "@/webview/types";
 import { FileCodeIcon, Send, Square } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/webview/components/ui/input-group";
@@ -10,7 +11,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { cn } from "@/webview/lib/utils";
 import { Field, FieldGroup } from "./ui/field";
 
-export interface ComposerProps {
+export interface InputPromptProps {
   loading: boolean;
   selectedSkills: SkillInfo[];
   availableSkills: SkillInfo[];
@@ -29,7 +30,7 @@ export interface ComposerProps {
   onSelectSkills: (skills: SkillInfo[]) => void;
 }
 
-export default function Composer({
+export default function InputPrompt({
   loading,
   selectedSkills,
   availableSkills,
@@ -41,12 +42,13 @@ export default function Composer({
   onSendPrompt,
   onInterrupt,
   onSelectSkills,
-}: ComposerProps) {
+}: InputPromptProps) {
   const [value, setValue] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls } = usePromptAttachments();
   console.log("askPermissions:", askPermissions);
   console.log("activeSessionStatus:", activeSessionStatus);
 
@@ -69,7 +71,7 @@ export default function Composer({
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
-    const images: string[] = [];
+    const images = getImageUrls();
     if ((!trimmed && images.length === 0) || loading) return;
 
     const reply = pendingPermissionReply as { permissions?: unknown[]; alwaysAllows?: string[] } | null;
@@ -79,7 +81,17 @@ export default function Composer({
 
     onSendPrompt(trimmed, selectedSkills, images, reply || undefined);
     onSelectSkills([]);
-  }, [value, loading, pendingPermissionReply, selectedSkills, onSendPrompt, onSelectSkills]);
+    clearAttachments();
+  }, [
+    value,
+    loading,
+    pendingPermissionReply,
+    selectedSkills,
+    onSendPrompt,
+    onSelectSkills,
+    getImageUrls,
+    clearAttachments,
+  ]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -121,25 +133,28 @@ export default function Composer({
   );
 
   const isProcessing = loading;
-  const hasContent = value.trim().length > 0;
+  const hasContent = value.trim().length > 0 || attachments.length > 0;
 
   return (
     <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm p-4">
       <Field>
         <InputGroup>
-          <InputGroupTextarea
-            ref={textareaRef}
-            value={value}
-            onChange={(e) => {
-              setValue(e.target.value);
-              if (historyIdx !== -1) {
-                setHistoryIdx(-1);
-              }
-            }}
-            onKeyDown={handleKeyDown}
-            className="text-[12px] max-h-50"
-            placeholder="Write a prompt..."
-          />
+          <div className="flex flex-col w-full">
+            <InputGroupTextarea
+              ref={textareaRef}
+              value={value}
+              onChange={(e) => {
+                setValue(e.target.value);
+                if (historyIdx !== -1) {
+                  setHistoryIdx(-1);
+                }
+              }}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              className="text-[12px] max-h-50"
+              placeholder="Write a prompt... "
+            />
+          </div>
           <InputGroupAddon className="flex items-center justify-center" align="block-end">
             <SkillsPanel
               availableSkills={availableSkills}
@@ -190,11 +205,11 @@ export default function Composer({
             ) : (
               <InputGroupButton
                 variant="default"
-                className={cn("h-7 w-7 ml-auto  cursor-pointer", {
-                  "cursor-not-allowed!": !hasContent,
+                className={cn("h-7 w-7 ml-auto cursor-pointer", {
+                  "cursor-not-allowed!": !hasContent && !isProcessing,
                 })}
                 onClick={handleSend}
-                disabled={!hasContent}
+                disabled={!hasContent && !isProcessing}
                 title="Send"
                 size="icon-sm"
               >
@@ -206,6 +221,7 @@ export default function Composer({
             selectedSkills={selectedSkills}
             onRemove={(name) => onSelectSkills(selectedSkills.filter((s) => s.name !== name))}
           />
+          <PromptAttachments attachments={attachments} onRemove={removeAttachment} />
         </InputGroup>
       </Field>
     </FieldGroup>

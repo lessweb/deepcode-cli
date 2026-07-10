@@ -373,7 +373,6 @@ describe("appReducer - ASSISTANT_MESSAGE", () => {
       result.current.dispatch({
         type: "ASSISTANT_MESSAGE",
         content: "I'm an AI",
-        html: "<p>I'm an AI</p>",
         meta: { model: "gpt-4" },
       });
     });
@@ -382,7 +381,6 @@ describe("appReducer - ASSISTANT_MESSAGE", () => {
     expect(result.current.state.messages[0]).toEqual({
       role: "assistant",
       content: "I'm an AI",
-      html: "<p>I'm an AI</p>",
       meta: { model: "gpt-4" },
     });
     expect(result.current.state.lastMessageRole).toBe("assistant");
@@ -832,7 +830,6 @@ describe("Message event handling", () => {
       postMessage({
         type: "assistant",
         content: "AI response",
-        html: "<p>AI response</p>",
       });
     });
 

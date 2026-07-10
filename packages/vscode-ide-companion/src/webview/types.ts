@@ -1,10 +1,11 @@
 // --- Message types ---
 
+import type { MessageMeta } from "@vegamo/deepcode-core";
+
 export interface SessionMessage {
   role: "user" | "assistant" | "tool" | "system";
   content: string;
-  html?: string;
-  meta?: Record<string, unknown>;
+  meta?: MessageMeta;
   visible?: boolean;
 }
 

@@ -5,7 +5,6 @@ import type { SessionManager, SkillInfo, UserToolPermission, PermissionScope } f
 export interface RouterContext {
   sessionManager: SessionManager;
   postMessage: (message: unknown) => void;
-  renderMarkdown: (text: string) => string;
   copyToClipboard: (text: string) => void;
   openFileInEditor: (filePath: string, line: number) => Promise<void>;
   getWorkspaceRoot: () => string;
@@ -81,9 +80,7 @@ export const appRouter = router({
           content: m.content,
           html:
             m.role !== "tool"
-              ? ctx.renderMarkdown(
-                  m.content || (m.messageParams as { reasoning_content?: string } | null)?.reasoning_content || ""
-                )
+              ? m.content || (m.messageParams as { reasoning_content?: string } | null)?.reasoning_content || ""
               : undefined,
           meta: m.meta,
         }));
@@ -145,7 +142,8 @@ export const appRouter = router({
 
     try {
       const userPrompt = {
-        text: prompt,
+        type: "userPrompt",
+        prompt: prompt,
         skills: skills.length > 0 ? (skills as SkillInfo[]) : undefined,
         imageUrls: normalizedImages.length > 0 ? normalizedImages : undefined,
         permissions: permissions && permissions.length > 0 ? (permissions as UserToolPermission[]) : undefined,
@@ -158,7 +156,7 @@ export const appRouter = router({
       const message = error instanceof Error ? error.message : String(error);
       ctx.postMessage({
         type: "assistant",
-        html: ctx.renderMarkdown(`Request failed: ${message}`),
+        content: `Request failed: ${message}`,
       });
       return { ok: false, error: message };
     } finally {
@@ -197,13 +195,7 @@ export const appRouter = router({
         .filter((m) => m.visible)
         .map((m) => ({
           role: m.role,
-          content: m.content,
-          html:
-            m.role !== "tool"
-              ? ctx.renderMarkdown(
-                  m.content || (m.messageParams as { reasoning_content?: string } | null)?.reasoning_content || ""
-                )
-              : undefined,
+          content: m.content || (m.messageParams as { reasoning_content?: string } | null)?.reasoning_content || "",
           meta: m.meta,
         })),
     };

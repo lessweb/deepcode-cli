@@ -31,10 +31,10 @@ export default function Messages({ messages, loading, llmStreamProgress, process
         {messages.map((msg, index) => {
           const prevMsg = index > 0 ? messages[index - 1] : null;
           const shouldConnect = prevMsg ? prevMsg.role !== "user" && msg.role !== "user" : false;
-          // console.log(`Rendering message ${index}:`, JSON.stringify(msg));
+          console.log(`Rendering message ${index}:`, JSON.stringify(msg));
           switch (msg.role) {
             case "user":
-              return <UserBubble key={`msg-${index}`} content={msg.content} />;
+              return <UserBubble key={`msg-${index}`} content={msg.content} meta={msg.meta} />;
             case "assistant": {
               const meta = msg.meta as { asThinking?: boolean } | undefined;
               if (meta?.asThinking) {

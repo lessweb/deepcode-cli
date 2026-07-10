@@ -24,8 +24,8 @@ export default function ThinkingBubble({ content, shouldConnect = false }: Think
             <ChevronDown className="ml-auto group-data-[state=open]:rotate-180" />
           </Button>
         </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="mt-2">
+        <CollapsibleContent className="py-2 px-3 w-auto">
+          <div className="mt-2 peer-[data-state=open]:bg-muted">
             <Markdown>{content}</Markdown>
           </div>
         </CollapsibleContent>

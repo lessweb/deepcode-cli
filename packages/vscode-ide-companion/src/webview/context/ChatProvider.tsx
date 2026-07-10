@@ -109,7 +109,6 @@ function appReducer(state: AppState, action: AppAction): AppState {
       const newMsg: SessionMessage = {
         role: "assistant",
         content: action.content || "",
-        html: action.html,
         meta: action.meta,
       };
       return {
@@ -233,7 +232,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
           dispatch({
             type: "ASSISTANT_MESSAGE",
             content: message.content as string,
-            html: message.html as string,
             meta: message.meta as Record<string, unknown> | undefined,
           });
           break;

@@ -3,6 +3,9 @@ import React from "react";
 import { useMemo, useCallback } from "react";
 import MarkdownIt from "markdown-it";
 import type { Options as MarkdownItOptions } from "markdown-it";
+import hljs from "highlight.js";
+// @ts-expect-error -- module does not provide types
+import taskLists from "markdown-it-task-lists";
 import "./index.css";
 
 export interface MarkdownProps {
@@ -80,14 +83,31 @@ const escapeHtml = (unsafe: string): string =>
 /**
  * Create a cached MarkdownIt instance
  */
-const createMarkdownInstance = (): MarkdownIt =>
-  new MarkdownIt({
+const createMarkdownInstance = (): MarkdownIt => {
+  const md = new MarkdownIt({
     html: false, // Disable HTML for security
     xhtmlOut: false,
     breaks: true,
     linkify: true,
     typographer: true,
-  } as MarkdownItOptions);
+    highlight: function (str, lang) {
+      if (lang && hljs.getLanguage(lang)) {
+        try {
+          return (
+            '<pre><code class="hljs">' +
+            hljs.highlight(str, { language: lang, ignoreIllegals: true }).value +
+            "</code></pre>"
+          );
+        } catch (__error) {
+          // Fall through to default escaping below
+        }
+      }
+
+      return '<pre><code class="hljs">' + md.utils.escapeHtml(str) + "</code></pre>";
+    },
+  } as MarkdownItOptions).use(taskLists, { enabled: false });
+  return md;
+};
 
 const Markdown: FC<MarkdownProps> = ({ children = "", onFileClick, enableFileLinks }) => {
   // Cache MarkdownIt instance

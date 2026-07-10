@@ -30,12 +30,12 @@ export default function DiffPreview({ toolData }: DiffPreviewProps) {
 
   return (
     <div className="space-y-2">
-      {toolData.output && <div className="text-xs text-muted-foreground">{toolData.output.trim()}</div>}
+      {toolData.output && <div className="text-xs text-muted-foreground pl-3">{toolData.output.trim()}</div>}
 
-      <div className="flex items-center gap-2 text-xs">
+      <div className="flex items-center gap-2 text-xs pl-3">
         <span className="text-muted-foreground">File</span>
         <Button
-          type="button"
+          variant="link"
           className="text-(--vscode-textLink-foreground) hover:underline cursor-pointer border-none bg-transparent p-0 text-xs truncate"
           title={meta.file_path}
         >
@@ -58,7 +58,7 @@ export default function DiffPreview({ toolData }: DiffPreviewProps) {
               return (
                 <div key={i} className={`flex px-2 py-0.5 ${cls}`}>
                   <span className="w-4 shrink-0 select-none">{prefix}</span>
-                  <span className="truncate">{line.slice(1)}</span>
+                  <div className="w-auto text-wrap break-all flex-1">{line.slice(1)}</div>
                 </div>
               );
             })}

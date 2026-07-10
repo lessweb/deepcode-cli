@@ -27,7 +27,7 @@ export default function SystemBubble({ content, meta, shouldConnect = false }: S
             <ChevronDown className={`h-3.5 w-3.5 ml-auto transition-transform ${open ? "" : "-rotate-90"}`} />
           </Button>
         </CollapsibleTrigger>
-        <CollapsibleContent>
+        <CollapsibleContent className="w-auto">
           <div className="mt-2 text-sm text-muted-foreground whitespace-pre-wrap p-2">{skillDescription}</div>
         </CollapsibleContent>
       </div>

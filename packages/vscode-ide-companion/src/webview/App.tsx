@@ -1,6 +1,6 @@
 import Header from "@/webview/components/Header";
 import Messages from "@/webview/components/Messages";
-import Composer from "@/webview/components/Composer";
+import InputPrompt from "@/webview/components/InputPrompt";
 import ThinkingLiveBubble from "@/webview/components/ThinkingLiveBubble";
 import PermissionPrompt from "@/webview/components/PermissionPrompt";
 import { useChat } from "@/webview/context/ChatProvider";
@@ -40,7 +40,7 @@ export default function App() {
           shouldConnect={state.lastMessageRole !== null && state.lastMessageRole !== "user"}
         />
       )}
-      <Composer
+      <InputPrompt
         loading={state.loading}
         selectedSkills={state.selectedSkills}
         availableSkills={state.skills}

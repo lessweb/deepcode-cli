@@ -3,7 +3,6 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import OpenAI from "openai";
-import MarkdownIt from "markdown-it";
 import type { SessionMessage } from "@vegamo/deepcode-core";
 import {
   SessionManager,
@@ -32,27 +31,21 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
   private readonly context: vscode.ExtensionContext;
   private webviewView: vscode.WebviewView | undefined;
-  private readonly md: MarkdownIt;
   private readonly sessionManager: SessionManager;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
-    this.md = new MarkdownIt({
-      html: false,
-      linkify: false,
-      breaks: true,
-    });
     this.sessionManager = new SessionManager({
       projectRoot: this.getWorkspaceRoot(),
       createOpenAIClient: () => this.createOpenAIClient(),
       getResolvedSettings: () => this.resolveCurrentSettings(),
-      renderMarkdown: (text) => this.md.render(text),
+      renderMarkdown: (text) => text,
       onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => {
         if (!this.webviewView) return;
-        if (message.visible === false) return;
+        if (!message.visible) return;
         if (message.role !== "tool") {
           const reasoningContent = (message.messageParams as ReasoningMessageParams | null)?.reasoning_content;
-          message.html = this.md.render(message.content || reasoningContent || "");
+          message.content = message.content || reasoningContent || "";
         }
         this.webviewView.webview.postMessage({ type: "appendMessage", message, shouldConnect });
       },
@@ -100,7 +93,6 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     const rpcContext: RouterContext = {
       sessionManager: this.sessionManager,
       postMessage: (message) => this.webviewView?.webview.postMessage(message),
-      renderMarkdown: (text) => this.md.render(text),
       copyToClipboard: (text) => void vscode.env.clipboard.writeText(text),
       openFileInEditor: (filePath, line) => this.openFileInEditor(filePath, line),
       getWorkspaceRoot: () => this.getWorkspaceRoot(),

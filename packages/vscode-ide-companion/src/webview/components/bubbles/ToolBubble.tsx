@@ -63,7 +63,10 @@ export default function ToolBubble({ content, meta, shouldConnect = false }: Too
       <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>
       <div className="flex-1 min-w-0">
         <CollapsibleTrigger asChild>
-          <Button variant="ghost" className="group w-full flex">
+          <Button
+            variant="ghost"
+            className="group w-full flex data-[state=open]:rounded-b-none data-[state=open]:border-muted"
+          >
             <span className="font-medium">{toolName}</span>
             {paramsMd && (
               <div className="text-xs break-all w-auto text-left flex-1 text-muted-foreground truncate">{paramsMd}</div>
@@ -71,8 +74,8 @@ export default function ToolBubble({ content, meta, shouldConnect = false }: Too
             <ChevronDown className={`ml-auto group-data-[state=open]:rotate-180`} />
           </Button>
         </CollapsibleTrigger>
-        <CollapsibleContent>
-          <div className="mt-2 text-sm text-muted-foreground">
+        <CollapsibleContent className="w-auto data-[state=open]:bg-muted data-[state=open]:rounded-t-none data-[state=open]:rounded-b-sm">
+          <div className="text-sm">
             {/* Plan renderer */}
             {toolName.toLowerCase() === "updateplan" && toolData.ok && toolData.metadata?.plan ? (
               <PlanRenderer plan={String(toolData.metadata.plan)} />
@@ -82,7 +85,7 @@ export default function ToolBubble({ content, meta, shouldConnect = false }: Too
               toolData.metadata ? (
               <DiffPreview toolData={toolData} />
             ) : (
-              <pre className="text-xs text-chart-2 whitespace-pre-wrap wrap-break-word bg-muted p-2 rounded-sm">
+              <pre className="text-xs text-chart-2 whitespace-pre-wrap wrap-break-word p-2">
                 {resultMd || toolData.output || content}
               </pre>
             )}

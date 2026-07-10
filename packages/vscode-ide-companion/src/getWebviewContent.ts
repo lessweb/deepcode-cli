@@ -74,7 +74,7 @@ function createDevHTML(nonce: string, uris: DevUris, csp: string): string {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Deep Code (Dev)</title>
         </head>
-        <body>
+        <body data-vscode-context='{"preventDefaultContextMenuItems": true}'>
         <div id="root"></div>
 
         <script type="module" nonce="${nonce}">

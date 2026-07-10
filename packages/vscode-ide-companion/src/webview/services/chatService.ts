@@ -148,5 +148,3 @@ export const chatService = {
     return result as { ok: boolean };
   },
 };
-
-// Types are exported at the top of the file
