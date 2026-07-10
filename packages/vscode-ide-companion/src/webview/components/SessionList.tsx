@@ -1,17 +1,26 @@
-import { useState, useMemo } from "react";
-import { Input } from "@/webview/components/ui/input";
-import { ScrollArea, ScrollBar } from "@/webview/components/ui/scroll-area";
+import { useState, useMemo, useCallback } from "react";
 import type { SessionSummary } from "@/webview/types";
-import { MessageCircle, Search } from "lucide-react";
+import { MessageCircle, PanelRight, Search } from "lucide-react";
 import { Empty, EmptyDescription, EmptyMedia, EmptyHeader, EmptyTitle } from "@/webview/components/ui/empty";
 import { cn } from "@/webview/lib/utils";
 import { Item, ItemActions, ItemContent, ItemGroup } from "./ui/item";
+import {
+  Drawer,
+  DrawerClose,
+  DrawerContent,
+  DrawerFooter,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerTrigger,
+} from "@/webview/components/ui/drawer";
+import { Button } from "@/webview/components/ui/button";
+import { InputGroup, InputGroupAddon, InputGroupInput } from "@/webview/components/ui/input-group";
 
-interface SessionDropdownProps {
+interface SessionListProps {
   sessions: SessionSummary[];
   activeSessionId: string | null;
   onSelect: (sessionId: string) => void;
-  onClose: () => void;
+  onCreateNewSession: () => void;
 }
 
 function formatTime(dateString: string): string {
@@ -27,8 +36,13 @@ function formatTime(dateString: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-export default function SessionList({ sessions, activeSessionId, onSelect, onClose }: SessionDropdownProps) {
+export default function SessionList({ sessions, activeSessionId, onSelect, onCreateNewSession }: SessionListProps) {
   const [query, setQuery] = useState("");
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const handleCloseDrawer = useCallback(() => {
+    setDrawerOpen(false);
+  }, []);
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase().trim();
@@ -69,68 +83,85 @@ export default function SessionList({ sessions, activeSessionId, onSelect, onClo
     grouped["Today"].length + grouped["Yesterday"].length + grouped["Past Week"].length + grouped["Older"].length;
 
   return (
-    <div className="flex flex-col h-full w-full">
-      <div className="p-2 shrink-0">
-        <div className="relative">
-          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            className="pl-8 h-8 text-sm"
-            placeholder="Search sessions..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            autoFocus
-          />
+    <Drawer direction="right" open={drawerOpen} onOpenChange={setDrawerOpen}>
+      <DrawerTrigger asChild>
+        <Button variant="ghost" size="icon" className="shrink-0 cursor-pointer" title="Show Agent Sessions Sidebar">
+          <PanelRight className="h-4 w-4" />
+        </Button>
+      </DrawerTrigger>
+      <DrawerContent>
+        <DrawerHeader>
+          <DrawerTitle>Sessions</DrawerTitle>
+          <InputGroup className="w-full mt-4">
+            <InputGroupInput
+              placeholder="Search sessions..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <InputGroupAddon>
+              <Search />
+            </InputGroupAddon>
+            <InputGroupAddon align="inline-end">
+              {Object.entries(grouped).reduceRight((acc, [_, items]) => acc + items.length, 0)} results
+            </InputGroupAddon>
+          </InputGroup>
+        </DrawerHeader>
+        <div className="no-scrollbar overflow-y-auto">
+          <div className="py-2 px-4 pt-0">
+            {totalCount === 0 ? (
+              <Empty className="h-full bg-muted/30">
+                <EmptyHeader>
+                  <EmptyMedia variant="icon">
+                    <MessageCircle />
+                  </EmptyMedia>
+                  <EmptyTitle>{query ? "No sessions found" : "No sessions yet"}</EmptyTitle>
+                  <EmptyDescription className="max-w-xs text-pretty">
+                    You&apos;re all caught up. New notifications will appear here.
+                  </EmptyDescription>
+                </EmptyHeader>
+              </Empty>
+            ) : (
+              Object.entries(grouped).map(([group, items]) =>
+                items.length > 0 ? (
+                  <ItemGroup key={group} className="mb-3 last:mb-0">
+                    <div className="text-xs uppercase font-medium tracking-wide px-1.5 py-1 text-muted-foreground">
+                      {group}
+                    </div>
+                    {items.map((s) => (
+                      <Item
+                        key={s.id}
+                        size="xs"
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-3 transition-colors cursor-pointer border-none",
+                          s.id === activeSessionId
+                            ? "bg-primary text-primary-foreground font-medium"
+                            : "text-foreground hover:bg-accent"
+                        )}
+                        onClick={() => {
+                          onSelect(s.id);
+                          handleCloseDrawer();
+                        }}
+                      >
+                        <ItemContent className="flex-1 truncate">{s.summary || "Untitled"}</ItemContent>
+                        <ItemActions className="shrink-0 text-xs text-muted-foreground">
+                          {formatTime(s.updateTime)}
+                        </ItemActions>
+                      </Item>
+                    ))}
+                  </ItemGroup>
+                ) : null
+              )
+            )}
+          </div>
         </div>
-      </div>
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="p-2 pt-0">
-          {totalCount === 0 ? (
-            <Empty className="h-full bg-muted/30">
-              <EmptyHeader>
-                <EmptyMedia variant="icon">
-                  <MessageCircle />
-                </EmptyMedia>
-                <EmptyTitle>{query ? "No sessions found" : "No sessions yet"}</EmptyTitle>
-                <EmptyDescription className="max-w-xs text-pretty">
-                  You&apos;re all caught up. New notifications will appear here.
-                </EmptyDescription>
-              </EmptyHeader>
-            </Empty>
-          ) : (
-            Object.entries(grouped).map(([group, items]) =>
-              items.length > 0 ? (
-                <ItemGroup key={group} className="mb-3 last:mb-0">
-                  <div className="text-xs uppercase font-medium tracking-wide px-1.5 py-1 text-muted-foreground">
-                    {group}
-                  </div>
-                  {items.map((s) => (
-                    <Item
-                      key={s.id}
-                      size="xs"
-                      className={cn(
-                        "w-full text-left px-2 py-1.5 rounded-md text-sm flex items-center gap-3 transition-colors cursor-pointer border-none",
-                        s.id === activeSessionId
-                          ? "bg-primary text-primary-foreground font-medium"
-                          : "text-foreground hover:bg-accent"
-                      )}
-                      onClick={() => {
-                        onSelect(s.id);
-                        onClose();
-                      }}
-                    >
-                      <ItemContent className="flex-1 truncate">{s.summary || "Untitled"}</ItemContent>
-                      <ItemActions className="shrink-0 text-xs text-muted-foreground">
-                        {formatTime(s.updateTime)}
-                      </ItemActions>
-                    </Item>
-                  ))}
-                </ItemGroup>
-              ) : null
-            )
-          )}
-        </div>
-        <ScrollBar />
-      </ScrollArea>
-    </div>
+        <DrawerFooter>
+          <DrawerClose asChild>
+            <Button onClick={onCreateNewSession} variant="outline" className="cursor-pointer">
+              New Session
+            </Button>
+          </DrawerClose>
+        </DrawerFooter>
+      </DrawerContent>
+    </Drawer>
   );
 }

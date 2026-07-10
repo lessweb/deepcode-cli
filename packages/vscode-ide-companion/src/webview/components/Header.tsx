@@ -15,6 +15,7 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/webview/components/ui/drawer";
+import SessionList from "@/webview/components/SessionList";
 
 interface HeaderProps {
   sessions: SessionSummary[];
@@ -24,20 +25,12 @@ interface HeaderProps {
 }
 
 export default function Header({ sessions, activeSessionId, onSelectSession, onCreateNewSession }: HeaderProps) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const handleCloseDrawer = useCallback(() => {
-    setDrawerOpen(false);
-  }, []);
-
   const handleSelect = useCallback(
     (sessionId: string) => {
-      setDrawerOpen(false);
       onSelectSession(sessionId);
     },
     [onSelectSession]
   );
-
   const activeSessionSummary = useMemo(() => {
     const session = sessions.find((s) => s.id === activeSessionId);
     if (session) {
@@ -74,34 +67,12 @@ export default function Header({ sessions, activeSessionId, onSelectSession, onC
         >
           <Settings className="h-4 w-4" />
         </Button>
-        <Drawer direction="right" open={drawerOpen} onOpenChange={setDrawerOpen}>
-          <DrawerTrigger asChild>
-            <Button variant="ghost" size="icon" className="shrink-0 cursor-pointer" title="Show Agent Sessions Sidebar">
-              <PanelRight className="h-4 w-4" />
-            </Button>
-          </DrawerTrigger>
-          <DrawerContent>
-            <DrawerHeader>
-              <DrawerTitle>Sessions</DrawerTitle>
-              <DrawerDescription>Manage your agent sessions.</DrawerDescription>
-            </DrawerHeader>
-            <div className="no-scrollbar overflow-y-auto">
-              <SessionDropdown
-                sessions={sessions}
-                activeSessionId={activeSessionId}
-                onSelect={handleSelect}
-                onClose={handleCloseDrawer}
-              />
-            </div>
-            <DrawerFooter>
-              <DrawerClose asChild>
-                <Button onClick={onCreateNewSession} variant="outline" className="cursor-pointer">
-                  New Session
-                </Button>
-              </DrawerClose>
-            </DrawerFooter>
-          </DrawerContent>
-        </Drawer>
+        <SessionList
+          sessions={sessions}
+          activeSessionId={activeSessionId}
+          onSelect={handleSelect}
+          onCreateNewSession={onCreateNewSession}
+        />
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import type { SkillInfo } from "@/webview/types";
 import { InputGroupButton } from "@/webview/components/ui/input-group";
 import {
@@ -51,6 +51,7 @@ export default function SkillsPanel({ availableSkills, selectedSkills, onToggle 
                     onSelect={() => onToggle(skill)}
                     title={skill.path}
                   >
+                    <GraduationCap className="h-3 w-3 text-muted-foreground" />
                     <span className="flex-1 truncate font-medium">{skill.name}</span>
                     <span className="text-xs text-muted-foreground truncate max-w-50">{skill.path}</span>
                   </CommandItem>

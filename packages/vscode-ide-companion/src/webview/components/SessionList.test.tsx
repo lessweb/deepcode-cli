@@ -14,20 +14,34 @@ import SessionList from "./SessionList";
 import type { SessionSummary } from "@/webview/types";
 
 // Mock dependencies
-vi.mock("@/webview/components/ui/input", () => ({
-  Input: vi.fn(({ value, onChange, ...props }) => (
+vi.mock("@/webview/components/ui/input-group", () => ({
+  InputGroup: vi.fn(({ children }) => <div data-testid="input-group">{children}</div>),
+  InputGroupAddon: vi.fn(({ children }) => <div data-testid="input-group-addon">{children}</div>),
+  InputGroupInput: vi.fn(({ value, onChange, ...props }) => (
     <input data-testid="search-input" value={value} onChange={onChange} {...props} />
   )),
 }));
 
-vi.mock("@/webview/components/ui/scroll-area", () => ({
-  ScrollArea: vi.fn(({ children }) => (
-    <div data-testid="scroll-area">
+vi.mock("@/webview/components/ui/drawer", () => ({
+  Drawer: vi.fn(({ children, open, onOpenChange }) => (
+    <div data-testid="drawer" data-open={open}>
       {children}
-      <div data-testid="scroll-bar" />
     </div>
   )),
-  ScrollBar: vi.fn(() => <div data-testid="scroll-bar" />),
+  DrawerTrigger: vi.fn(({ children }) => <div data-testid="drawer-trigger">{children}</div>),
+  DrawerContent: vi.fn(({ children }) => <div data-testid="drawer-content">{children}</div>),
+  DrawerHeader: vi.fn(({ children }) => <div data-testid="drawer-header">{children}</div>),
+  DrawerTitle: vi.fn(({ children }) => <div data-testid="drawer-title">{children}</div>),
+  DrawerFooter: vi.fn(({ children }) => <div data-testid="drawer-footer">{children}</div>),
+  DrawerClose: vi.fn(({ children }) => <div data-testid="drawer-close">{children}</div>),
+}));
+
+vi.mock("@/webview/components/ui/button", () => ({
+  Button: vi.fn(({ children, onClick }) => (
+    <button data-testid="button" onClick={onClick}>
+      {children}
+    </button>
+  )),
 }));
 
 vi.mock("@/webview/components/ui/empty", () => ({
@@ -39,9 +53,13 @@ vi.mock("@/webview/components/ui/empty", () => ({
 }));
 
 vi.mock("@/webview/components/ui/item", () => ({
-  Item: vi.fn(({ children }) => <div data-testid="item">{children}</div>),
+  Item: vi.fn(({ children, onClick }) => (
+    <div data-testid="item" onClick={onClick}>
+      {children}
+    </div>
+  )),
   ItemContent: vi.fn(({ children }) => <div>{children}</div>),
-  ItemGroup: vi.fn(({ children }) => <div>{children}</div>),
+  ItemGroup: vi.fn(({ children }) => <div data-testid="item-group">{children}</div>),
   ItemActions: vi.fn(({ children }) => <div>{children}</div>),
 }));
 
@@ -73,7 +91,7 @@ describe("SessionList", () => {
     sessions: mockSessions,
     activeSessionId: null,
     onSelect: vi.fn(),
-    onClose: vi.fn(),
+    onCreateNewSession: vi.fn(),
   };
 
   beforeEach(() => {
@@ -85,9 +103,9 @@ describe("SessionList", () => {
     expect(screen.getByTestId("search-input")).toBeInTheDocument();
   });
 
-  it("renders scroll area", () => {
+  it("renders drawer", () => {
     render(<SessionList {...defaultProps} />);
-    expect(screen.getByTestId("scroll-area")).toBeInTheDocument();
+    expect(screen.getByTestId("drawer")).toBeInTheDocument();
   });
 
   it("shows empty state when no sessions", () => {

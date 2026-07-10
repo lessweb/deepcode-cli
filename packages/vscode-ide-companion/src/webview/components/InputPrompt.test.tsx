@@ -265,13 +265,13 @@ describe("InputPrompt", () => {
     it("restores text when editingMessage changes", () => {
       const { rerender } = render(<InputPrompt {...defaultProps} />);
 
-      expect(screen.getByRole("textbox").value).toBe("");
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("");
 
       rerender(
         <InputPrompt {...defaultProps} editingMessage={{ text: "Editing this message", images: [], skills: [] }} />
       );
 
-      expect(screen.getByRole("textbox").value).toBe("Editing this message");
+      expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe("Editing this message");
     });
 
     it("calls onClearEditingMessage when sending while editing", async () => {
