@@ -3,7 +3,7 @@ import SkillsPanel from "@/webview/components/SkillsPanel";
 import SkillsTags from "@/webview/components/SkillsTags";
 import ContextMeter from "@/webview/components/ContextMeter";
 import { PromptAttachments, usePromptAttachments } from "@/webview/components/PromptAttachments";
-import type { ActiveEditor, SkillInfo, TokenTelemetry } from "@/webview/types";
+import type { ActiveEditor, EditingMessage, SkillInfo, TokenTelemetry } from "@/webview/types";
 import { FileCodeIcon, Send, Square } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/webview/components/ui/input-group";
 import { Separator } from "@/webview/components/ui/separator";
@@ -20,6 +20,7 @@ export interface InputPromptProps {
   activeSessionStatus: string | null;
   tokenTelemetry?: TokenTelemetry;
   activeEditor: ActiveEditor | null;
+  editingMessage: EditingMessage | null;
   onSendPrompt: (
     prompt: string,
     skills?: SkillInfo[],
@@ -28,6 +29,7 @@ export interface InputPromptProps {
   ) => void;
   onInterrupt: () => void;
   onSelectSkills: (skills: SkillInfo[]) => void;
+  onClearEditingMessage: () => void;
 }
 
 export default function InputPrompt({
@@ -39,16 +41,19 @@ export default function InputPrompt({
   activeSessionStatus,
   tokenTelemetry,
   activeEditor,
+  editingMessage,
   onSendPrompt,
   onInterrupt,
   onSelectSkills,
+  onClearEditingMessage,
 }: InputPromptProps) {
   const [value, setValue] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [historyIdx, setHistoryIdx] = useState(-1);
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls } = usePromptAttachments();
+  const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls, loadImages } =
+    usePromptAttachments();
   console.log("askPermissions:", askPermissions);
   console.log("activeSessionStatus:", activeSessionStatus);
 
@@ -69,6 +74,19 @@ export default function InputPrompt({
     autoResize();
   }, [value, autoResize]);
 
+  // Restore editing state when editingMessage changes
+  useEffect(() => {
+    if (editingMessage) {
+      setValue(editingMessage.text);
+      if (editingMessage.images && editingMessage.images.length > 0) {
+        loadImages(editingMessage.images);
+      }
+      if (editingMessage.skills && editingMessage.skills.length > 0) {
+        onSelectSkills(editingMessage.skills);
+      }
+    }
+  }, [editingMessage, loadImages, onSelectSkills]);
+
   const handleSend = useCallback(() => {
     const trimmed = value.trim();
     const images = getImageUrls();
@@ -82,6 +100,7 @@ export default function InputPrompt({
     onSendPrompt(trimmed, selectedSkills, images, reply || undefined);
     onSelectSkills([]);
     clearAttachments();
+    onClearEditingMessage();
   }, [
     value,
     loading,
@@ -91,6 +110,7 @@ export default function InputPrompt({
     onSelectSkills,
     getImageUrls,
     clearAttachments,
+    onClearEditingMessage,
   ]);
 
   const handleKeyDown = useCallback(

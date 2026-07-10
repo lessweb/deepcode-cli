@@ -78,12 +78,34 @@ export function usePromptAttachments() {
     return attachments.map((a) => a.dataUrl);
   }, [attachments]);
 
+  // Restore image attachments from a list of data URLs (used when editing a message).
+  const loadImages = React.useCallback((imageUrls: string[]) => {
+    if (!imageUrls || imageUrls.length === 0) return;
+    setAttachments((prev) => {
+      const existing = new Set(prev.map((a) => a.dataUrl));
+      const restored = imageUrls
+        .filter((url) => !existing.has(url))
+        .map((url) => {
+          nextIdRef.current += 1;
+          return {
+            id: nextIdRef.current,
+            name: ATTACHMENT_LABEL,
+            mimeType: url.startsWith("data:") ? url.slice(5, url.indexOf(";")) || "image/png" : "image/png",
+            dataUrl: url,
+            label: ATTACHMENT_LABEL,
+          };
+        });
+      return [...prev, ...restored];
+    });
+  }, []);
+
   return {
     attachments,
     handlePaste,
     removeAttachment,
     clearAttachments,
     getImageUrls,
+    loadImages,
   };
 }
 

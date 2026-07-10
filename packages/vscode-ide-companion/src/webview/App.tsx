@@ -32,6 +32,7 @@ export default function App() {
         loading={state.loading}
         llmStreamProgress={state.llmStreamProgress}
         processes={state.processes}
+        onEditMessage={actions.editMessage}
       />
       {state.loading && (
         <ThinkingLiveBubble
@@ -49,9 +50,11 @@ export default function App() {
         activeSessionStatus={state.activeSessionStatus}
         tokenTelemetry={state.tokenTelemetry}
         activeEditor={state.activeEditor}
+        editingMessage={state.editingMessage}
         onSendPrompt={actions.sendPrompt}
         onInterrupt={actions.interrupt}
         onSelectSkills={actions.setSelectedSkills}
+        onClearEditingMessage={() => actions.editMessage(null)}
       />
     </div>
   );

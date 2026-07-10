@@ -10,6 +10,7 @@ import type {
   TokenTelemetry,
   SkillInfo,
   ActiveEditor,
+  EditingMessage,
 } from "@/webview/types";
 
 // ============================================================================
@@ -31,6 +32,7 @@ interface ChatContextValue {
     selectSession: (sessionId: string) => Promise<void>;
     denyPermission: (sessionId: string) => Promise<void>;
     setSelectedSkills: (skills: SkillInfo[]) => void;
+    editMessage: (editingMessage: EditingMessage | null) => void;
   };
 }
 
@@ -56,6 +58,7 @@ const initialState: AppState = {
   permissionPromptState: null,
   pendingPermissionReply: null,
   activeEditor: null,
+  editingMessage: null,
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -143,6 +146,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, messages: [], lastMessageRole: null };
     case "SET_ACTIVE_EDITOR":
       return { ...state, activeEditor: action.editor };
+    case "SET_EDITING_MESSAGE":
+      return { ...state, editingMessage: action.editingMessage };
     default:
       return state;
   }
@@ -325,6 +330,10 @@ export function ChatProvider({ children }: ChatProviderProps) {
     dispatch({ type: "SET_SELECTED_SKILLS", skills });
   }, []);
 
+  const editMessage = useCallback((editingMessage: EditingMessage | null) => {
+    dispatch({ type: "SET_EDITING_MESSAGE", editingMessage });
+  }, []);
+
   const contextValue: ChatContextValue = {
     state,
     dispatch,
@@ -335,6 +344,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
       selectSession,
       denyPermission,
       setSelectedSkills,
+      editMessage,
     },
   };
 

@@ -9,6 +9,14 @@ export interface SessionMessage {
   visible?: boolean;
 }
 
+// --- Editing state ---
+
+export interface EditingMessage {
+  text: string;
+  images: string[];
+  skills: SkillInfo[];
+}
+
 export interface AskPermissionRequest {
   toolCallId: string;
   name: string;
@@ -89,6 +97,7 @@ export interface AppState {
     alwaysAllows: string[];
   } | null;
   activeEditor: ActiveEditor | null;
+  editingMessage: EditingMessage | null;
 }
 
 // --- App actions ---
@@ -123,4 +132,5 @@ export type AppAction =
   | { type: "SET_PERMISSION_PROMPT_STATE"; state: PermissionPromptState | null }
   | { type: "SET_PENDING_PERMISSION_REPLY"; reply: AppState["pendingPermissionReply"] }
   | { type: "CLEAR_MESSAGES" }
-  | { type: "SET_ACTIVE_EDITOR"; editor: ActiveEditor | null };
+  | { type: "SET_ACTIVE_EDITOR"; editor: ActiveEditor | null }
+  | { type: "SET_EDITING_MESSAGE"; editingMessage: EditingMessage | null };

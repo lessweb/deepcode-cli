@@ -48,7 +48,8 @@ describe("PromptAttachments", () => {
 
 describe("usePromptAttachments", () => {
   function TestComponent() {
-    const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls } = usePromptAttachments();
+    const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls, loadImages } =
+      usePromptAttachments();
 
     return (
       <div>
@@ -60,6 +61,9 @@ describe("usePromptAttachments", () => {
         </button>
         <button data-testid="clear" onClick={clearAttachments}>
           Clear
+        </button>
+        <button data-testid="loadImages" onClick={() => loadImages(["data:image/png;base64,xyz"])}>
+          Load Images
         </button>
       </div>
     );
@@ -107,5 +111,49 @@ describe("usePromptAttachments", () => {
 
     fireEvent.click(screen.getByTestId("clear"));
     expect(screen.getByTestId("count").textContent).toBe("0");
+  });
+
+  it("loads images from URLs (for editing)", async () => {
+    render(<TestComponent />);
+
+    expect(screen.getByTestId("count").textContent).toBe("0");
+
+    fireEvent.click(screen.getByTestId("loadImages"));
+
+    expect(screen.getByTestId("count").textContent).toBe("1");
+    expect(screen.getByTestId("urls").textContent).toBe("data:image/png;base64,xyz");
+  });
+
+  it("does not duplicate existing images when loading", async () => {
+    render(<TestComponent />);
+
+    // Load the same image twice
+    fireEvent.click(screen.getByTestId("loadImages"));
+    fireEvent.click(screen.getByTestId("loadImages"));
+
+    expect(screen.getByTestId("count").textContent).toBe("1");
+  });
+
+  it("loads multiple images from URLs", async () => {
+    function MultiLoadTest() {
+      const { attachments, loadImages } = usePromptAttachments();
+      return (
+        <div>
+          <div data-testid="count">{attachments.length}</div>
+          <button
+            data-testid="loadMultiple"
+            onClick={() => loadImages(["data:image/png;base64,img1", "data:image/jpeg;base64,img2"])}
+          >
+            Load Multiple
+          </button>
+        </div>
+      );
+    }
+
+    render(<MultiLoadTest />);
+
+    fireEvent.click(screen.getByTestId("loadMultiple"));
+
+    expect(screen.getByTestId("count").textContent).toBe("2");
   });
 });

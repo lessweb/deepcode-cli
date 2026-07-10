@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import InputPrompt, { type InputPromptProps } from "./InputPrompt";
 import type { SkillInfo } from "@/webview/types";
@@ -44,8 +44,8 @@ vi.mock("@/webview/components/ui/button", () => ({
 vi.mock("@/webview/components/ui/input-group", () => ({
   InputGroup: vi.fn(({ children }) => <div data-testid="input-group">{children}</div>),
   InputGroupAddon: vi.fn(({ children }) => <div data-testid="input-group-addon">{children}</div>),
-  InputGroupButton: vi.fn(({ children, onClick }) => (
-    <button data-testid="input-group-button" onClick={onClick}>
+  InputGroupButton: vi.fn(({ children, onClick, title, disabled }) => (
+    <button data-testid="input-group-button" onClick={onClick} title={title} disabled={disabled}>
       {children}
     </button>
   )),
@@ -127,6 +127,7 @@ const mockOnSendPrompt =
   >();
 const mockOnInterrupt = vi.fn<() => void>();
 const mockOnSelectSkills = vi.fn<(skills: SkillInfo[]) => void>();
+const mockOnClearEditingMessage = vi.fn<() => void>();
 
 const defaultProps: InputPromptProps = {
   loading: false,
@@ -144,9 +145,11 @@ const defaultProps: InputPromptProps = {
     usage: null,
   },
   activeEditor: null,
+  editingMessage: null,
   onSendPrompt: mockOnSendPrompt,
   onInterrupt: mockOnInterrupt,
   onSelectSkills: mockOnSelectSkills,
+  onClearEditingMessage: mockOnClearEditingMessage,
 };
 
 describe("InputPrompt", () => {
@@ -255,6 +258,48 @@ describe("InputPrompt", () => {
         />
       );
       expect(screen.getByTestId("hover-card")).toBeInTheDocument();
+    });
+  });
+
+  describe("Editing message", () => {
+    it("restores text when editingMessage changes", () => {
+      const { rerender } = render(<InputPrompt {...defaultProps} />);
+
+      expect(screen.getByRole("textbox").value).toBe("");
+
+      rerender(
+        <InputPrompt {...defaultProps} editingMessage={{ text: "Editing this message", images: [], skills: [] }} />
+      );
+
+      expect(screen.getByRole("textbox").value).toBe("Editing this message");
+    });
+
+    it("calls onClearEditingMessage when sending while editing", async () => {
+      const { container } = render(
+        <InputPrompt {...defaultProps} editingMessage={{ text: "Editing this message", images: [], skills: [] }} />
+      );
+
+      // Wait for the editing message to be processed
+      await waitFor(() => {
+        const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+        expect(textarea.value).toBe("Editing this message");
+      });
+
+      // Click send button
+      const sendButton = container.querySelector("button[title='Send']");
+      if (sendButton) {
+        fireEvent.click(sendButton);
+      }
+
+      expect(mockOnSendPrompt).toHaveBeenCalledWith("Editing this message", [], [], undefined);
+      expect(mockOnClearEditingMessage).toHaveBeenCalled();
+    });
+
+    it("calls onSelectSkills when editingMessage has skills", () => {
+      const skills = [{ name: "TestSkill" }];
+      render(<InputPrompt {...defaultProps} editingMessage={{ text: "Test message", images: [], skills }} />);
+
+      expect(mockOnSelectSkills).toHaveBeenCalledWith(skills);
     });
   });
 });

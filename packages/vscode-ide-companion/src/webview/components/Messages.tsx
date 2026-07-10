@@ -6,15 +6,17 @@ import ThinkingBubble from "@/webview/components/bubbles/ThinkingBubble";
 import ToolBubble from "@/webview/components/bubbles/ToolBubble";
 import SystemBubble from "@/webview/components/bubbles/SystemBubble";
 import type { SessionMessage } from "@/webview/types";
+import type { EditingMessage } from "@/webview/types";
 
 interface MessagesProps {
   messages: SessionMessage[];
   loading: boolean;
   llmStreamProgress: unknown;
   processes: Record<string, { startTime: string; command: string }> | null;
+  onEditMessage?: (editing: EditingMessage) => void;
 }
 
-export default function Messages({ messages, loading, llmStreamProgress, processes }: MessagesProps) {
+export default function Messages({ messages, loading, llmStreamProgress, processes, onEditMessage }: MessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   console.log("llmStreamProgress: ", llmStreamProgress);
@@ -34,7 +36,25 @@ export default function Messages({ messages, loading, llmStreamProgress, process
           console.log(`Rendering message ${index}:`, JSON.stringify(msg));
           switch (msg.role) {
             case "user":
-              return <UserBubble key={`msg-${index}`} content={msg.content} meta={msg.meta} />;
+              return (
+                <UserBubble
+                  key={`msg-${index}`}
+                  content={msg.content}
+                  meta={msg.meta}
+                  onEdit={
+                    onEditMessage
+                      ? () => {
+                          const meta = msg.meta as { userPrompt?: { imageUrls?: string[] } } | undefined;
+                          onEditMessage({
+                            text: msg.content,
+                            images: meta?.userPrompt?.imageUrls ?? [],
+                            skills: [],
+                          });
+                        }
+                      : undefined
+                  }
+                />
+              );
             case "assistant": {
               const meta = msg.meta as { asThinking?: boolean } | undefined;
               if (meta?.asThinking) {
