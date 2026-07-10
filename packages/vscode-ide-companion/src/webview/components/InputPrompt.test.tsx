@@ -1,5 +1,5 @@
 /**
- * Unit tests for Composer component
+ * Unit tests for InputPrompt component
  *
  * Tests cover:
  * - handleSend functionality
@@ -11,7 +11,7 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import Composer, { type ComposerProps } from "./Composer";
+import InputPrompt, { type InputPromptProps } from "./InputPrompt";
 import type { SkillInfo } from "@/webview/types";
 
 // Mock dependencies
@@ -83,6 +83,19 @@ vi.mock("@/webview/components/ui/popover", () => ({
   PopoverContent: vi.fn(({ children }) => <div data-testid="popover-content">{children}</div>),
 }));
 
+vi.mock("@/webview/components/PromptAttachments", () => ({
+  PromptAttachments: vi.fn(({ attachments }) => (
+    <div data-testid="prompt-attachments">{attachments.length} attachments</div>
+  )),
+  usePromptAttachments: vi.fn(() => ({
+    attachments: [],
+    handlePaste: vi.fn(),
+    removeAttachment: vi.fn(),
+    clearAttachments: vi.fn(),
+    getImageUrls: vi.fn(() => []),
+  })),
+}));
+
 vi.mock("@/webview/lib/utils", () => ({
   cn: vi.fn((...args: unknown[]) => args.filter(Boolean).join(" ")),
 }));
@@ -115,7 +128,7 @@ const mockOnSendPrompt =
 const mockOnInterrupt = vi.fn<() => void>();
 const mockOnSelectSkills = vi.fn<(skills: SkillInfo[]) => void>();
 
-const defaultProps: ComposerProps = {
+const defaultProps: InputPromptProps = {
   loading: false,
   selectedSkills: [] as SkillInfo[],
   availableSkills: [] as SkillInfo[],
@@ -136,14 +149,14 @@ const defaultProps: ComposerProps = {
   onSelectSkills: mockOnSelectSkills,
 };
 
-describe("Composer", () => {
+describe("InputPrompt", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   describe("handleSend", () => {
     it("calls onSendPrompt when sending a message", async () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       const textarea = screen.getByRole("textbox");
       fireEvent.change(textarea, { target: { value: "Hello" } });
       fireEvent.keyDown(textarea, { key: "Enter" });
@@ -151,14 +164,14 @@ describe("Composer", () => {
     });
 
     it("does not send empty message", () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       const textarea = screen.getByRole("textbox");
       fireEvent.keyDown(textarea, { key: "Enter" });
       expect(mockOnSendPrompt).not.toHaveBeenCalled();
     });
 
     it("trims whitespace before sending", async () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       const textarea = screen.getByRole("textbox");
       fireEvent.change(textarea, { target: { value: "  Hello   " } });
       fireEvent.keyDown(textarea, { key: "Enter" });
@@ -166,7 +179,7 @@ describe("Composer", () => {
     });
 
     it("does not send while loading", () => {
-      render(<Composer {...defaultProps} loading={true} />);
+      render(<InputPrompt {...defaultProps} loading={true} />);
       const textarea = screen.getByRole("textbox");
       fireEvent.change(textarea, { target: { value: "Hello" } });
       fireEvent.keyDown(textarea, { key: "Enter" });
@@ -176,7 +189,7 @@ describe("Composer", () => {
 
   describe("Keyboard navigation", () => {
     it("does not send on Shift+Enter", () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       const textarea = screen.getByRole("textbox");
       fireEvent.change(textarea, { target: { value: "Hello" } });
       fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true });
@@ -184,7 +197,7 @@ describe("Composer", () => {
     });
 
     it("does not send on other keys", () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       const textarea = screen.getByRole("textbox");
       fireEvent.change(textarea, { target: { value: "Hello" } });
       fireEvent.keyDown(textarea, { key: "A" });
@@ -194,12 +207,12 @@ describe("Composer", () => {
 
   describe("Loading state", () => {
     it("renders interrupt button when loading", () => {
-      render(<Composer {...defaultProps} loading={true} />);
+      render(<InputPrompt {...defaultProps} loading={true} />);
       expect(screen.getByTestId("input-group-button")).toBeInTheDocument();
     });
 
     it("calls onInterrupt when interrupt button clicked", () => {
-      render(<Composer {...defaultProps} loading={true} />);
+      render(<InputPrompt {...defaultProps} loading={true} />);
       const button = screen.getByTestId("input-group-button");
       fireEvent.click(button);
       expect(mockOnInterrupt).toHaveBeenCalled();
@@ -208,13 +221,13 @@ describe("Composer", () => {
 
   describe("Skills", () => {
     it("renders skills panel", () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       expect(screen.getByTestId("skills-panel")).toBeInTheDocument();
     });
 
     it("passes selectedSkills to onSelectSkills", () => {
       const skills = [{ id: "skill1", name: "TestSkill" }];
-      render(<Composer {...defaultProps} availableSkills={skills} />);
+      render(<InputPrompt {...defaultProps} availableSkills={skills} />);
       // Skills panel should be rendered with skills
       expect(screen.getByTestId("skills-panel")).toBeInTheDocument();
     });
@@ -222,21 +235,24 @@ describe("Composer", () => {
 
   describe("Context meter", () => {
     it("renders context meter", () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       expect(screen.getByTestId("context-meter")).toBeInTheDocument();
     });
   });
 
   describe("Hover card", () => {
     it("renders hover card when activeEditor is null", () => {
-      render(<Composer {...defaultProps} />);
+      render(<InputPrompt {...defaultProps} />);
       // HoverCard may or may not be rendered based on activeEditor
       expect(screen.getByTestId("field-group")).toBeInTheDocument();
     });
 
     it("renders hover card when activeEditor is provided", () => {
       render(
-        <Composer {...defaultProps} activeEditor={{ fileName: "test.ts", languageId: "typescript", lineCount: 100 }} />
+        <InputPrompt
+          {...defaultProps}
+          activeEditor={{ fileName: "test.ts", languageId: "typescript", lineCount: 100 }}
+        />
       );
       expect(screen.getByTestId("hover-card")).toBeInTheDocument();
     });
