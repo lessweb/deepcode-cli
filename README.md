@@ -187,6 +187,12 @@ npm run build:vscode
 
 - 在 GitHub Issues 上报告错误或请求功能 (https://github.com/lessweb/deepcode-cli/issues)
 
+## 社区工具 / Community Tools
+
+以下是与 Deep Code 配套使用的社区项目，由各自的作者维护：
+
+- [deep-switch](https://github.com/skyedolyn-sys/deep-switch) — macOS 菜单栏 / Windows·Linux 托盘小工具，一键切换 Deep Code 当前使用的 AI provider，无需手动编辑 `~/.deepcode/settings.json`，下次调用 deepcode 即生效；可同时写入 opencode 配置。A menu-bar / tray utility to swap Deep Code's AI provider in one click — no JSON editing, no restart.
+
 ## 协议
 
 - MIT
