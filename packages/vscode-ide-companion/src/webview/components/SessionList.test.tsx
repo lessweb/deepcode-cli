@@ -63,6 +63,12 @@ vi.mock("@/webview/components/ui/item", () => ({
   ItemActions: vi.fn(({ children }) => <div>{children}</div>),
 }));
 
+vi.mock("@/webview/components/ui/tooltip", () => ({
+  Tooltip: vi.fn(({ children }) => <div>{children}</div>),
+  TooltipTrigger: vi.fn(({ children }) => <div>{children}</div>),
+  TooltipContent: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
 describe("SessionList", () => {
   const today = new Date();
   const yesterday = new Date(today);
