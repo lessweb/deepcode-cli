@@ -106,12 +106,14 @@ vi.mock("lucide-react", () => ({
   StopCircle: vi.fn(() => <span data-testid="stop-icon" />),
   ChevronDown: vi.fn(() => <span data-testid="chevron" />),
   Send: vi.fn(() => <span data-testid="send-icon" />),
+  Reply: vi.fn(() => <span data-testid="reply-icon" />),
   FileCodeIcon: vi.fn(() => <span data-testid="file-icon" />),
   GraduationCap: vi.fn(() => <span data-testid="graduation-icon" />),
   X: vi.fn(() => <span data-testid="x-icon" />),
   AlertCircle: vi.fn(() => <span data-testid="alert-icon" />),
   CheckCircle: vi.fn(() => <span data-testid="check-icon" />),
   Loader2: vi.fn(() => <span data-testid="loader-icon" />),
+  Loader2Icon: vi.fn(() => <span data-testid="loader-icon" />),
   Settings: vi.fn(() => <span data-testid="settings-icon" />),
   Info: vi.fn(() => <span data-testid="info-icon" />),
 }));
@@ -146,6 +148,7 @@ const defaultProps: InputPromptProps = {
   },
   activeEditor: null,
   editingMessage: null,
+  messages: [],
   onSendPrompt: mockOnSendPrompt,
   onInterrupt: mockOnInterrupt,
   onSelectSkills: mockOnSelectSkills,
@@ -205,6 +208,274 @@ describe("InputPrompt", () => {
       fireEvent.change(textarea, { target: { value: "Hello" } });
       fireEvent.keyDown(textarea, { key: "A" });
       expect(mockOnSendPrompt).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("History navigation", () => {
+    it("adds sent messages to history", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox");
+
+      fireEvent.change(textarea, { target: { value: "First message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(mockOnSendPrompt).toHaveBeenCalledWith("First message", [], [], undefined);
+
+      fireEvent.change(textarea, { target: { value: "Second message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      expect(mockOnSendPrompt).toHaveBeenCalledWith("Second message", [], [], undefined);
+    });
+
+    it("navigates to previous history with ArrowUp when at start", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add two messages to history
+      fireEvent.change(textarea, { target: { value: "First message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.change(textarea, { target: { value: "Second message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Clear and navigate with ArrowUp
+      fireEvent.change(textarea, { target: { value: "" } });
+      // Simulate cursor at start (selectionStart === 0)
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+      // Should show "Second message" (most recent)
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Second message");
+      });
+    });
+
+    it("navigates through history with multiple ArrowUp presses", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add three messages to history
+      fireEvent.change(textarea, { target: { value: "First" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.change(textarea, { target: { value: "Second" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.change(textarea, { target: { value: "Third" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Navigate with ArrowUp twice
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Third");
+      });
+
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Second");
+      });
+    });
+
+    it("navigates to next history with ArrowDown", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add messages to history
+      fireEvent.change(textarea, { target: { value: "First" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.change(textarea, { target: { value: "Second" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.change(textarea, { target: { value: "Third" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Navigate to history - shows most recent
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Third");
+      });
+
+      // ArrowUp again - goes to older
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Second");
+      });
+
+      // ArrowDown - goes back to newer
+      fireEvent.keyDown(textarea, { key: "ArrowDown" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Third");
+      });
+
+      // ArrowDown again - exits and restores draft (empty)
+      fireEvent.keyDown(textarea, { key: "ArrowDown" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("");
+      });
+    });
+
+    it("restores draft when navigating past the end of history", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add messages to history
+      fireEvent.change(textarea, { target: { value: "First" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+      fireEvent.change(textarea, { target: { value: "Second" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Navigate to history (entering with empty value preserves no draft)
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Second");
+      });
+
+      // Navigate back with ArrowDown (goes forward to end of history)
+      fireEvent.keyDown(textarea, { key: "ArrowDown" });
+      await waitFor(() => {
+        // Reached end of history, restores empty draft
+        expect((textarea as HTMLTextAreaElement).value).toBe("");
+      });
+    });
+
+    it("exits history browsing when typing", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add message to history
+      fireEvent.change(textarea, { target: { value: "History message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Navigate to history
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("History message");
+      });
+
+      // Type something - should exit history browsing
+      fireEvent.change(textarea, { target: { value: "New input" } });
+
+      // Next ArrowUp should start from beginning, not from history position
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("History message");
+      });
+    });
+
+    it("exits history browsing when pressing non-arrow keys", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add message to history
+      fireEvent.change(textarea, { target: { value: "History message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Navigate to history
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("History message");
+      });
+
+      // Press Escape - should exit history browsing but not change value
+      fireEvent.keyDown(textarea, { key: "Escape" });
+      expect((textarea as HTMLTextAreaElement).value).toBe("History message");
+    });
+
+    it("does not navigate history when no history exists", () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+      // Value should remain empty
+      expect((textarea as HTMLTextAreaElement).value).toBe("");
+    });
+
+    it("does not navigate history when caret is not at start/end", async () => {
+      render(<InputPrompt {...defaultProps} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add message to history
+      fireEvent.change(textarea, { target: { value: "History message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Type content with caret in the middle
+      fireEvent.change(textarea, { target: { value: "Hello World" } });
+      // Set cursor to middle (after "Hello")
+      textarea.setSelectionRange(5, 5);
+
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+      // Value should remain unchanged since caret is not at start
+      expect((textarea as HTMLTextAreaElement).value).toBe("Hello World");
+    });
+  });
+
+  describe("Loading history from messages", () => {
+    it("loads user messages from messages prop into history", async () => {
+      const messages = [
+        { role: "user", content: "First message from history" },
+        { role: "assistant", content: "Assistant response" },
+        { role: "user", content: "Second message from history" },
+      ];
+      render(<InputPrompt {...defaultProps} messages={messages} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Navigate to history
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("Second message from history");
+      });
+
+      // Navigate to older message
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("First message from history");
+      });
+    });
+
+    it("clears history when messages is empty", async () => {
+      const { rerender } = render(<InputPrompt {...defaultProps} messages={[]} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Add a message first
+      fireEvent.change(textarea, { target: { value: "New message" } });
+      fireEvent.keyDown(textarea, { key: "Enter" });
+
+      // Rerender with empty messages
+      rerender(<InputPrompt {...defaultProps} messages={[]} />);
+
+      // Try to navigate history - should not work since history is empty
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+      // Value should remain empty
+      expect((textarea as HTMLTextAreaElement).value).toBe("");
+    });
+
+    it("ignores non-user messages when building history", async () => {
+      const messages = [
+        { role: "user", content: "User message" },
+        { role: "assistant", content: "Should be ignored" },
+        { role: "tool", content: "Should also be ignored" },
+        { role: "system", content: "Ignored" },
+      ];
+      render(<InputPrompt {...defaultProps} messages={messages} />);
+      const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+
+      // Navigate to history
+      fireEvent.change(textarea, { target: { value: "" } });
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+
+      await waitFor(() => {
+        expect((textarea as HTMLTextAreaElement).value).toBe("User message");
+      });
+
+      // Second ArrowUp should stay at the same message (already at oldest)
+      fireEvent.keyDown(textarea, { key: "ArrowUp" });
+      expect((textarea as HTMLTextAreaElement).value).toBe("User message");
     });
   });
 

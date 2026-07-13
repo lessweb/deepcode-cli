@@ -51,6 +51,7 @@ export default function App() {
         tokenTelemetry={state.tokenTelemetry}
         activeEditor={state.activeEditor}
         editingMessage={state.editingMessage}
+        messages={state.messages}
         onSendPrompt={actions.sendPrompt}
         onInterrupt={actions.interrupt}
         onSelectSkills={actions.setSelectedSkills}

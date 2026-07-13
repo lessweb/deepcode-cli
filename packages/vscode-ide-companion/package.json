@@ -101,6 +101,7 @@
     "@webview-rpc/host": "^1.0.17",
     "@webview-rpc/react-query": "^1.0.17",
     "cmdk": "^1.1.1",
+    "embla-carousel-react": "^8.6.0",
     "framer-motion": "^12.42.2",
     "highlight.js": "^11.11.1",
     "lucide-react": "^1.21.0",

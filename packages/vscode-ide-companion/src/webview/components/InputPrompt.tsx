@@ -22,6 +22,7 @@ export interface InputPromptProps {
   tokenTelemetry?: TokenTelemetry;
   activeEditor: ActiveEditor | null;
   editingMessage: EditingMessage | null;
+  messages?: { role: string; content: string }[]; // Historical messages for history navigation
   onSendPrompt: (
     prompt: string,
     skills?: SkillInfo[],
@@ -43,6 +44,7 @@ export default function InputPrompt({
   tokenTelemetry,
   activeEditor,
   editingMessage,
+  messages,
   onSendPrompt,
   onInterrupt,
   onSelectSkills,
@@ -57,6 +59,23 @@ export default function InputPrompt({
     usePromptAttachments();
   console.log("askPermissions:", askPermissions);
   console.log("activeSessionStatus:", activeSessionStatus);
+
+  // Rebuild history from messages when messages change (e.g., loading a session)
+  useEffect(() => {
+    if (messages && messages.length > 0) {
+      const userMessages = messages
+        .filter((m) => m.role === "user" && typeof m.content === "string" && m.content.trim())
+        .map((m) => m.content);
+      setHistory(userMessages);
+      setHistoryIdx(-1);
+      setDraftBeforeHistory("");
+    } else {
+      // Clear history when no messages (new session)
+      setHistory([]);
+      setHistoryIdx(-1);
+      setDraftBeforeHistory("");
+    }
+  }, [messages]);
 
   // Auto-resize textarea
   const autoResize = useCallback(() => {
@@ -118,34 +137,54 @@ export default function InputPrompt({
     (e: React.KeyboardEvent) => {
       // if (e.isComposing) return;
 
+      const el = textareaRef.current;
+      const isAtStart = el?.selectionStart === 0 && el?.selectionEnd === 0;
+      const isAtEnd = el?.selectionStart === el?.value.length && el?.selectionEnd === el?.value.length;
+
+      // Exit history browsing mode on any non-ArrowUp/ArrowDown key
+      if (historyIdx !== -1 && e.key !== "ArrowUp" && e.key !== "ArrowDown") {
+        setHistoryIdx(-1);
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         handleSend();
       } else if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        const el = textareaRef.current;
-        if (!el) return;
-        if (el.selectionStart === 0 && el.selectionEnd === 0 && history.length > 0) {
+        // Navigate to previous history item when:
+        // 1. Already in history browsing mode (historyIdx !== -1), OR
+        // 2. Caret is at the start of the input AND there's history
+        if ((historyIdx !== -1 || isAtStart) && history.length > 0) {
           e.preventDefault();
+          let nextIdx = historyIdx;
           if (historyIdx === -1) {
+            // Enter history browsing mode: save current draft
             setDraftBeforeHistory(value);
-            setHistoryIdx(history.length - 1);
-            setValue(history[history.length - 1]);
+            nextIdx = history.length - 1;
           } else if (historyIdx > 0) {
-            setHistoryIdx(historyIdx - 1);
-            setValue(history[historyIdx - 1]);
+            nextIdx = historyIdx - 1;
+          }
+          if (nextIdx !== historyIdx) {
+            setHistoryIdx(nextIdx);
+            setValue(history[nextIdx]);
           }
         }
       } else if (e.key === "ArrowDown" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        const el = textareaRef.current;
-        if (!el) return;
-        if (historyIdx !== -1 && el.selectionStart === el.value.length && el.selectionEnd === el.value.length) {
+        // Navigate to next history item when:
+        // 1. Already in history browsing mode (historyIdx !== -1), OR
+        // 2. Caret is at the end of the input AND there's history
+        if ((historyIdx !== -1 || isAtEnd) && history.length > 0) {
           e.preventDefault();
-          if (historyIdx < history.length - 1) {
-            setHistoryIdx(historyIdx + 1);
-            setValue(history[historyIdx + 1]);
-          } else {
-            setHistoryIdx(-1);
-            setValue(draftBeforeHistory);
+          if (historyIdx !== -1) {
+            if (historyIdx < history.length - 1) {
+              // Navigate to next (older) item
+              const nextIdx = historyIdx + 1;
+              setHistoryIdx(nextIdx);
+              setValue(history[nextIdx]);
+            } else {
+              // Reached the end of history: restore draft and exit browsing mode
+              setHistoryIdx(-1);
+              setValue(draftBeforeHistory);
+            }
           }
         }
       }
