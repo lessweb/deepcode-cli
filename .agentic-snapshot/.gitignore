@@ -1,0 +1,2 @@
+# Snapshot dist files are local backups, not git-tracked
+*.js
