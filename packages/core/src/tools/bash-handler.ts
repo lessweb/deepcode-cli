@@ -65,7 +65,7 @@ export async function handleBashTool(
   }
 
   const execution = await executeShellCommand(shellPath, shellArgs, startCwd, command, context);
-  const result = buildToolCommandResult(
+  const result = buildToolCommandResultWithAnalysis(
     execution.stdout,
     execution.stderr,
     marker,
@@ -85,6 +85,75 @@ export async function handleBashTool(
   }
 
   return formatResult(result, "bash");
+}
+
+/**
+ * Extract structured error pattern information from command output.
+ * Helps the LLM identify the root cause of failures more quickly.
+ */
+function extractErrorAnalysis(output: string, exitCode: number | null): string | undefined {
+  if (!output || exitCode === 0) {
+    return undefined;
+  }
+
+  const lines = output.split(/\r?\n/);
+  const errorLines: string[] = [];
+  let lineCount = 0;
+
+  // Collect error-like lines (common patterns across languages/tools)
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    if (
+      /error|exception|traceback|failed|failure|not found|syntax\s*error|cannot\s+find|undefined|ts\d+|ts error/i.test(
+        lower
+      )
+    ) {
+      errorLines.push(line.trim());
+      lineCount++;
+      if (lineCount >= 10) break; // limit to top 10 error lines
+    }
+  }
+
+  if (errorLines.length === 0) return undefined;
+
+  return errorLines.join("\n");
+}
+
+function buildToolCommandResultWithAnalysis(
+  stdout: string,
+  stderr: string,
+  marker: string,
+  exitCode: number | null,
+  signal: string | null,
+  shellPath: string,
+  startCwd: string,
+  timedOut: boolean = false,
+  timeoutMs?: number,
+  deadlineAtMs?: number
+): ToolCommandResult {
+  const result = buildToolCommandResult(
+    stdout,
+    stderr,
+    marker,
+    exitCode,
+    signal,
+    shellPath,
+    startCwd,
+    timedOut,
+    timeoutMs,
+    deadlineAtMs
+  );
+
+  // Attach error analysis for failed commands
+  if (exitCode !== 0 && signal === null && !timedOut) {
+    const analysis = extractErrorAnalysis(result.output, exitCode);
+    if (analysis) {
+      // Prepend error analysis to the output so the LLM sees it first
+      result.output = `<error_analysis>\n${analysis}\n</error_analysis>\n\n${result.output}`;
+    }
+  }
+
+  return result;
 }
 
 function isTrue(value: unknown): boolean {

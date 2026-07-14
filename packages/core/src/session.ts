@@ -28,16 +28,13 @@ import {
   type ToolExecutionHooks,
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
-import {
-  getDefaultAutoCompactWindow,
-  type McpServerConfig,
-  type PermissionScope,
-  type PermissionSettings,
-} from "./settings";
+import { getDefaultAutoCompactWindow } from "./settings";
+import type { HooksConfig, McpServerConfig, PermissionScope, PermissionSettings } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
 import { killProcessTree } from "./common/process-tree";
+import { fireHook } from "./common/hooks";
 import { GitFileHistory, type FileHistoryCheckpointResult } from "./common/file-history";
 import { clearSessionState, getSnippet, rebuildSessionStateFromHistory } from "./common/state";
 import {
@@ -312,6 +309,7 @@ export type SessionManagerOptions = {
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
+    hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
@@ -342,6 +340,7 @@ export class SessionManager {
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
+    hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
@@ -1174,6 +1173,13 @@ ${agentInstructions}
 
     this.appendPlanModeTransitionMessages(sessionId, false, Boolean(userPrompt.planMode));
 
+    // Inject hierarchical project rules (.deepcode/rules/)
+    const projectRules = this.loadProjectRules();
+    if (projectRules) {
+      const rulesMessage = this.buildSystemMessage(sessionId, projectRules);
+      this.appendSessionMessage(sessionId, rulesMessage);
+    }
+
     this.recordUserPromptCheckpoint(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
@@ -1330,6 +1336,9 @@ ${agentInstructions}
     try {
       const maxIterations = 80000; // about 1K RMB cost
       let toolCalls: unknown[] | null = null;
+      // Track error fix state across iterations
+      const errorFixCounts = new Map<string, number>();
+      let lastToolExecutionHadFailures = false;
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         if (this.isInterrupted(sessionId)) {
@@ -1462,10 +1471,33 @@ ${agentInstructions}
             messagePermissions: permissionPlan?.permissions,
           });
           waitingForUser = toolAppendResult.waitingForUser;
+
+          // Auto error fix: check if any tool executions failed
+          lastToolExecutionHadFailures = this.hasRecentToolExecutionFailure(this.listSessionMessages(sessionId));
+          if (lastToolExecutionHadFailures) {
+            // Track retry count across iterations
+            const errorKey = `error_at_iter_${iteration}`;
+            errorFixCounts.set(errorKey, (errorFixCounts.get(errorKey) ?? 0) + 1);
+          }
         }
 
         if (this.isInterrupted(sessionId)) {
           return;
+        }
+
+        // After LLM response and tool execution: if there were failures and the LLM
+        // responds WITHOUT tool calls (giving up), inject a fix reminder
+        if (lastToolExecutionHadFailures && !toolCalls) {
+          const failedToolMessages = this.getFailedToolMessages(sessionId);
+          if (failedToolMessages.length > 0 && errorFixCounts.size <= 3) {
+            const fixReminder = this.buildSystemMessage(
+              sessionId,
+              `[Auto Error Fix] The previous command failed. Do NOT move on. Analyze the error above, fix the code, then re-run the command to verify. If you've already tried multiple approaches, explain the issue to the user.`
+            );
+            this.appendSessionMessage(sessionId, fixReminder);
+            lastToolExecutionHadFailures = false;
+            continue; // Retry: let the LLM see the fix reminder and generate a fix
+          }
         }
 
         this.updateSessionEntry(sessionId, (entry) => ({
@@ -1512,6 +1544,9 @@ ${agentInstructions}
     } catch (error) {
       const errMessage = describeLlmError(error);
       const aborted = this.isAbortLikeError(error) || sessionController.signal.aborted;
+      if (!aborted) {
+        fireHook(this.getResolvedSettings().hooks, "onError", { error: errMessage });
+      }
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
         status: aborted ? "interrupted" : "failed",
@@ -2204,6 +2239,65 @@ ${agentInstructions}
     return this.readNonEmptyFile(path.join(os.homedir(), ".deepcode", "AGENTS.md"));
   }
 
+  /**
+   * Load hierarchical rules from .deepcode/rules/ directory.
+   * Each .md file becomes a named rule section injected into system context.
+   * Supports subdirectory-based scoping (e.g., rules/api/*.md, rules/db/*.md).
+   */
+  private loadProjectRules(): string | null {
+    const rulesDir = path.join(this.projectRoot, ".deepcode", "rules");
+    if (!fs.existsSync(rulesDir)) {
+      return null;
+    }
+
+    const sections: string[] = [];
+
+    const collectRules = (dir: string, scope: string): void => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      // Sort: files first, then directories, alphabetical
+      entries.sort((a, b) => {
+        if (a.isDirectory() !== b.isDirectory()) {
+          return a.isDirectory() ? 1 : -1;
+        }
+        return a.name.localeCompare(b.name);
+      });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          collectRules(fullPath, path.join(scope, entry.name));
+          continue;
+        }
+        if (!entry.name.endsWith(".md")) {
+          continue;
+        }
+
+        const content = this.readNonEmptyFile(fullPath);
+        if (!content) {
+          continue;
+        }
+
+        const ruleName = entry.name.replace(/\.md$/, "");
+        const ruleHeader = scope ? `${scope}/${ruleName}` : ruleName;
+        sections.push(`### Rule: ${ruleHeader}\n\n${content}`);
+      }
+    };
+
+    collectRules(rulesDir, "");
+
+    if (sections.length === 0) {
+      return null;
+    }
+
+    return `# Project Rules\n\n${sections.join("\n\n")}`;
+  }
+
   private buildSystemMessage(
     sessionId: string,
     content: string,
@@ -2339,14 +2433,24 @@ ${agentInstructions}
       messagePermissions?: MessageToolPermission[];
     } = {}
   ): Promise<{ waitingForUser: boolean }> {
+    const settings = this.getResolvedSettings();
     const hooks: ToolExecutionHooks = {
-      onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
+      onProcessStart: (pid, command) => {
+        this.addSessionProcess(sessionId, pid, command);
+        fireHook(settings.hooks, "beforeCommand", { command });
+      },
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
       onBackgroundProcessComplete: (completion) => this.addBackgroundProcessCompletionMessage(sessionId, completion),
-      onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
-      onAfterFileMutation: (filePath) => this.recordFileMutationCheckpoint(sessionId, filePath),
+      onBeforeFileMutation: (filePath) => {
+        this.prepareFileMutationCheckpoint(sessionId, filePath);
+        fireHook(settings.hooks, "beforeWrite", { filePath });
+      },
+      onAfterFileMutation: (filePath) => {
+        this.recordFileMutationCheckpoint(sessionId, filePath);
+        fireHook(settings.hooks, "afterWrite", { filePath });
+      },
       shouldStop: () => this.isInterrupted(sessionId),
     };
     const parsedToolCalls = toolCalls
@@ -2447,6 +2551,60 @@ ${agentInstructions}
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
     this.appendSkillMessages(sessionId, userPrompt.skills);
+  }
+
+  /**
+   * Check if the most recent tool execution messages contain failures.
+   * Looks at the last batch of tool-call result messages for any with ok:false.
+   */
+  private hasRecentToolExecutionFailure(messages: SessionMessage[]): boolean {
+    // Only check the most recent tool messages (after the last non-tool message)
+    let foundToolMessages = false;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "tool") {
+        break; // Stop at the first non-tool message from the end
+      }
+      foundToolMessages = true;
+      if (msg.content) {
+        try {
+          const parsed = JSON.parse(msg.content);
+          if (parsed && typeof parsed === "object" && parsed.ok === false) {
+            return true;
+          }
+        } catch {
+          // Not JSON, skip
+        }
+      }
+    }
+    return foundToolMessages; // false if no tool messages at all
+  }
+
+  /**
+   * Get the list of failed tool messages for error reporting.
+   */
+  private getFailedToolMessages(sessionId: string): string[] {
+    const messages = this.listSessionMessages(sessionId);
+    const failed: string[] = [];
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i];
+      if (msg.role !== "tool") {
+        break;
+      }
+      if (msg.content) {
+        try {
+          const parsed = JSON.parse(msg.content);
+          if (parsed && typeof parsed === "object" && parsed.ok === false) {
+            const errorMsg = parsed.error ?? parsed.output ?? "Unknown error";
+            const name = parsed.name ?? "unknown";
+            failed.push(`${name}: ${String(errorMsg).slice(0, 200)}`);
+          }
+        } catch {
+          // skip
+        }
+      }
+    }
+    return failed;
   }
 
   private buildToolParamsSnippet(toolFunction: unknown | null): string {
