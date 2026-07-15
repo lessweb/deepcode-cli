@@ -188,6 +188,16 @@ export function getDefaultSkillPrompt(options: DefaultSkillPromptOptions = {}): 
   return buildSkillDocumentsPrompt(skillDocs);
 }
 
+/** Read the dedicated prompt used when a submitted turn enters Plan Mode. */
+export function getPlanModePrompt(): string {
+  const templatePath = path.join(getExtensionRoot(), "templates", "prompts", "plan.md");
+  try {
+    return fs.readFileSync(templatePath, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function buildSkillDocumentsPrompt(skills: SkillPromptDocument[]): string {
   const blocks = skills.map((skill) => renderSkillDocumentBlock(skill));
   return `Use the skill documents below to assist the user:\n${blocks.join("\n\n")}`;
@@ -579,7 +589,7 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
       type: "function",
       function: {
         name: "read",
-        description: "Read files from the filesystem (text, images, PDFs, notebooks).",
+        description: "Read files from the filesystem (text, images, notebooks).",
         parameters: {
           type: "object",
           properties: {
@@ -594,10 +604,6 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
             limit: {
               type: "number",
               description: "Number of lines to read",
-            },
-            pages: {
-              type: "string",
-              description: 'Page range for PDF files (e.g., "1-5", "3", "10-20"). Only applicable to PDF files.',
             },
           },
           required: ["file_path"],

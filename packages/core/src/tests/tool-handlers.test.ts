@@ -998,6 +998,24 @@ test("Read returns an acknowledgement for images and attaches the image as a fol
   );
 });
 
+test("Read reports PDFs as binary without attaching their contents", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "document.pdf");
+  fs.writeFileSync(filePath, "%PDF-1.7\n" + "x".repeat(1024 * 1024));
+
+  const readResult = await handleReadTool({ file_path: filePath }, createContext("pdf-read", workspace));
+
+  assert.equal(readResult.ok, true);
+  assert.equal(readResult.output, "WARNING: File is binary.");
+  assert.deepEqual(readResult.metadata, {
+    mime: "application/pdf",
+    encoding: "base64",
+    bytes: 1024 * 1024 + "%PDF-1.7\n".length,
+    pageCount: 0,
+  });
+  assert.equal(readResult.followUpMessages, undefined);
+});
+
 function createContext(
   sessionId: string,
   projectRoot: string,

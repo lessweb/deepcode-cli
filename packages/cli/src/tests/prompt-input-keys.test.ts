@@ -22,6 +22,9 @@ import {
   renderBufferWithCursor,
   buildInitPromptSubmission,
   buildPromptDraftFromSessionMessage,
+  extractProposedPlan,
+  getImplementationPrompt,
+  getPlanImplementationChoice,
   disableTerminalExtendedKeys,
   enableTerminalExtendedKeys,
   EMPTY_BUFFER,
@@ -138,6 +141,28 @@ test("parseTerminalInput recognizes shifted return sequences", () => {
   assert.equal(key.return, true);
   assert.equal(key.shift, true);
   assert.equal(key.meta, false);
+});
+
+test("parseTerminalInput recognizes shift+tab for Plan Mode cycling", () => {
+  const { input, key } = parseTerminalInput("\u001B[Z");
+  assert.equal(input, "");
+  assert.equal(key.tab, true);
+  assert.equal(key.shift, true);
+});
+
+test("extractProposedPlan only returns a complete non-empty plan", () => {
+  assert.equal(extractProposedPlan("<proposed_plan>\nPlan\n</proposed_plan>"), "Plan");
+  assert.equal(extractProposedPlan("<proposed_plan>Plan"), null);
+  assert.equal(extractProposedPlan("<proposed_plan>\n</proposed_plan>"), null);
+});
+
+test("getImplementationPrompt uses Chinese only above five full-width punctuation marks", () => {
+  assert.equal(getImplementationPrompt("，、；。；"), "Implement the plan.");
+  assert.equal(getImplementationPrompt("，、；。；。"), "实现此方案。");
+});
+
+test("getPlanImplementationChoice treats escape as staying in Plan Mode", () => {
+  assert.equal(getPlanImplementationChoice("", { escape: true, return: false }, 0), "stay");
 });
 
 test("prompt return key action submits on plain enter", () => {

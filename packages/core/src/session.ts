@@ -14,6 +14,7 @@ import {
   getCompactPrompt,
   getDefaultSkillPrompt,
   getExtensionRoot,
+  getPlanModePrompt,
   getRuntimeContext,
   getSystemPrompt,
   getTools,
@@ -66,7 +67,15 @@ const PROJECT_CODE_HASH_LENGTH = 16;
 const BACKGROUND_FAILURE_LOG_TAIL_CHARS = 4000;
 const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
 const DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD = 512 * 1024;
-const PLAN_MODE_STATUS_MESSAGE = "/plan\n  └ Set Plan Mode on. Awaiting <proposed_plan>.";
+const PLAN_MODE_ON_STATUS_MESSAGE = "  └ Set Plan Mode on. Awaiting <proposed_plan>.";
+const PLAN_MODE_OFF_STATUS_MESSAGE = "  └ Set Plan Mode off.";
+const PLAN_MODE_FORCE_ASK_SCOPES = [
+  "write-in-cwd",
+  "write-out-cwd",
+  "delete-in-cwd",
+  "delete-out-cwd",
+  "mutate-git-log",
+] as const satisfies readonly PermissionScope[];
 
 type ChatCompletionDebugOptions = {
   enabled?: boolean;
@@ -232,6 +241,7 @@ export type SessionEntry = {
   updateTime: string;
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
   askPermissions?: AskPermissionRequest[];
+  planMode?: boolean;
 };
 
 export type SessionsIndex = {
@@ -282,6 +292,7 @@ export type UserPromptContent = {
   skills?: SkillInfo[];
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
+  planMode?: boolean;
 };
 
 export type SkillInfo = {
@@ -1046,9 +1057,6 @@ ${agentInstructions}
     }
 
     for (const skill of skills) {
-      if (skill.name === "plan") {
-        this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, PLAN_MODE_STATUS_MESSAGE));
-      }
       if (skill.isLoaded) {
         continue;
       }
@@ -1118,6 +1126,7 @@ ${agentInstructions}
       createTime: now,
       updateTime: now,
       processes: null,
+      planMode: Boolean(userPrompt.planMode),
     };
     index.entries.push(entry);
     const sortedEntries = index.entries.slice().sort((a, b) => {
@@ -1163,6 +1172,8 @@ ${agentInstructions}
       this.appendSessionMessage(sessionId, instructionsMessage);
     }
 
+    this.appendPlanModeTransitionMessages(sessionId, false, Boolean(userPrompt.planMode));
+
     this.recordUserPromptCheckpoint(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
@@ -1196,11 +1207,14 @@ ${agentInstructions}
       inheritedPermissions: this.getResolvedSettings().permissions,
     });
     const now = new Date().toISOString();
+    const previousPlanMode = Boolean(this.getSession(sessionId)?.planMode);
+    const nextPlanMode = Boolean(userPrompt.planMode);
     const updated = this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
       status: "pending",
       failReason: null,
       askPermissions: undefined,
+      planMode: nextPlanMode,
       updateTime: now,
     }));
 
@@ -1208,6 +1222,8 @@ ${agentInstructions}
       await this.createSession(userPrompt, controller);
       return;
     }
+
+    this.appendPlanModeTransitionMessages(sessionId, previousPlanMode, nextPlanMode);
 
     if (hasUserPermissionReplies(userPrompt) && this.hasTrailingPendingToolCalls(sessionId)) {
       this.activeSessionId = sessionId;
@@ -1407,6 +1423,7 @@ ${agentInstructions}
               projectRoot: this.projectRoot,
               toolCalls,
               settings: this.getResolvedSettings().permissions,
+              forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
               readPermissionExemptPaths: this.getSkillScanRoots().map((entry) => entry.root),
               resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
             })
@@ -2090,6 +2107,23 @@ ${agentInstructions}
     };
   }
 
+  private appendPlanModeTransitionMessages(sessionId: string, wasEnabled: boolean, isEnabled: boolean): void {
+    if (wasEnabled === isEnabled) {
+      return;
+    }
+
+    if (isEnabled) {
+      const prompt = getPlanModePrompt();
+      if (prompt) {
+        this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, prompt));
+      }
+      this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, PLAN_MODE_ON_STATUS_MESSAGE));
+      return;
+    }
+
+    this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, PLAN_MODE_OFF_STATUS_MESSAGE));
+  }
+
   private renderInitCommandPrompt(): string {
     const templatePath = path.join(getExtensionRoot(), "templates", "prompts", "init_command.md.ejs");
     const template = fs.readFileSync(templatePath, "utf8");
@@ -2346,6 +2380,7 @@ ${agentInstructions}
       skills: prompt.skills ? prompt.skills.map((skill) => ({ ...skill })) : undefined,
       permissions: prompt.permissions ? prompt.permissions.map((permission) => ({ ...permission })) : undefined,
       alwaysAllows: prompt.alwaysAllows ? [...prompt.alwaysAllows] : undefined,
+      planMode: prompt.planMode,
     };
   }
 
@@ -2752,6 +2787,7 @@ ${agentInstructions}
       updateTime: typeof value.updateTime === "string" ? value.updateTime : new Date().toISOString(),
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
+      planMode: value.planMode === true,
     };
   }
 

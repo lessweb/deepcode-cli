@@ -15,6 +15,12 @@ export {
 } from "./hooks/cursor";
 export { default as AppContainer } from "./views/AppContainer";
 export { AskUserQuestionPrompt } from "./views/AskUserQuestionPrompt";
+export {
+  PlanImplementationPrompt,
+  extractProposedPlan,
+  getImplementationPrompt,
+  getPlanImplementationChoice,
+} from "./views/PlanImplementationPrompt";
 export { MessageView } from "./components";
 export { parseDiffPreview } from "./components/MessageView/utils";
 export {

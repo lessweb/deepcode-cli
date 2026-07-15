@@ -170,6 +170,103 @@ test("computeToolCallPermissions only asks for scopes not already allowed", () =
   );
 });
 
+test("computeToolCallPermissions temporarily upgrades allowed forced scopes to ask", () => {
+  const projectRoot = createTempDir("deepcode-permissions-force-ask-workspace-");
+  const forcedScopes: PermissionScope[] = [
+    "write-in-cwd",
+    "write-out-cwd",
+    "delete-in-cwd",
+    "delete-out-cwd",
+    "mutate-git-log",
+  ];
+  const plan = computeToolCallPermissions({
+    sessionId: "session-1",
+    projectRoot,
+    forceAskScopes: forcedScopes,
+    settings: {
+      allow: ["write-in-cwd", "write-out-cwd", "delete-out-cwd", "mutate-git-log"] as PermissionScope[],
+      deny: ["delete-in-cwd"] as PermissionScope[],
+      ask: [] as PermissionScope[],
+      defaultMode: "allowAll" as const,
+    },
+    toolCalls: [
+      {
+        id: "call-write-in",
+        type: "function",
+        function: { name: "write", arguments: JSON.stringify({ file_path: path.join(projectRoot, "file.txt") }) },
+      },
+      {
+        id: "call-write-out",
+        type: "function",
+        function: { name: "write", arguments: JSON.stringify({ file_path: "/tmp/file.txt" }) },
+      },
+      {
+        id: "call-delete-out",
+        type: "function",
+        function: {
+          name: "bash",
+          arguments: JSON.stringify({
+            command: "rm /tmp/file.txt",
+            sideEffects: ["delete-out-cwd"],
+          }),
+        },
+      },
+      {
+        id: "call-mutate-git",
+        type: "function",
+        function: {
+          name: "bash",
+          arguments: JSON.stringify({ command: "git commit --allow-empty -m test", sideEffects: ["mutate-git-log"] }),
+        },
+      },
+      {
+        id: "call-delete-in",
+        type: "function",
+        function: {
+          name: "bash",
+          arguments: JSON.stringify({ command: "rm file.txt", sideEffects: ["delete-in-cwd"] }),
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual(plan.permissions, [
+    { toolCallId: "call-write-in", permission: "ask" },
+    { toolCallId: "call-write-out", permission: "ask" },
+    { toolCallId: "call-delete-out", permission: "ask" },
+    { toolCallId: "call-mutate-git", permission: "ask" },
+    { toolCallId: "call-delete-in", permission: "deny" },
+  ]);
+  assert.deepEqual(
+    plan.askPermissions.map((item) => ({ id: item.toolCallId, scopes: item.scopes })),
+    [
+      { id: "call-write-in", scopes: ["write-in-cwd"] },
+      { id: "call-write-out", scopes: ["write-out-cwd"] },
+      { id: "call-delete-out", scopes: ["delete-out-cwd"] },
+      { id: "call-mutate-git", scopes: ["mutate-git-log"] },
+    ]
+  );
+
+  const defaultPlan = computeToolCallPermissions({
+    sessionId: "session-1",
+    projectRoot,
+    settings: {
+      allow: ["write-in-cwd"] as PermissionScope[],
+      deny: [] as PermissionScope[],
+      ask: [] as PermissionScope[],
+      defaultMode: "allowAll" as const,
+    },
+    toolCalls: [
+      {
+        id: "call-default",
+        type: "function",
+        function: { name: "write", arguments: JSON.stringify({ file_path: path.join(projectRoot, "file.txt") }) },
+      },
+    ],
+  });
+  assert.deepEqual(defaultPlan.permissions, [{ toolCallId: "call-default", permission: "allow" }]);
+});
+
 test("computeToolCallPermissions allows read tool calls under skill scan paths", () => {
   const projectRoot = createTempDir("deepcode-permissions-skill-read-workspace-");
   const home = createTempDir("deepcode-permissions-skill-read-home-");

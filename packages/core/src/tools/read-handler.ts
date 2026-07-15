@@ -13,8 +13,6 @@ import {
 
 const DEFAULT_LINE_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
-const PDF_LARGE_PAGE_THRESHOLD = 10;
-const PDF_MAX_PAGE_RANGE = 20;
 const LINE_NUMBER_WIDTH = 6;
 const DEFAULT_GITIGNORE = [
   "node_modules/",
@@ -40,12 +38,6 @@ const DEFAULT_GITIGNORE = [
   "*.war",
   "target/",
 ];
-
-type PageRange = {
-  start: number;
-  end: number;
-  count: number;
-};
 
 type TextReadResult = {
   content: string;
@@ -159,36 +151,8 @@ export async function handleReadTool(
     }
 
     if (ext === ".pdf") {
-      const pagesParam = typeof args.pages === "string" ? args.pages.trim() : "";
       const buffer = fs.readFileSync(filePath);
       const pageCount = countPdfPages(buffer);
-      const pageRange = pagesParam ? parsePageRange(pagesParam) : null;
-
-      if (!pageRange && pageCount !== null && pageCount > PDF_LARGE_PAGE_THRESHOLD) {
-        return {
-          ok: false,
-          name: "read",
-          error: `PDF has ${pageCount} pages; provide "pages" to read a range.`,
-        };
-      }
-
-      if (pageRange && pageRange.count > PDF_MAX_PAGE_RANGE) {
-        return {
-          ok: false,
-          name: "read",
-          error: `PDF page range exceeds ${PDF_MAX_PAGE_RANGE} pages.`,
-        };
-      }
-
-      if (pageRange && pageCount !== null && pageRange.end > pageCount) {
-        return {
-          ok: false,
-          name: "read",
-          error: `PDF page range exceeds total page count (${pageCount}).`,
-        };
-      }
-
-      const base64 = buffer.toString("base64");
       markFileRead(context.sessionId, filePath, {
         content: "",
         timestamp: Math.floor(stat.mtimeMs),
@@ -197,13 +161,12 @@ export async function handleReadTool(
       return {
         ok: true,
         name: "read",
-        output: `data:application/pdf;base64,${base64}`,
+        output: "WARNING: File is binary.",
         metadata: {
           mime: "application/pdf",
           encoding: "base64",
           bytes: buffer.length,
           pageCount,
-          pages: pageRange ? `${pageRange.start}-${pageRange.end}` : null,
         },
       };
     }
@@ -518,45 +481,6 @@ function countPdfPages(buffer: Buffer): number | null {
   } catch {
     return null;
   }
-}
-
-function parsePageRange(input: string): PageRange {
-  const trimmed = input.trim();
-  if (!trimmed) {
-    throw new Error("pages must be a non-empty string.");
-  }
-  if (trimmed.includes(",")) {
-    throw new Error('pages must be a single range like "1-5" or "3".');
-  }
-
-  const parts = trimmed.split("-").map((part) => part.trim());
-  if (parts.length === 1) {
-    const value = parsePositiveInt(parts[0], "pages");
-    return { start: value, end: value, count: 1 };
-  }
-
-  if (parts.length === 2) {
-    const start = parsePositiveInt(parts[0], "pages");
-    const end = parsePositiveInt(parts[1], "pages");
-    if (end < start) {
-      throw new Error("pages range end must be >= start.");
-    }
-    return { start, end, count: end - start + 1 };
-  }
-
-  throw new Error('pages must be a single range like "1-5" or "3".');
-}
-
-function parsePositiveInt(value: string, label: string): number {
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric)) {
-    throw new Error(`${label} must be a number.`);
-  }
-  const integer = Math.trunc(numeric);
-  if (integer < 1) {
-    throw new Error(`${label} must be >= 1.`);
-  }
-  return integer;
 }
 
 function readNotebook(filePath: string): string {

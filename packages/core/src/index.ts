@@ -55,6 +55,7 @@ export {
   getCompactPrompt,
   getRuntimeContext,
   getDefaultSkillPrompt,
+  getPlanModePrompt,
   getExtensionRoot,
   getTools,
   buildSkillDocumentsPrompt,

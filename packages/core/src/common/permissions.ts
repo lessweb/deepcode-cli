@@ -60,6 +60,7 @@ export type ComputeToolCallPermissionsOptions = {
   projectRoot: string;
   toolCalls: unknown[];
   settings?: Required<PermissionSettings>;
+  forceAskScopes?: readonly PermissionScope[];
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
 };
@@ -163,10 +164,18 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
       readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
     });
-    const permission = evaluatePermissionScopes(request.scopes, options.settings);
+    const evaluatedPermission = evaluatePermissionScopes(request.scopes, options.settings);
+    const forcedAskScopes =
+      evaluatedPermission === "deny"
+        ? []
+        : getAllowedForcedAskScopes(request.scopes, options.settings, options.forceAskScopes);
+    const permission = forcedAskScopes.length > 0 ? "ask" : evaluatedPermission;
     permissions.push({ toolCallId: toolCall.id, permission });
     if (permission === "ask") {
-      const askScopes = getPermissionScopesRequiringAsk(request.scopes, options.settings);
+      const askScopes = mergeAskScopes(
+        getPermissionScopesRequiringAsk(request.scopes, options.settings),
+        forcedAskScopes
+      );
       askPermissions.push({
         toolCallId: toolCall.id,
         scopes: askScopes.length > 0 ? askScopes : request.scopes,
@@ -178,6 +187,25 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
   }
 
   return { permissions, askPermissions };
+}
+
+function getAllowedForcedAskScopes(
+  scopes: AskPermissionScope[],
+  settings: Required<PermissionSettings> | undefined,
+  forceAskScopes: readonly PermissionScope[] | undefined
+): PermissionScope[] {
+  if (!forceAskScopes?.length) {
+    return [];
+  }
+
+  return scopes.filter(
+    (scope): scope is PermissionScope =>
+      scope !== "unknown" && forceAskScopes.includes(scope) && evaluatePermissionScopes([scope], settings) === "allow"
+  );
+}
+
+function mergeAskScopes(existing: AskPermissionScope[], forced: PermissionScope[]): AskPermissionScope[] {
+  return [...existing, ...forced.filter((scope) => !existing.includes(scope))];
 }
 
 export function describeToolPermissionRequest(options: {

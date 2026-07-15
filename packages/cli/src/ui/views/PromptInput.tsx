@@ -72,6 +72,7 @@ export type PromptSubmission = {
   selectedSkills?: SkillInfo[];
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
+  planMode?: boolean;
   command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit";
 };
 
@@ -96,9 +97,11 @@ type Props = {
   promptDraft?: PromptDraft | null;
   statusLineSegments?: StatusSegment[];
   statusLineSeparator?: string;
+  planMode: boolean;
   onSubmit: (submission: PromptSubmission) => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
   onRawModeChange?: (mode: string) => void;
+  onPlanModeChange: (enabled: boolean) => void;
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
   onExitShortcut?: () => void;
@@ -129,12 +132,14 @@ export const PromptInput = React.memo(function PromptInput({
   promptDraft,
   statusLineSegments,
   statusLineSeparator,
+  planMode,
   onSubmit,
   onModelConfigChange,
   onInterrupt,
   onToggleProcessStdout,
   onExitShortcut,
   onRawModeChange,
+  onPlanModeChange,
 }: Props): React.ReactElement {
   const { stdout } = useStdout();
   const inputTextRef = useRef<DOMElement | null>(null);
@@ -226,9 +231,10 @@ export const PromptInput = React.memo(function PromptInput({
         screenWidth,
         cursorLayoutKey ?? "default",
         imageUrls.length,
+        planMode ? "plan-mode" : "default-mode",
         selectedSkills.map((skill) => skill.name).join("\u001F"),
       ].join("\u001E"),
-    [cursorLayoutKey, imageUrls.length, screenWidth, selectedSkills]
+    [cursorLayoutKey, imageUrls.length, planMode, screenWidth, selectedSkills]
   );
   useTerminalFocusReporting(stdout, !disabled);
   useTerminalExtendedKeys(stdout, !disabled);
@@ -428,6 +434,11 @@ export const PromptInput = React.memo(function PromptInput({
       const noModifier = !key.shift && !key.ctrl && !key.meta;
       const returnAction = getPromptReturnKeyAction(key);
       const isPlainReturn = returnAction === "submit";
+
+      if (key.shift && key.tab) {
+        onPlanModeChange(!planMode);
+        return;
+      }
 
       if (showFileMentionMenu) {
         if (key.upArrow || key.downArrow || key.tab || returnAction === "submit") {
@@ -678,6 +689,11 @@ export const PromptInput = React.memo(function PromptInput({
       setShowModelDropdown(true);
       return;
     }
+    if (item.kind === "plan") {
+      clearSlashToken();
+      onPlanModeChange(true);
+      return;
+    }
     if (item.kind === "raw") {
       clearSlashToken();
       setOpenRawModelDropdown(true);
@@ -744,6 +760,7 @@ export const PromptInput = React.memo(function PromptInput({
       text: expandPasteMarkers(buffer.text, pastesRef.current),
       imageUrls,
       selectedSkills,
+      planMode,
     });
     resetPromptInput();
   }
@@ -779,6 +796,12 @@ export const PromptInput = React.memo(function PromptInput({
             {formatSelectedSkillsStatus(selectedSkills)}
           </Text>
           <Text dimColor> (use /skills to edit)</Text>
+        </Box>
+      ) : null}
+      {planMode ? (
+        <Box width={screenWidth} justifyContent="flex-end">
+          <Text color="yellow">💡 Plan mode</Text>
+          <Text dimColor> (shift+tab to cycle)</Text>
         </Box>
       ) : null}
       {/* Input */}
