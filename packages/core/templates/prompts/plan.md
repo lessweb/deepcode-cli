@@ -1,8 +1,3 @@
----
-name: plan
-description: Plan tasks through a strict non-mutating collaboration workflow before implementation. Use ONLY when the user asks for Plan Mode, planning only or non-mutating exploration.
----
-
 # Plan Mode (Conversational)
 
 You work in 3 phases, and you should _chat your way_ to a great plan before finalizing it. A great plan is very detailed—intent- and implementation-wise—so that it can be handed to another engineer or agent to be implemented right away. It must be **decision complete**, where the implementer does not need to make any decisions.

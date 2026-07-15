@@ -20,6 +20,7 @@ import {
   formatAskUserQuestionAnswers,
 } from "../core/ask-user-question";
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
+import { PlanImplementationPrompt, extractProposedPlan, getImplementationPrompt } from "./PlanImplementationPrompt";
 import { buildExitSummaryText, buildResumeHintText } from "../exit-summary";
 import { RawMode, useRawModeContext } from "../contexts";
 import { renderMessageToStdout } from "../components/MessageView/utils";
@@ -133,6 +134,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+  const [pendingPlanImplementation, setPendingPlanImplementation] = useState<string | null>(null);
 
   rawModeRef.current = mode;
   messagesRef.current = messages;
@@ -253,6 +256,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     setActiveStatus(null);
     setActiveAskPermissions(undefined);
     setPendingPermissionReply(null);
+    setPlanMode(false);
+    setPendingPlanImplementation(null);
     setDismissedQuestionIds(new Set());
     await resetStaticView([]);
     await refreshSkills();
@@ -369,6 +374,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           submission.selectedSkills && submission.selectedSkills.length > 0 ? submission.selectedSkills : undefined,
         permissions: submission.permissions,
         alwaysAllows: submission.alwaysAllows,
+        planMode: submission.planMode ?? planMode,
       };
       const activeSessionId = sessionManager.getActiveSessionId();
       const permissionReply =
@@ -404,6 +410,12 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         }
         await refreshSkills();
         refreshSessionsList();
+        const completedSession = sessionManager.getSession(sessionManager.getActiveSessionId() ?? "");
+        const proposedPlan =
+          prompt.planMode && completedSession?.status === "completed"
+            ? extractProposedPlan(completedSession.assistantReply)
+            : null;
+        setPendingPlanImplementation(proposedPlan);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setErrorLine(message);
@@ -425,6 +437,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       refreshSessionsList,
       navigateToSubView,
       resetToWelcome,
+      planMode,
     ]
   );
 
@@ -496,6 +509,25 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     [handlePrompt]
   );
 
+  const handlePlanImplementationChoice = useCallback(
+    (choice: "implement" | "stay" | "default") => {
+      const proposedPlan = pendingPlanImplementation;
+      setPendingPlanImplementation(null);
+      if (choice === "stay") {
+        return;
+      }
+      setPlanMode(false);
+      if (choice === "implement" && proposedPlan) {
+        handleSubmit({
+          text: getImplementationPrompt(proposedPlan),
+          imageUrls: [],
+          planMode: false,
+        });
+      }
+    },
+    [handleSubmit, pendingPlanImplementation]
+  );
+
   const handleExitShortcut = useCallback(() => {
     handleExit({ showCommand: false, showSummary: false });
   }, [handleExit]);
@@ -517,6 +549,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       setRunningProcesses(session?.processes ?? null);
       setActiveStatus(session?.status ?? null);
       setActiveAskPermissions(session?.askPermissions);
+      setPlanMode(session?.planMode === true);
+      setPendingPlanImplementation(null);
       if (pendingPermissionReply && pendingPermissionReply.sessionId !== sessionId) {
         setPendingPermissionReply(null);
       }
@@ -965,6 +999,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />
+      ) : pendingPlanImplementation && !busy ? (
+        <PlanImplementationPrompt onSelect={handlePlanImplementationChoice} />
       ) : isExiting ? null : (
         <PromptInput
           projectRoot={projectRoot}
@@ -986,6 +1022,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           placeholder="Type your message..."
           statusLineSegments={statusLineSegments}
           statusLineSeparator={resolvedSettings.statusline.separator}
+          planMode={planMode}
+          onPlanModeChange={setPlanMode}
         />
       )}
     </Box>

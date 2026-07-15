@@ -6,14 +6,15 @@ import * as os from "os";
 import * as path from "path";
 import { GitFileHistory } from "../common/file-history";
 import { clearSessionState } from "../common/state";
-import { getProjectCode, SessionManager, type SessionMessage, type SkillInfo } from "../session";
+import { getProjectCode, SessionManager, type SessionMessage } from "../session";
 
 const originalFetch = globalThis.fetch;
 const originalConsoleWarn = console.warn;
 const originalHome = process.env.HOME;
 const originalUserProfile = process.env.USERPROFILE;
 const tempDirs: string[] = [];
-const PLAN_MODE_STATUS_MESSAGE = "/plan\n  └ Set Plan Mode on. Awaiting <proposed_plan>.";
+const PLAN_MODE_ON_STATUS_MESSAGE = "  └ Set Plan Mode on. Awaiting <proposed_plan>.";
+const PLAN_MODE_OFF_STATUS_MESSAGE = "  └ Set Plan Mode off.";
 
 /** Set homedir in a cross-platform way (HOME on Unix, USERPROFILE on Windows). */
 function setHomeDir(dir: string): void {
@@ -523,68 +524,69 @@ test("SessionManager resolves bundled skill prompts", () => {
   assert.match(prompt, /# Skill Writer/);
 });
 
-test("SessionManager appends plan mode status whenever the plan skill is selected", async () => {
-  const workspace = createTempDir("deepcode-plan-skill-workspace-");
-  const home = createTempDir("deepcode-plan-skill-home-");
-  setHomeDir(home);
-
-  const manager = createSessionManager(workspace, "machine-id-plan-skill");
-  const planSkill = await getPlanSkill(manager);
-
-  const sessionId = await manager.createSession({ text: "", skills: [planSkill] });
-  let messages = manager.listSessionMessages(sessionId);
-  assert.equal(countPlanModeStatusMessages(messages), 1);
-  assert.equal(countLoadedSkillMessages(messages, "plan"), 1);
-
-  await manager.replySession(sessionId, { text: "", skills: [planSkill] });
-  messages = manager.listSessionMessages(sessionId);
-  assert.equal(countPlanModeStatusMessages(messages), 2);
-  assert.equal(countLoadedSkillMessages(messages, "plan"), 1);
-});
-
-test("SessionManager appends plan mode status when the plan skill is auto-matched", async () => {
+test("SessionManager persists Plan Mode and appends prompts only on mode transitions", async () => {
   const workspace = createTempDir("deepcode-plan-matched-workspace-");
   const home = createTempDir("deepcode-plan-matched-home-");
   setHomeDir(home);
 
-  const client = {
-    chat: {
-      completions: {
-        create: async (request: any) => {
-          if (isSkillMatchingRequest(request)) {
-            return createSkillMatchingResponse(["plan"]);
-          }
-          return createChatResponse("planned", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
-        },
-      },
-    },
-  };
-  const manager = createMockedClientSessionManagerWithClient(workspace, client);
+  const manager = createMockedClientSessionManager(workspace, [
+    createChatResponse("planned", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+    createChatResponse("still planning", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+    createChatResponse("implementing", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+  ]);
+  const sessionId = await manager.createSession({ text: "Plan this change", planMode: true });
+  let messages = manager.listSessionMessages(sessionId);
+  assert.equal(manager.getSession(sessionId)?.planMode, true);
+  assert.equal(messages.filter((message) => message.content === PLAN_MODE_ON_STATUS_MESSAGE).length, 1);
+  assert.equal(
+    messages.some((message) => message.content?.includes("# Plan Mode (Conversational)")),
+    true
+  );
+  assert.equal(messages.find((message) => message.role === "user")?.meta?.userPrompt?.planMode, true);
 
-  const sessionId = await manager.createSession({ text: "Plan Mode for this change" });
-  const messages = manager.listSessionMessages(sessionId);
-  assert.equal(countPlanModeStatusMessages(messages), 1);
-  assert.equal(countLoadedSkillMessages(messages, "plan"), 1);
+  await manager.replySession(sessionId, { text: "Refine it", planMode: true });
+  messages = manager.listSessionMessages(sessionId);
+  assert.equal(messages.filter((message) => message.content === PLAN_MODE_ON_STATUS_MESSAGE).length, 1);
+
+  await manager.replySession(sessionId, { text: "Implement it", planMode: false });
+  messages = manager.listSessionMessages(sessionId);
+  assert.equal(manager.getSession(sessionId)?.planMode, false);
+  assert.equal(messages.filter((message) => message.content === PLAN_MODE_OFF_STATUS_MESSAGE).length, 1);
 });
 
-test("SessionManager appends plan mode status for deferred permission prompts", async () => {
-  const workspace = createTempDir("deepcode-plan-deferred-workspace-");
-  const home = createTempDir("deepcode-plan-deferred-home-");
+test("SessionManager excludes the former bundled plan skill and defaults legacy sessions to Default mode", async () => {
+  const workspace = createTempDir("deepcode-plan-legacy-workspace-");
+  const home = createTempDir("deepcode-plan-legacy-home-");
   setHomeDir(home);
 
-  const manager = createSessionManager(workspace, "machine-id-plan-deferred");
-  const sessionId = await manager.createSession({ text: "" });
-  const planSkill = await getPlanSkill(manager);
-
-  await (manager as any).appendDeferredPermissionPrompt(
-    sessionId,
-    { text: "", skills: [planSkill] },
-    new AbortController()
+  const manager = createSessionManager(workspace, "machine-id-plan-legacy");
+  assert.equal(
+    (await manager.listSkills()).some((skill) => skill.name === "plan"),
+    false
   );
 
-  const messages = manager.listSessionMessages(sessionId);
-  assert.equal(countPlanModeStatusMessages(messages), 1);
-  assert.equal(countLoadedSkillMessages(messages, "plan"), 1);
+  const sessionId = await manager.createSession({ text: "Default mode" });
+  const index = (manager as any).loadSessionsIndex();
+  delete index.entries.find((entry: { id: string }) => entry.id === sessionId).planMode;
+  (manager as any).saveSessionsIndex(index);
+  assert.equal(manager.getSession(sessionId)?.planMode, false);
+
+  const autoMatchManager = createMockedClientSessionManagerWithClient(workspace, {
+    chat: {
+      completions: {
+        create: async (request: any) =>
+          isSkillMatchingRequest(request)
+            ? createSkillMatchingResponse(["plan"])
+            : createChatResponse("default reply", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+      },
+    },
+  });
+  const autoMatchSessionId = await autoMatchManager.createSession({ text: "Plan this feature" });
+  const autoMatchMessages = autoMatchManager.listSessionMessages(autoMatchSessionId);
+  assert.equal(
+    autoMatchMessages.some((message) => message.meta?.skill?.name === "plan"),
+    false
+  );
 });
 
 test("SessionManager excludes disabled skills by resolved skill name", async () => {
@@ -3570,16 +3572,6 @@ function createSessionManager(projectRoot: string, machineId: string): SessionMa
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
-}
-
-async function getPlanSkill(manager: SessionManager): Promise<SkillInfo> {
-  const planSkill = (await manager.listSkills()).find((skill) => skill.name === "plan");
-  assert.ok(planSkill);
-  return planSkill;
-}
-
-function countPlanModeStatusMessages(messages: SessionMessage[]): number {
-  return messages.filter((message) => message.role === "system" && message.content === PLAN_MODE_STATUS_MESSAGE).length;
 }
 
 function countLoadedSkillMessages(messages: SessionMessage[], skillName: string): number {

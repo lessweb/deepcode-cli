@@ -188,6 +188,16 @@ export function getDefaultSkillPrompt(options: DefaultSkillPromptOptions = {}): 
   return buildSkillDocumentsPrompt(skillDocs);
 }
 
+/** Read the dedicated prompt used when a submitted turn enters Plan Mode. */
+export function getPlanModePrompt(): string {
+  const templatePath = path.join(getExtensionRoot(), "templates", "prompts", "plan.md");
+  try {
+    return fs.readFileSync(templatePath, "utf8").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function buildSkillDocumentsPrompt(skills: SkillPromptDocument[]): string {
   const blocks = skills.map((skill) => renderSkillDocumentBlock(skill));
   return `Use the skill documents below to assist the user:\n${blocks.join("\n\n")}`;

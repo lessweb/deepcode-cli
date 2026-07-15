@@ -7,6 +7,7 @@ import { fileURLToPath } from "url";
 import {
   buildSkillDocumentsPrompt,
   getDefaultSkillPrompt,
+  getPlanModePrompt,
   getRuntimeContext,
   getSystemPrompt,
   getTools,
@@ -92,6 +93,12 @@ test("getDefaultSkillPrompt skips disabled default skills", () => {
   const prompt = getDefaultSkillPrompt({ enabledSkills: { "karpathy-guidelines": false } });
 
   assert.equal(prompt, "");
+});
+
+test("getPlanModePrompt loads the dedicated Plan Mode template", () => {
+  const prompt = getPlanModePrompt();
+  assert.equal(prompt.includes("# Plan Mode (Conversational)"), true);
+  assert.equal(prompt.includes("<proposed_plan>"), true);
 });
 
 test("buildSkillDocumentsPrompt excludes SKILL.md frontmatter metadata", () => {
