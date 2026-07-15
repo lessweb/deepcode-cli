@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import BubbleDot from "@/webview/components/bubbles/BubbleDot";
 import { Spinner } from "@/webview/components/ui/spinner";
 import type { LlmStreamProgressData } from "@/webview/types";
+import ProgressShimmer from "@/webview/components/ProgressShimmer";
 
 interface ThinkingLiveBubbleProps {
   llmStreamProgress: LlmStreamProgressData | null;
@@ -86,10 +87,9 @@ export default function ThinkingLiveBubble({
 
   return (
     <div className="flex gap-2 mb-3 px-4 w-full max-w-237.5 mx-auto min-w-sm">
-      <BubbleDot connectToPrev={shouldConnect} className="mt-1" />
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Spinner className="h-3 w-3" />
-        <span className="font-medium">Thinking</span>
+        <Spinner className="size-3.5" />
+        <ProgressShimmer className="font-medium">Thinking</ProgressShimmer>
         <span className="text-xs">{statusText}</span>
       </div>
     </div>
