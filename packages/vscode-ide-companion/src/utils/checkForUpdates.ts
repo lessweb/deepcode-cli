@@ -20,10 +20,6 @@ export async function checkForUpdates(context: CheckForUpdatesContext, log: (mes
   try {
     const extensionId = context.extension.id;
     const currentVersion = context.extension.packageJSON.version;
-    log(`CheckForUpdates started`);
-    log(`==========================================`);
-    log(`Checking for updates for ${extensionId} v${currentVersion}`);
-    log(`==========================================`);
 
     const response = await fetch("https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery", {
       method: "POST",
