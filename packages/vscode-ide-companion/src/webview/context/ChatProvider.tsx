@@ -59,6 +59,7 @@ const initialState: AppState = {
   pendingPermissionReply: null,
   activeEditor: null,
   editingMessage: null,
+  askUserQuestions: null,
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -148,6 +149,8 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, activeEditor: action.editor };
     case "SET_EDITING_MESSAGE":
       return { ...state, editingMessage: action.editingMessage };
+    case "SET_ASK_USER_QUESTIONS":
+      return { ...state, askUserQuestions: action.data };
     default:
       return state;
   }

@@ -4,25 +4,20 @@ import InputPrompt from "@/webview/components/InputPrompt";
 import ThinkingLiveBubble from "@/webview/components/ThinkingLiveBubble";
 import PermissionPrompt from "@/webview/components/PermissionPrompt";
 import { useChat } from "@/webview/context/ChatProvider";
+import AskQuestionCarousel from "@/webview/components/AskQuestionCarousel";
 
 export default function App() {
   const { state, dispatch, actions } = useChat();
 
   return (
-    <div className="flex flex-col h-screen overflow-hidden">
+    <div className="relative flex flex-col h-screen min-h-screen w-full overflow-hidden">
       <Header
         sessions={state.sessions}
         activeSessionId={state.activeSessionId}
         onSelectSession={actions.selectSession}
         onCreateNewSession={actions.createNewSession}
       />
-      <Messages
-        messages={state.messages}
-        loading={state.loading}
-        llmStreamProgress={state.llmStreamProgress}
-        processes={state.processes}
-        onEditMessage={actions.editMessage}
-      />
+      <Messages messages={state.messages} loading={state.loading} onEditMessage={actions.editMessage} />
       <PermissionPrompt
         askPermissions={state.askPermissions}
         sessionStatus={state.activeSessionStatus}
@@ -39,6 +34,12 @@ export default function App() {
           llmStreamProgress={state.llmStreamProgress}
           processes={state.processes}
           shouldConnect={state.lastMessageRole !== null && state.lastMessageRole !== "user"}
+        />
+      )}
+      {state.askUserQuestions && (
+        <AskQuestionCarousel
+          questions={state.askUserQuestions.questions}
+          onClose={() => dispatch({ type: "SET_ASK_USER_QUESTIONS", data: null })}
         />
       )}
       <InputPrompt

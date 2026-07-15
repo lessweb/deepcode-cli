@@ -152,4 +152,12 @@ export const chatService = {
     const result = await wrpc.showAlert.mutate(message);
     return result as { ok: boolean };
   },
+
+  /**
+   * Add a system message to the current session
+   */
+  async addSystemMessage(content: string, meta?: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
+    const result = await wrpc.addSystemMessage.mutate({ content, meta });
+    return result as { ok: boolean; error?: string };
+  },
 };

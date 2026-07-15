@@ -1,18 +1,9 @@
 import { Button } from "@/webview/components/ui/button";
-
-interface ToolData {
-  ok: boolean;
-  name: string;
-  output: string;
-  metadata?: {
-    file_path?: string;
-    scope?: { start_line?: number };
-    diff_preview?: string;
-  };
-}
+import type { FileToolMetadata } from "@/webview/components/bubbles/ToolBubble";
 
 interface DiffPreviewProps {
-  toolData: ToolData;
+  output: string;
+  metadata: FileToolMetadata;
 }
 
 function formatDisplayPath(filePath: string): string {
@@ -20,8 +11,8 @@ function formatDisplayPath(filePath: string): string {
   return filePath;
 }
 
-export default function DiffPreview({ toolData }: DiffPreviewProps) {
-  const meta = toolData.metadata;
+export default function DiffPreview({ metadata, output }: DiffPreviewProps) {
+  const meta = metadata;
   if (!meta?.file_path) return null;
 
   const diffLines = (meta.diff_preview || "")
@@ -30,7 +21,7 @@ export default function DiffPreview({ toolData }: DiffPreviewProps) {
 
   return (
     <div className="space-y-2">
-      {toolData.output && <div className="text-xs text-muted-foreground pl-3">{toolData.output.trim()}</div>}
+      {output && <div className="text-xs text-muted-foreground pl-3">{output.trim()}</div>}
 
       <div className="flex items-center gap-2 text-xs pl-3">
         <span className="text-muted-foreground">File</span>

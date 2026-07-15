@@ -3,31 +3,25 @@ import { ScrollArea, ScrollBar } from "@/webview/components/ui/scroll-area";
 import UserBubble from "@/webview/components/bubbles/UserBubble";
 import AssistantBubble from "@/webview/components/bubbles/AssistantBubble";
 import ThinkingBubble from "@/webview/components/bubbles/ThinkingBubble";
-import ToolBubble from "@/webview/components/bubbles/ToolBubble";
+import ToolBubble, { type ToolBubbleProps } from "@/webview/components/bubbles/ToolBubble";
 import SystemBubble from "@/webview/components/bubbles/SystemBubble";
-import type { SessionMessage } from "@/webview/types";
-import type { EditingMessage } from "@/webview/types";
+import type { SessionMessage, EditingMessage } from "@/webview/types";
 
 interface MessagesProps {
   messages: SessionMessage[];
   loading: boolean;
-  llmStreamProgress: unknown;
-  processes: Record<string, { startTime: string; command: string }> | null;
   onEditMessage?: (editing: EditingMessage) => void;
 }
 
-export default function Messages({ messages, loading, llmStreamProgress, processes, onEditMessage }: MessagesProps) {
+export default function Messages({ messages, loading, onEditMessage }: MessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
-
-  console.log("llmStreamProgress: ", llmStreamProgress);
-  console.log("processes: ", processes);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
   return (
-    <ScrollArea className="flex-1 w-full max-w-237.5 mx-auto min-w-sm min-h-0">
+    <ScrollArea className="flex-1 w-full max-w-237.5 mx-auto min-w-sm min-h-0 overflow-hidden">
       <div className="flex flex-col gap-0 px-4 py-4">
         {messages.map((msg, index) => {
           const prevMsg = index > 0 ? messages[index - 1] : null;
@@ -35,6 +29,7 @@ export default function Messages({ messages, loading, llmStreamProgress, process
 
           switch (msg.role) {
             case "user":
+              console.log("msg:", msg);
               return (
                 <UserBubble
                   key={`msg-${index}`}
@@ -63,7 +58,13 @@ export default function Messages({ messages, loading, llmStreamProgress, process
             }
             case "tool":
               return (
-                <ToolBubble key={`msg-${index}`} content={msg.content} meta={msg.meta} shouldConnect={shouldConnect} />
+                <ToolBubble
+                  key={`msg-${index}`}
+                  content={msg.content}
+                  meta={msg.meta as ToolBubbleProps["meta"]}
+                  shouldConnect={shouldConnect}
+                  isLastMessage={index === messages.length - 1}
+                />
               );
             case "system":
               return (

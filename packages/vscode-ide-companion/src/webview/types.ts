@@ -78,6 +78,19 @@ export interface PermissionPromptState {
 
 // --- App state ---
 
+// --- AskUserQuestion types ---
+
+export interface AskUserQuestionData {
+  questions: Array<{
+    question: string;
+    multiSelect: boolean;
+    options: Array<{
+      label: string;
+      description?: string;
+    }>;
+  }>;
+}
+
 export interface AppState {
   sessions: SessionSummary[];
   activeSessionId: string | null;
@@ -98,6 +111,7 @@ export interface AppState {
   } | null;
   activeEditor: ActiveEditor | null;
   editingMessage: EditingMessage | null;
+  askUserQuestions: AskUserQuestionData | null;
 }
 
 // --- App actions ---
@@ -133,4 +147,5 @@ export type AppAction =
   | { type: "SET_PENDING_PERMISSION_REPLY"; reply: AppState["pendingPermissionReply"] }
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_ACTIVE_EDITOR"; editor: ActiveEditor | null }
-  | { type: "SET_EDITING_MESSAGE"; editingMessage: EditingMessage | null };
+  | { type: "SET_EDITING_MESSAGE"; editingMessage: EditingMessage | null }
+  | { type: "SET_ASK_USER_QUESTIONS"; data: AskUserQuestionData | null };

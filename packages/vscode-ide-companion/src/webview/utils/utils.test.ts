@@ -9,7 +9,6 @@
  * - buildAskUserQuestionReply
  */
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect } from "vitest";
 import {
   flattenUsageFields,
@@ -18,7 +17,8 @@ import {
   toTitleCase,
   buildAskUserQuestionReply,
 } from "./index";
-import type { AnswerFormValues } from "@/webview/components/AskUserQuestion";
+import type { AnswerFormValues } from "@/webview/components/AskQuestionCarousel";
+import type { TokenTelemetry } from "@/webview/types";
 
 describe("flattenUsageFields", () => {
   it("returns empty array for null input", () => {
@@ -67,15 +67,21 @@ describe("getTokenUsagePercent", () => {
   });
 
   it("returns 0 when activeTokens is 0", () => {
-    expect(getTokenUsagePercent({ activeTokens: 0, compactPromptTokenThreshold: 1000 } as any)).toBe(0);
+    expect(
+      getTokenUsagePercent({ activeTokens: 0, compactPromptTokenThreshold: 1000 } as unknown as TokenTelemetry)
+    ).toBe(0);
   });
 
   it("returns 0 when threshold is 0", () => {
-    expect(getTokenUsagePercent({ activeTokens: 500, compactPromptTokenThreshold: 0 } as any)).toBe(0);
+    expect(
+      getTokenUsagePercent({ activeTokens: 500, compactPromptTokenThreshold: 0 } as unknown as TokenTelemetry)
+    ).toBe(0);
   });
 
   it("returns 0 when threshold is negative", () => {
-    expect(getTokenUsagePercent({ activeTokens: 500, compactPromptTokenThreshold: -100 } as any)).toBe(0);
+    expect(
+      getTokenUsagePercent({ activeTokens: 500, compactPromptTokenThreshold: -100 } as unknown as TokenTelemetry)
+    ).toBe(0);
   });
 
   it("calculates correct percentage", () => {
@@ -84,7 +90,7 @@ describe("getTokenUsagePercent", () => {
     const result = getTokenUsagePercent({
       activeTokens: 500,
       compactPromptTokenThreshold: 1000,
-    } as any);
+    } as unknown as TokenTelemetry);
     expect(result).toBe(25);
   });
 
@@ -95,7 +101,7 @@ describe("getTokenUsagePercent", () => {
     const result = getTokenUsagePercent({
       activeTokens: 333,
       compactPromptTokenThreshold: 1000,
-    } as any);
+    } as unknown as TokenTelemetry);
     expect(result).toBe(16);
   });
 
@@ -106,7 +112,7 @@ describe("getTokenUsagePercent", () => {
     const result = getTokenUsagePercent({
       activeTokens: "500",
       compactPromptTokenThreshold: "1000",
-    } as any);
+    } as unknown as TokenTelemetry);
     // The function uses Number() which converts strings correctly
     // But the formula is (0.5 * activeTokens) / threshold
     // So (0.5 * 500) / 1000 = 250 / 1000 = 0.25 * 100 = 25

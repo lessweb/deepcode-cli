@@ -248,6 +248,22 @@ export const appRouter = router({
     vscodeApi.window.showInformationMessage(input);
     return { ok: true };
   }),
+
+  addSystemMessage: procedure
+    .input(
+      z.object({
+        content: z.string(),
+        meta: z.record(z.string(), z.unknown()).optional(),
+      })
+    )
+    .resolve(({ ctx, input }) => {
+      const activeSessionId = ctx.sessionManager.getActiveSessionId();
+      if (!activeSessionId) {
+        return { ok: false, error: "No active session" };
+      }
+      ctx.sessionManager.addSessionSystemMessage(activeSessionId, input.content, true, input.meta);
+      return { ok: true };
+    }),
 });
 
 export type AppRouter = typeof appRouter;

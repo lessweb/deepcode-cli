@@ -195,7 +195,7 @@ export default function InputPrompt({
   const hasContent = value.trim().length > 0 || attachments.length > 0;
 
   return (
-    <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm p-4">
+    <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm px-4 pt-1.5 pb-4">
       <Field>
         <InputGroup>
           <div className="flex flex-col w-full">

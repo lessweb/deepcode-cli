@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import BubbleDot from "@/webview/components/bubbles/BubbleDot";
 import { Spinner } from "@/webview/components/ui/spinner";
 import type { LlmStreamProgressData } from "@/webview/types";
@@ -32,6 +32,18 @@ function getStatusText(
   return "Processing...";
 }
 
+function formatElapsedTime(startTimeIso: string) {
+  const startTime = new Date(startTimeIso).getTime();
+  const elapsedMs = Date.now() - startTime;
+  const elapsedSeconds = Math.floor(elapsedMs / 1000);
+  const minutes = Math.floor(elapsedSeconds / 60);
+  const seconds = elapsedSeconds % 60;
+  if (minutes > 0) {
+    return `${minutes}m${seconds}s`;
+  }
+  return `${seconds}s`;
+}
+
 export default function ThinkingLiveBubble({
   llmStreamProgress,
   processes,
@@ -39,6 +51,28 @@ export default function ThinkingLiveBubble({
 }: ThinkingLiveBubbleProps) {
   const [statusText, setStatusText] = useState(() => getStatusText(llmStreamProgress, processes));
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const getThinkingContentText = useCallback(() => {
+    if (processes && Object.keys(processes).length > 0) {
+      const firstPid = Object.keys(processes)[0];
+      const process = processes[firstPid];
+      const elapsed = formatElapsedTime(process.startTime);
+      return `(${elapsed}) ${process.command}`;
+    }
+
+    if (llmStreamProgress && llmStreamProgress.startedAt) {
+      const startedAt = new Date(llmStreamProgress.startedAt).getTime();
+      const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+      const formattedTokens = llmStreamProgress.formattedTokens || "0";
+      if (elapsedSeconds >= 3) {
+        return `(${elapsedSeconds}s) · ↓ ${formattedTokens} tokens`;
+      }
+    }
+
+    return "Processing...";
+  }, [llmStreamProgress, processes]);
+
+  console.log("getThinkingContentText:", getThinkingContentText());
 
   useEffect(() => {
     setStatusText(getStatusText(llmStreamProgress, processes));

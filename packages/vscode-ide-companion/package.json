@@ -128,6 +128,8 @@
     "@types/react-dom": "^19.2.2",
     "@types/semver": "^7.7.1",
     "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.64.0",
+    "@typescript-eslint/parser": "^8.64.0",
     "@vitejs/plugin-react-swc": "^4.2.1",
     "@vscode/vsce": "^3.6.0",
     "autoprefixer": "^10.5.0",

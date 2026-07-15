@@ -1,68 +1,265 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/webview/components/ui/collapsible";
 import BubbleDot from "@/webview/components/bubbles/BubbleDot";
-import AskUserQuestion from "@/webview/components/AskUserQuestion";
-import PlanRenderer from "@/webview/components/PlanRenderer";
+// import AskUserQuestion from "@/webview/components/AskUserQuestion";
 import DiffPreview from "@/webview/components/DiffPreview";
+import PlanRenderer from "@/webview/components/PlanRenderer";
 import { ChevronDown } from "lucide-react";
 import { Button } from "@/webview/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/webview/components/ui/tooltip";
 import ProgressShimmer from "@/webview/components/ProgressShimmer";
+import { useChat } from "@/webview/context";
 
-interface ToolBubbleProps {
+export interface ToolBubbleProps {
   content: string;
-  meta?: Record<string, unknown>;
+  meta?: {
+    function?: {
+      name?: string;
+      arguments?: string[] | string;
+    };
+    paramsMd?: string;
+    resultMd?: string;
+  };
   shouldConnect?: boolean;
+  isLastMessage?: boolean;
 }
 
-interface ToolData {
+// ============================================================================
+// Tool Result Metadata Types
+// ============================================================================
+
+/** Bash tool result metadata */
+export interface BashToolMetadata {
+  cwd?: string | null;
+  exitCode?: number | null;
+  signal?: string | null;
+  shellPath?: string;
+  startCwd?: string;
+  timedOut?: boolean;
+  timeoutMs?: number;
+  deadlineAt?: string;
+  truncated?: boolean;
+}
+
+/** Edit/Write tool result file metadata */
+export interface FileToolMetadata {
+  type?: string;
+  file_path?: string;
+  bytes?: number;
+  encoding?: string;
+  line_endings?: "LF" | "CRLF";
+  cache_refreshed?: boolean;
+  diff_preview?: string;
+  /** Additional file info */
+  [key: string]: unknown;
+}
+
+/** Read tool result metadata */
+export interface ReadToolMetadata extends FileToolMetadata {
+  content?: string;
+  output?: string;
+  startLine?: number;
+  endLine?: number;
+  totalLines?: number;
+  isPartialView?: boolean;
+  timestamp?: number;
+}
+
+/** AskUserQuestion tool result metadata */
+export interface AskUserQuestionMetadata {
+  kind: "ask_user_question";
+  questions: Array<{
+    question: string;
+    multiSelect: boolean;
+    options: Array<{
+      label: string;
+      description?: string;
+    }>;
+  }>;
+}
+
+/** UpdatePlan tool result metadata */
+export interface UpdatePlanMetadata {
+  plan: string;
+  explanation?: string;
+}
+
+/** WebSearch tool result metadata */
+export interface WebSearchMetadata {
+  results?: Array<{
+    title?: string;
+    url?: string;
+    snippet?: string;
+    [key: string]: unknown;
+  }>;
+  query?: string;
+  totalResults?: number;
+  [key: string]: unknown;
+}
+
+/** Plan metadata (for UpdatePlan tool) */
+export interface PlanMeta {
+  plan: string;
+}
+
+/** Union type for all tool metadata */
+export type ToolMetadata =
+  | BashToolMetadata
+  | FileToolMetadata
+  | ReadToolMetadata
+  | AskUserQuestionMetadata
+  | UpdatePlanMetadata
+  | WebSearchMetadata
+  | PlanMeta;
+
+// ============================================================================
+// Tool Data (parsed from JSON content)
+// ============================================================================
+
+/** Tool names enum */
+export type ToolName = "bash" | "edit" | "read" | "write" | "AskUserQuestion" | "UpdatePlan" | "WebSearch" | "unknown";
+
+/** Tool execution result data */
+export interface ToolData {
   ok: boolean;
-  name: string;
-  output: string;
-  metadata?: Record<string, unknown>;
+  name: ToolName;
+  output?: string;
+  error?: string;
+  metadata?: ToolMetadata;
+  awaitUserResponse?: boolean;
+  followUpMessages?: Array<{
+    role: "system";
+    content: string;
+    contentParams?: unknown;
+  }>;
+}
+
+// ============================================================================
+// Utility Types
+// ============================================================================
+
+/** Type guard for AskUserQuestion metadata */
+export function isAskUserQuestionMetadata(metadata: unknown): metadata is AskUserQuestionMetadata {
+  return (
+    typeof metadata === "object" &&
+    metadata !== null &&
+    "kind" in metadata &&
+    (metadata as { kind: unknown }).kind === "ask_user_question"
+  );
+}
+
+/** Type guard for UpdatePlan metadata */
+export function isUpdatePlanMetadata(metadata: unknown): metadata is UpdatePlanMetadata {
+  return typeof metadata === "object" && metadata !== null && "plan" in metadata;
+}
+
+/** Type guard for FileTool metadata */
+export function isFileToolMetadata(metadata: unknown): metadata is FileToolMetadata {
+  return typeof metadata === "object" && metadata !== null && "file_path" in metadata;
+}
+
+/** Type guard for ReadTool metadata */
+export function isReadToolMetadata(metadata: unknown): metadata is ReadToolMetadata {
+  return typeof metadata === "object" && metadata !== null && "totalLines" in metadata;
+}
+
+/** Type guard for AskUserQuestion tool */
+export function isAskUserQuestionTool(name: string): boolean {
+  return name === "AskUserQuestion";
+}
+
+/** Type guard for UpdatePlan tool */
+export function isUpdatePlanTool(name: string): boolean {
+  return name === "UpdatePlan";
+}
+
+/** Type guard for file mutation tools (edit/write) */
+export function isFileMutationTool(name: string): boolean {
+  return name === "edit" || name === "write";
 }
 
 /**
- * Tool Bubble
- * @param param0
- * @param param0.content
- * @param param0.meta
- * @param param0.shouldConnect
- * @constructor
+ * Parse tool content JSON safely
  */
-export default function ToolBubble({ content, meta, shouldConnect = false }: ToolBubbleProps) {
-  let toolData: ToolData = { ok: false, name: "unknown", output: "" };
+function parseToolData(content: string): ToolData {
   try {
-    toolData = JSON.parse(content || "{}");
+    const parsed = JSON.parse(content || "{}");
+    return {
+      ok: Boolean(parsed.ok),
+      name: parsed.name || "unknown",
+      output: parsed.output,
+      error: parsed.error,
+      metadata: parsed.metadata,
+      awaitUserResponse: parsed.awaitUserResponse,
+      followUpMessages: parsed.followUpMessages,
+    } as ToolData;
   } catch {
-    // ignore parse errors
+    return { ok: false, name: "unknown" };
+  }
+}
+
+/**
+ * Render tool content based on tool type
+ */
+function renderToolContent(toolData: ToolData, resultMd: string, content: string): React.ReactNode {
+  const { name, ok, metadata, output } = toolData;
+  const toolNameLower = name.toLowerCase();
+
+  // UpdatePlan: render plan
+  if (isUpdatePlanTool(name) && isUpdatePlanMetadata(metadata) && ok && metadata.plan) {
+    return <PlanRenderer plan={metadata.plan} />;
   }
 
-  const isOk = Boolean(toolData.ok);
-  const toolName = toolData.name || "unknown";
-  const paramsMd = ((meta?.paramsMd as string) || "").trim();
-  const resultMd = ((meta?.resultMd as string) || "").trim();
-  const isAskUserQuestion = toolData.metadata?.kind === "ask_user_question";
+  // Edit/Write: render diff preview
+  if (isFileMutationTool(toolNameLower) && isFileToolMetadata(metadata) && ok) {
+    return <DiffPreview metadata={metadata} output={output || ""} />;
+  }
 
-  const [open, setOpen] = useState<boolean>(isAskUserQuestion);
+  // Default: render output or raw content
+  return (
+    <pre className="text-xs text-chart-2 whitespace-pre-wrap wrap-break-word p-2">{resultMd || output || content}</pre>
+  );
+}
 
-  // Special rendering for AskUserQuestion
+/**
+ * Tool Bubble Component
+ * Renders tool execution results with appropriate UI based on tool type.
+ */
+export default function ToolBubble({ content, meta, shouldConnect = false, isLastMessage = false }: ToolBubbleProps) {
+  const [open, setOpen] = useState<boolean>(false);
+  const { dispatch } = useChat();
+  const toolData = parseToolData(content);
+  const { ok, name, metadata } = toolData;
+
+  // Track if we've dispatched for AskUserQuestion to prevent re-dispatch
+  const hasDispatchedRef = useRef(false);
+
+  const paramsMd = (meta?.paramsMd as string | undefined)?.trim() ?? "";
+  const resultMd = (meta?.resultMd as string | undefined)?.trim() ?? "";
+
+  // AskUserQuestion: dispatch action to show AskQuestionCarousel (only once and only if last message)
+  const isAskUserQuestion = isAskUserQuestionMetadata(metadata);
+  useEffect(() => {
+    if (isAskUserQuestion && isLastMessage && !hasDispatchedRef.current) {
+      hasDispatchedRef.current = true;
+      dispatch({
+        type: "SET_ASK_USER_QUESTIONS",
+        data: { questions: (metadata as AskUserQuestionMetadata).questions },
+      });
+    }
+  }, [isAskUserQuestion, isLastMessage, dispatch, metadata]);
+
   if (isAskUserQuestion) {
-    return <ProgressShimmer>{(toolData.metadata?.questions || []).length || 0} confirmation pending</ProgressShimmer>;
-    return (
-      <div className="relative flex gap-2 mb-3">
-        <BubbleDot variant={isOk ? "success" : "error"} connectToPrev={shouldConnect} />
-        <div className="flex-1 min-w-0">
-          <div className="text-sm font-medium mb-1">{toolName}</div>
-          <AskUserQuestion toolData={toolData} />
-        </div>
-      </div>
-    );
+    if (isLastMessage)
+      return (
+        <ProgressShimmer>{(metadata as AskUserQuestionMetadata).questions.length} confirmation pending</ProgressShimmer>
+      );
+    return <div>&nbsp;</div>;
   }
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="relative flex w-full gap-2 mb-3">
-      <BubbleDot variant={isOk ? "success" : "error"} connectToPrev={shouldConnect} className="mt-3.5" />
+      <BubbleDot variant={ok ? "success" : "error"} connectToPrev={shouldConnect} className="mt-3.5" />
       <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>
       <div className="flex-1 min-w-0">
         <CollapsibleTrigger asChild>
@@ -70,7 +267,7 @@ export default function ToolBubble({ content, meta, shouldConnect = false }: Too
             variant="ghost"
             className="group w-full flex data-[state=open]:rounded-b-none data-[state=open]:border-muted"
           >
-            <span className="font-medium">{toolName}</span>
+            <span className="font-medium">{name}</span>
             {paramsMd && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -83,25 +280,11 @@ export default function ToolBubble({ content, meta, shouldConnect = false }: Too
                 </TooltipContent>
               </Tooltip>
             )}
-            <ChevronDown className={`ml-auto group-data-[state=open]:rotate-180`} />
+            <ChevronDown className="ml-auto group-data-[state=open]:rotate-180" />
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="w-auto data-[state=open]:bg-muted data-[state=open]:rounded-t-none data-[state=open]:rounded-b-sm">
-          <div className="text-sm">
-            {/* Plan renderer */}
-            {toolName.toLowerCase() === "updateplan" && toolData.ok && toolData.metadata?.plan ? (
-              <PlanRenderer plan={String(toolData.metadata.plan)} />
-            ) : /* Write/Edit with diff preview */
-            (toolName.toLowerCase() === "edit" || toolName.toLowerCase() === "write") &&
-              toolData.ok &&
-              toolData.metadata ? (
-              <DiffPreview toolData={toolData} />
-            ) : (
-              <pre className="text-xs text-chart-2 whitespace-pre-wrap wrap-break-word p-2">
-                {resultMd || toolData.output || content}
-              </pre>
-            )}
-          </div>
+          <div className="text-sm">{renderToolContent(toolData, resultMd, content)}</div>
         </CollapsibleContent>
       </div>
     </Collapsible>
