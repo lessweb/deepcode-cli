@@ -144,7 +144,7 @@ export const appRouter = router({
     try {
       const userPrompt = {
         type: "userPrompt",
-        prompt: prompt,
+        text: prompt,
         skills: skills.length > 0 ? (skills as SkillInfo[]) : undefined,
         imageUrls: normalizedImages.length > 0 ? normalizedImages : undefined,
         permissions: permissions && permissions.length > 0 ? (permissions as UserToolPermission[]) : undefined,

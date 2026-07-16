@@ -25,7 +25,7 @@ export default function SkillsPanel({ availableSkills, selectedSkills, onToggle 
     return (
       <InputGroupButton disabled className="text-xs h-8 text-muted-foreground">
         <GraduationCap className="h-3 w-3" />
-        <span>Skill</span>
+        <span>Skills</span>
       </InputGroupButton>
     );
   }
@@ -34,7 +34,7 @@ export default function SkillsPanel({ availableSkills, selectedSkills, onToggle 
     <>
       <InputGroupButton className="text-xs h-8 text-muted-foreground cursor-pointer" onClick={() => setOpen(true)}>
         <GraduationCap className="h-3 w-3" />
-        <span>Skill</span>
+        <span>Skills</span>
       </InputGroupButton>
       <CommandDialog open={open} onOpenChange={setOpen}>
         <Command autoFocus className="w-full" label="Skills command palette">

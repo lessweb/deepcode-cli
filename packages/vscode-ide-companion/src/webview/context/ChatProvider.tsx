@@ -210,6 +210,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
       const message = event.data as Record<string, unknown> | undefined;
       if (!message?.type) return;
 
+      console.log("[ChatProvider] postMessage received:", message.type, message);
+
       switch (message.type) {
         case "sessionStatus":
           dispatch({
@@ -281,7 +283,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
           permissions: options?.permissions as Array<{ toolCallId: string; permission: "allow" | "deny" }> | undefined,
           alwaysAllows: options?.alwaysAllows,
         });
-      } catch {
+      } catch (err) {
+        console.error("[ChatProvider] sendPrompt failed:", err);
         dispatch({ type: "SET_LOADING", loading: false });
       }
       const freshSkills = await chatService.getSkills();

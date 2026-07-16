@@ -1,6 +1,6 @@
 import { createWrpcClient } from "@webview-rpc/client";
 import { withReactQuery } from "@webview-rpc/react-query";
-import type { AppRouter } from "../router";
+import type { AppRouter } from "@/router";
 
 // ---------------------------------------------------------------------------
 // Extract per-procedure input / output from the AppRouter type so that
@@ -49,8 +49,32 @@ export const wrpc: WrpcClient = new Proxy(baseClient, {
     }
     const path = String(prop);
     return {
-      query: (input?: unknown) => target.call(path, input),
-      mutate: (input?: unknown) => target.call(path, input),
+      query: (input?: unknown) => {
+        console.log(`[wrpc] query: ${path}`, input);
+        return target.call(path, input).then(
+          (result: unknown) => {
+            console.log(`[wrpc] query: ${path} → resolved`, result);
+            return result;
+          },
+          (err: unknown) => {
+            console.error(`[wrpc] query: ${path} → rejected`, err);
+            throw err;
+          }
+        );
+      },
+      mutate: (input?: unknown) => {
+        console.log(`[wrpc] mutate: ${path}`, input);
+        return target.call(path, input).then(
+          (result: unknown) => {
+            console.log(`[wrpc] mutate: ${path} → resolved`, result);
+            return result;
+          },
+          (err: unknown) => {
+            console.error(`[wrpc] mutate: ${path} → rejected`, err);
+            throw err;
+          }
+        );
+      },
     };
   },
 }) as WrpcClient;

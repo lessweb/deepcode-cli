@@ -2,7 +2,6 @@ import { cn } from "@/webview/lib/utils";
 
 interface BubbleDotProps {
   variant?: "default" | "success" | "error";
-  connectToPrev?: boolean;
   className?: string;
 }
 
@@ -10,11 +9,10 @@ interface BubbleDotProps {
  * BubbleDot component
  * @param param0
  * @param param0.variant
- * @param param0.connectToPrev
  * @param param0.className
  * @constructor
  */
-export default function BubbleDot({ variant = "default", connectToPrev = false, className }: BubbleDotProps) {
+export default function BubbleDot({ variant = "default", className }: BubbleDotProps) {
   return (
     <span
       className={cn(
@@ -22,7 +20,6 @@ export default function BubbleDot({ variant = "default", connectToPrev = false, 
         variant === "success" && "bg-success",
         variant === "error" && "bg-destructive",
         variant === "default" && "bg-muted-foreground",
-        connectToPrev && "connect-to-prev",
         className
       )}
     />

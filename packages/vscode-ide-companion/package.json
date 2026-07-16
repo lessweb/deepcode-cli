@@ -34,6 +34,12 @@
     "onStartupFinished",
     "onView:deepcode.chatView"
   ],
+  "files": [
+    "dist/**",
+    "assets/**",
+    "templates/**",
+    "LICENSE"
+  ],
   "contributes": {
     "commands": [
       {

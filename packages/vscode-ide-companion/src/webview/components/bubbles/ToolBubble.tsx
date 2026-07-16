@@ -7,8 +7,6 @@ import { ChevronDown } from "lucide-react";
 import { Button } from "@/webview/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/webview/components/ui/tooltip";
 import ProgressShimmer from "@/webview/components/ProgressShimmer";
-import { useChat } from "@/webview/context";
-
 export interface ToolBubbleProps {
   content: string;
   meta?: {
@@ -21,6 +19,7 @@ export interface ToolBubbleProps {
   };
   shouldConnect?: boolean;
   isLastMessage?: boolean;
+  onAskUserQuestions?: (questions: AskUserQuestionMetadata["questions"]) => void;
 }
 
 // ============================================================================
@@ -224,9 +223,14 @@ function renderToolContent(toolData: ToolData, resultMd: string, content: string
  * Tool Bubble Component
  * Renders tool execution results with appropriate UI based on tool type.
  */
-export default function ToolBubble({ content, meta, shouldConnect = false, isLastMessage = false }: ToolBubbleProps) {
+export default function ToolBubble({
+  content,
+  meta,
+  shouldConnect = false,
+  isLastMessage = false,
+  onAskUserQuestions,
+}: ToolBubbleProps) {
   const [open, setOpen] = useState<boolean>(false);
-  const { dispatch } = useChat();
   const toolData = parseToolData(content);
   const { ok, name, metadata } = toolData;
 
@@ -236,17 +240,14 @@ export default function ToolBubble({ content, meta, shouldConnect = false, isLas
   const paramsMd = (meta?.paramsMd as string | undefined)?.trim() ?? "";
   const resultMd = (meta?.resultMd as string | undefined)?.trim() ?? "";
 
-  // AskUserQuestion: dispatch action to show AskQuestionCarousel (only once and only if last message)
+  // AskUserQuestion: notify parent to show AskQuestionCarousel (only once and only if last message)
   const isAskUserQuestion = isAskUserQuestionMetadata(metadata);
   useEffect(() => {
-    if (isAskUserQuestion && isLastMessage && !hasDispatchedRef.current) {
+    if (isAskUserQuestion && isLastMessage && !hasDispatchedRef.current && onAskUserQuestions) {
       hasDispatchedRef.current = true;
-      dispatch({
-        type: "SET_ASK_USER_QUESTIONS",
-        data: { questions: (metadata as AskUserQuestionMetadata).questions },
-      });
+      onAskUserQuestions((metadata as AskUserQuestionMetadata).questions);
     }
-  }, [isAskUserQuestion, isLastMessage, dispatch, metadata]);
+  }, [isAskUserQuestion, isLastMessage, onAskUserQuestions, metadata]);
 
   if (isAskUserQuestion) {
     if (isLastMessage)
@@ -258,8 +259,8 @@ export default function ToolBubble({ content, meta, shouldConnect = false, isLas
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="relative flex w-full gap-2 mb-3">
-      <BubbleDot variant={ok ? "success" : "error"} connectToPrev={shouldConnect} className="mt-3.5" />
-      <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>
+      <BubbleDot variant={ok ? "success" : "error"} className="mt-3.5" />
+      {shouldConnect && <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>}
       <div className="flex-1 min-w-0">
         <CollapsibleTrigger asChild>
           <Button

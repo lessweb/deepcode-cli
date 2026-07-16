@@ -5,6 +5,7 @@
       "type": "npm",
       "script": "dev:webview",
       "isBackground": true,
+      "dependsOn": ["npm: watch"],
       "problemMatcher": {
         "owner": "custom",
         "pattern": {

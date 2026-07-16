@@ -9,7 +9,7 @@ import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } fro
 import { Separator } from "@/webview/components/ui/separator";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { cn } from "@/webview/lib/utils";
-import { Field, FieldGroup } from "./ui/field";
+import { Field, FieldDescription, FieldGroup } from "./ui/field";
 import { Spinner } from "@/webview/components/ui/spinner";
 
 export interface InputPromptProps {
@@ -17,8 +17,6 @@ export interface InputPromptProps {
   selectedSkills: SkillInfo[];
   availableSkills: SkillInfo[];
   pendingPermissionReply: unknown;
-  askPermissions: unknown[];
-  activeSessionStatus: string | null;
   tokenTelemetry?: TokenTelemetry;
   activeEditor: ActiveEditor | null;
   editingMessage: EditingMessage | null;
@@ -39,8 +37,6 @@ export default function InputPrompt({
   selectedSkills,
   availableSkills,
   pendingPermissionReply,
-  askPermissions,
-  activeSessionStatus,
   tokenTelemetry,
   activeEditor,
   editingMessage,
@@ -57,8 +53,6 @@ export default function InputPrompt({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls, loadImages } =
     usePromptAttachments();
-  console.log("askPermissions:", askPermissions);
-  console.log("activeSessionStatus:", activeSessionStatus);
 
   // Rebuild history from messages when messages change (e.g., loading a session)
   useEffect(() => {
@@ -195,8 +189,8 @@ export default function InputPrompt({
   const hasContent = value.trim().length > 0 || attachments.length > 0;
 
   return (
-    <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm px-4 pt-1.5 pb-4">
-      <Field>
+    <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm px-4 pt-1.5 pb-1">
+      <Field className="gap-0.5">
         <InputGroup>
           <div className="flex flex-col w-full">
             <InputGroupTextarea
@@ -283,6 +277,9 @@ export default function InputPrompt({
           />
           <PromptAttachments attachments={attachments} onRemove={removeAttachment} />
         </InputGroup>
+        <FieldDescription className="text-center text-[12px]">
+          AI-generated content, for reference only
+        </FieldDescription>
       </Field>
     </FieldGroup>
   );

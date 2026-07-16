@@ -15,8 +15,8 @@ export default function ThinkingBubble({ content, shouldConnect = false }: Think
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="relative flex w-full gap-2 rounded-md mb-3">
-      <BubbleDot connectToPrev={shouldConnect} className="mt-3.5" />
-      <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>
+      <BubbleDot className="mt-3.5" />
+      {shouldConnect && <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>}
       <div className="flex-1 min-w-0 data-[state=open]:bg-muted">
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="group w-full">

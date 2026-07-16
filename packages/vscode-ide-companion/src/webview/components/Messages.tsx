@@ -3,7 +3,10 @@ import { ScrollArea, ScrollBar } from "@/webview/components/ui/scroll-area";
 import UserBubble from "@/webview/components/bubbles/UserBubble";
 import AssistantBubble from "@/webview/components/bubbles/AssistantBubble";
 import ThinkingBubble from "@/webview/components/bubbles/ThinkingBubble";
-import ToolBubble, { type ToolBubbleProps } from "@/webview/components/bubbles/ToolBubble";
+import ToolBubble, {
+  type ToolBubbleProps,
+  type AskUserQuestionMetadata,
+} from "@/webview/components/bubbles/ToolBubble";
 import SystemBubble from "@/webview/components/bubbles/SystemBubble";
 import type { SessionMessage, EditingMessage } from "@/webview/types";
 
@@ -11,9 +14,10 @@ interface MessagesProps {
   messages: SessionMessage[];
   loading: boolean;
   onEditMessage?: (editing: EditingMessage) => void;
+  onAskUserQuestions?: (questions: AskUserQuestionMetadata["questions"]) => void;
 }
 
-export default function Messages({ messages, loading, onEditMessage }: MessagesProps) {
+export default function Messages({ messages, loading, onEditMessage, onAskUserQuestions }: MessagesProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -29,7 +33,6 @@ export default function Messages({ messages, loading, onEditMessage }: MessagesP
 
           switch (msg.role) {
             case "user":
-              console.log("msg:", msg);
               return (
                 <UserBubble
                   key={`msg-${index}`}
@@ -64,6 +67,7 @@ export default function Messages({ messages, loading, onEditMessage }: MessagesP
                   meta={msg.meta as ToolBubbleProps["meta"]}
                   shouldConnect={shouldConnect}
                   isLastMessage={index === messages.length - 1}
+                  onAskUserQuestions={onAskUserQuestions}
                 />
               );
             case "system":

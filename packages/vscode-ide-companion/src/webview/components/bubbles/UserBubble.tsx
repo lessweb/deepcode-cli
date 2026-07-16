@@ -66,7 +66,7 @@ export default function UserBubble({ content, meta, onEdit }: UserBubbleProps) {
               onClick={handleCopy}
               title={copied ? "Copied!" : "Copy"}
             >
-              {copied ? <Check className="h-3 w-3 text-success" /> : <Copy className="h-3 w-3" />}
+              {copied ? <Check className="size-3.5 text-success" /> : <Copy className="size-3.5" />}
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
@@ -76,7 +76,7 @@ export default function UserBubble({ content, meta, onEdit }: UserBubbleProps) {
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="icon-sm" className="cursor-pointer" onClick={handleEdit}>
-              <PenLine className="h-3 w-3" />
+              <PenLine className="size-3.5" />
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">

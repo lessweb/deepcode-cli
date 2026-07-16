@@ -1,3 +1,4 @@
+import { useCallback } from "react";
 import Header from "@/webview/components/Header";
 import Messages from "@/webview/components/Messages";
 import InputPrompt from "@/webview/components/InputPrompt";
@@ -5,9 +6,17 @@ import ThinkingLiveBubble from "@/webview/components/ThinkingLiveBubble";
 import PermissionPrompt from "@/webview/components/PermissionPrompt";
 import { useChat } from "@/webview/context/ChatProvider";
 import AskQuestionCarousel from "@/webview/components/AskQuestionCarousel";
+import type { AskUserQuestionMetadata } from "@/webview/components/bubbles/ToolBubble";
 
 export default function App() {
   const { state, dispatch, actions } = useChat();
+
+  const handleAskUserQuestions = useCallback(
+    (questions: AskUserQuestionMetadata["questions"]) => {
+      dispatch({ type: "SET_ASK_USER_QUESTIONS", data: { questions } });
+    },
+    [dispatch]
+  );
 
   return (
     <div className="relative flex flex-col h-screen min-h-screen w-full overflow-hidden">
@@ -17,7 +26,12 @@ export default function App() {
         onSelectSession={actions.selectSession}
         onCreateNewSession={actions.createNewSession}
       />
-      <Messages messages={state.messages} loading={state.loading} onEditMessage={actions.editMessage} />
+      <Messages
+        messages={state.messages}
+        loading={state.loading}
+        onEditMessage={actions.editMessage}
+        onAskUserQuestions={handleAskUserQuestions}
+      />
       <PermissionPrompt
         askPermissions={state.askPermissions}
         sessionStatus={state.activeSessionStatus}
@@ -33,7 +47,7 @@ export default function App() {
         <ThinkingLiveBubble
           llmStreamProgress={state.llmStreamProgress}
           processes={state.processes}
-          shouldConnect={state.lastMessageRole !== null && state.lastMessageRole !== "user"}
+          // shouldConnect={state.lastMessageRole !== null && state.lastMessageRole !== "user"}
         />
       )}
       {state.askUserQuestions && (
@@ -47,8 +61,8 @@ export default function App() {
         selectedSkills={state.selectedSkills}
         availableSkills={state.skills}
         pendingPermissionReply={state.pendingPermissionReply}
-        askPermissions={state.askPermissions}
-        activeSessionStatus={state.activeSessionStatus}
+        // askPermissions={state.askPermissions}
+        // activeSessionStatus={state.activeSessionStatus}
         tokenTelemetry={state.tokenTelemetry}
         activeEditor={state.activeEditor}
         editingMessage={state.editingMessage}

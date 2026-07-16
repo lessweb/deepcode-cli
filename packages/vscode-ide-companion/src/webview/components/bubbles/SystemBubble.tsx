@@ -18,8 +18,8 @@ export default function SystemBubble({ content, meta, shouldConnect = false }: S
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="relative w-full flex gap-2 mb-3">
-      <BubbleDot connectToPrev={shouldConnect} className="mt-3.5" />
-      <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>
+      <BubbleDot className="mt-3.5" />
+      {shouldConnect && <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>}
       <div className="flex-1 min-w-0">
         <CollapsibleTrigger asChild>
           <Button variant="ghost" className="group w-full cursor-pointer">
