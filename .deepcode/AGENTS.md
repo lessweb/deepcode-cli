@@ -25,6 +25,7 @@ packages/
 │   ├── ui/hooks/           # Custom hooks (cursor, history navigation, paste handling, terminal input, statusline)
 │   ├── ui/contexts/        # React contexts (AppContext, RawModeContext)
 │   ├── ui/statusline/      # Pluggable statusline providers (command, module)
+│   ├── ui/utils/            # Shared UI utilities (writing, formatting)
 │   └── tests/              # UI-focused tests with run-tests.mjs runner
 ├── vscode-ide-companion/   # VSCode extension companion
 │   └── src/                # extension.ts, provider.ts, utils.ts
@@ -55,6 +56,9 @@ All commands run from the repo root.
 | `npm run start` | Runs the locally built CLI (`scripts/start.js`) |
 | `npm run build-and-start` | Builds then starts the CLI |
 | `npm run clean` | Removes generated files and dist directories |
+| `npm run release:version` | Bumps version across all packages |
+| `npm run prepare:package` | Prepares the CLI package for distribution |
+| `npm run prepare:vscode` | Prepares the VSCode extension for distribution |
 
 To run a **single test file** within a package:
 ```
@@ -111,17 +115,19 @@ Run the CLI locally for manual testing: `node packages/cli/dist/cli.js` (after `
 
 ## Architecture Overview
 
-The CLI (`@vegamo/deepcode-cli`) renders a terminal UI using [Ink](https://github.com/vadimdemedes/ink) (React for terminals). `SessionManager` (in `@vegamo/deepcode-core`) drives the LLM interaction loop: it builds system prompts, sends user messages with optional skills/images, streams responses, executes tool calls via `ToolExecutor`, and compacts context when token thresholds are exceeded (512K for DeepSeek V4 models, 128K for others). OpenAI client connectivity is managed by `createOpenAIClient()` with a 180-second keep-alive timeout.
+The CLI (`@vegamo/deepcode-cli`) renders a terminal UI using [Ink](https://github.com/vadimdemedes/ink) (React for terminals). `SessionManager` (in `@vegamo/deepcode-core`) drives the LLM interaction loop: it builds system prompts, sends user messages with optional skills/images, streams responses, executes tool calls via `ToolExecutor`, and compacts context when token thresholds are exceeded (512K for DeepSeek V4 models, 128K for others). OpenAI client connectivity is managed by `createOpenAIClient()` with a 180-second keep-alive timeout. API errors are normalized through `describeLlmError()` in `packages/core/src/common/llm-error.ts`, which produces credential-safe, structured error details.
 
-Seven built-in tools are available to the LLM: `bash`, `read`, `write`, `edit`, `AskUserQuestion`, `UpdatePlan`, and `WebSearch`. Tool definitions are registered in `packages/core/src/tools/executor.ts` and described to the LLM via `packages/core/src/prompt.ts`.
+Seven built-in tools are available to the LLM: `bash`, `read`, `write`, `edit`, `AskUserQuestion`, `UpdatePlan`, and `WebSearch`. The `read` tool returns a `snippet_id` that must be passed to subsequent `edit` calls, ensuring edits always operate on a known, session-local file snapshot. Tool definitions are registered in `packages/core/src/tools/executor.ts` and described to the LLM via `packages/core/src/prompt.ts`.
 
 A **permission system** (`packages/core/src/common/permissions.ts`) controls tool execution scopes (read/write/delete/network/git-log, etc.) with configurable allow/deny/ask decisions.
 
 A **file history system** (`packages/core/src/common/file-history.ts`) provides undo/checkpoint support via lightweight Git branches.
 
-**Slash commands**: `/skills`, `/model`, `/new`, `/init`, `/resume`, `/continue`, `/undo`, `/mcp`, `/raw`, `/exit`, plus dynamic `/skill-name` for each loaded skill.
+**Slash commands**: `/skills`, `/model`, `/plan`, `/new`, `/init`, `/resume`, `/continue`, `/undo`, `/mcp`, `/raw`, `/exit`, plus dynamic `/skill-name` for each loaded skill.
 
-**Key UI features**: `@` file mentions in the prompt input, `Ctrl+O` to view live process stdout, `Ctrl+V` to paste images, `Ctrl+X` to clear images, Shift+Enter for newlines, pluggable statusline, MCP server status display, undo selector, and permission prompts.
+**Plan Mode** (`/plan` or `Shift+Tab`): Restricts the agent to read-only operations on the first turn and requires it to produce a task plan via `<proposed_plan>` for user approval before any file writes, deletions, or git mutations. When enabled, write/delete/mutate-git-log permissions are force-asked regardless of user settings.
+
+**Key UI features**: `@` file mentions in the prompt input, `Ctrl+O` to view live process stdout, `Ctrl+V` to paste images, `Ctrl+X` to clear images, Shift+Enter for newlines, `Shift+Tab` to toggle Plan Mode, pluggable statusline, MCP server status display, undo selector, and permission prompts.
 
 **CLI flags**: `-p <prompt>` / `--prompt` to auto-submit a prompt on launch, `-r [sessionId]` / `--resume [sessionId]` to resume a session or show the session picker, `-v` / `--version`, `-h` / `--help`.
 

@@ -105,6 +105,8 @@ export { DEEPSEEK_V4_MODELS, supportsMultimodal, defaultsToThinkingMode } from "
 export { findGitBashPath, resolveShellPath, setShellIfWindows } from "./common/shell-utils";
 export { logApiError } from "./common/error-logger";
 export { logOpenAIChatCompletionDebug } from "./common/debug-logger";
+export { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
+export type { LlmErrorDetails } from "./common/llm-error";
 export {
   clampBashTimeoutMs,
   DEFAULT_BASH_TIMEOUT_MS,

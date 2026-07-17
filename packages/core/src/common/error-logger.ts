@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
+import type { LlmErrorDetails } from "./llm-error";
 
 const LOG_DIR = path.join(os.homedir(), ".deepcode", "logs");
 const ERROR_LOG_PATH = path.join(LOG_DIR, "error.log");
@@ -78,11 +79,7 @@ export type ApiErrorLogEntry = {
   sessionId?: string;
   model?: string;
   baseURL?: string;
-  error: {
-    name: string;
-    message: string;
-    stack?: string;
-  };
+  error: LlmErrorDetails;
   request: Record<string, unknown>;
   response?: unknown;
 };
@@ -101,11 +98,7 @@ export function logApiError(entry: ApiErrorLogEntry): void {
       sessionId: entry.sessionId,
       model: entry.model,
       baseURL: entry.baseURL,
-      error: {
-        name: entry.error.name,
-        message: maskSensitive(entry.error.message),
-        stack: entry.error.stack ? maskSensitive(entry.error.stack) : undefined,
-      },
+      error: sanitizeError(entry.error),
       request: sanitizeRequestPayload(entry.request),
     };
 
@@ -126,4 +119,13 @@ export function logApiError(entry: ApiErrorLogEntry): void {
   } catch {
     // Silently ignore logging failures to avoid disrupting the main flow
   }
+}
+
+function sanitizeError(error: LlmErrorDetails): LlmErrorDetails {
+  return {
+    ...error,
+    message: maskSensitive(error.message),
+    stack: error.stack ? maskSensitive(error.stack) : undefined,
+    causes: error.causes?.map(sanitizeError),
+  };
 }
