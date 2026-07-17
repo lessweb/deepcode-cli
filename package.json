@@ -1,5 +1,6 @@
 {
   "name": "@vegamo/deepcode",
+  "version": "0.1.34",
   "description": "Deep Code — CLI, core library, and VSCode companion",
   "license": "MIT",
   "packageManager": "npm@10.9.4",
@@ -48,6 +49,5 @@
     "tsx": "^4.21.0",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.59.2"
-  },
-  "version": "0.0.1"
+  }
 }
