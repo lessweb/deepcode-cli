@@ -7,7 +7,7 @@
       "request": "launch",
       "args": ["--extensionDevelopmentPath=${workspaceFolder}"],
       "outFiles": ["${workspaceFolder}/dist/**/*.js"],
-      "preLaunchTask": "npm: dev:webview",
+      "preLaunchTask": "Start Dev Watch",
       "presentation": {
         "group": "deepcode"
       }

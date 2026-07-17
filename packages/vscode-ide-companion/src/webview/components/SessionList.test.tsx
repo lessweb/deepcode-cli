@@ -98,6 +98,8 @@ describe("SessionList", () => {
     activeSessionId: null,
     onSelect: vi.fn(),
     onCreateNewSession: vi.fn(),
+    onRename: vi.fn(),
+    onDelete: vi.fn(),
   };
 
   beforeEach(() => {

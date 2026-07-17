@@ -3,6 +3,8 @@
 import type { MessageMeta } from "@vegamo/deepcode-core";
 
 export interface SessionMessage {
+  id?: string;
+  sessionId?: string;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
   meta?: MessageMeta;

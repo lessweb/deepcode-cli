@@ -36,6 +36,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
   private readonly context: vscode.ExtensionContext;
   private webviewView: vscode.WebviewView | undefined;
+  private activeChatPanel: vscode.WebviewPanel | undefined;
   private readonly sessionManager: SessionManager;
 
   constructor(context: vscode.ExtensionContext) {
@@ -131,6 +132,47 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           };
         }
         return null;
+      },
+      openChatPanel: (sessionId, viewColumn) => {
+        // Dispose previous chat panel if exists (mutual exclusion)
+        if (this.activeChatPanel) {
+          this.activeChatPanel.dispose();
+          this.activeChatPanel = undefined;
+        }
+
+        const panel = vscode.window.createWebviewPanel(
+          "deepcode.chatPanel",
+          "Deep Code",
+          { viewColumn: viewColumn as unknown as vscode.ViewColumn, preserveFocus: true },
+          {
+            enableScripts: true,
+            retainContextWhenHidden: true,
+            localResourceRoots: [vscode.Uri.file(path.join(this.context.extensionPath, "dist", "webview"))],
+          }
+        );
+
+        // Track panel and clean up on dispose
+        this.activeChatPanel = panel;
+        panel.onDidDispose(() => {
+          if (this.activeChatPanel === panel) {
+            this.activeChatPanel = undefined;
+          }
+        });
+
+        // Build RPC context for this panel
+        const panelContext: RouterContext = {
+          ...rpcContext,
+          postMessage: (message) => panel.webview.postMessage(message),
+        };
+
+        // Attach RPC router and load content
+        attachRouterToPanel(appRouter, panel, panelContext);
+        getWebviewContent(this.context, panel.webview).then((html) => {
+          panel.webview.html = html;
+        });
+
+        // Switch to this session
+        this.sessionManager.setActiveSessionId(sessionId);
       },
     };
 

@@ -160,4 +160,53 @@ export const chatService = {
     const result = await wrpc.addSystemMessage.mutate({ content, meta });
     return result as { ok: boolean; error?: string };
   },
+
+  /**
+   * Rename a session
+   */
+  async renameSession(sessionId: string, summary: string): Promise<{ ok: boolean; error?: string }> {
+    const result = await wrpc.renameSession.mutate({ sessionId, summary });
+    return result as { ok: boolean; error?: string };
+  },
+
+  /**
+   * Delete a session
+   */
+  async deleteSession(sessionId: string): Promise<{ ok: boolean; error?: string; wasActiveSession?: boolean }> {
+    const result = await wrpc.deleteSession.mutate({ sessionId });
+    return result as { ok: boolean; error?: string; wasActiveSession?: boolean };
+  },
+
+  /**
+   * Get the JSONL file path for a session (for Inspect JSONL)
+   */
+  async getSessionFilePath(sessionId: string): Promise<{ filePath: string }> {
+    const result = await wrpc.getSessionFilePath.query({ sessionId });
+    return result as { filePath: string };
+  },
+
+  /**
+   * Open a chat panel for a session in a specific view column
+   * viewColumn: 1 = Active (Open as Editor), 2 = Beside (Open to the Side)
+   */
+  async openChatPanel(sessionId: string, viewColumn: number): Promise<{ ok: boolean }> {
+    const result = await wrpc.openChatPanel.mutate({ sessionId, viewColumn });
+    return result as { ok: boolean };
+  },
+
+  /**
+   * Open the chat in a new VSCode window
+   */
+  async openChatInNewWindow(sessionId: string): Promise<{ ok: boolean }> {
+    const result = await wrpc.openChatInNewWindow.mutate({ sessionId });
+    return result as { ok: boolean };
+  },
+
+  /**
+   * Open a URL in the default browser
+   */
+  async openExternal(url: string): Promise<{ ok: boolean }> {
+    const result = await wrpc.openExternal.mutate({ url });
+    return result as { ok: boolean };
+  },
 };

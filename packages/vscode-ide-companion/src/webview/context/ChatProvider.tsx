@@ -33,6 +33,8 @@ interface ChatContextValue {
     denyPermission: (sessionId: string) => Promise<void>;
     setSelectedSkills: (skills: SkillInfo[]) => void;
     editMessage: (editingMessage: EditingMessage | null) => void;
+    renameSession: (sessionId: string, summary: string) => Promise<void>;
+    deleteSession: (sessionId: string) => Promise<void>;
   };
 }
 
@@ -340,6 +342,33 @@ export function ChatProvider({ children }: ChatProviderProps) {
     dispatch({ type: "SET_EDITING_MESSAGE", editingMessage });
   }, []);
 
+  const renameSession = useCallback(
+    async (sessionId: string, summary: string) => {
+      await chatService.renameSession(sessionId, summary);
+      // Only update the session title locally, don't reload messages
+      dispatch({
+        type: "SET_SESSIONS",
+        sessions: state.sessions.map((s) => (s.id === sessionId ? { ...s, summary } : s)),
+      });
+    },
+    [state.sessions]
+  );
+
+  const deleteSession = useCallback(
+    async (sessionId: string) => {
+      const result = await chatService.deleteSession(sessionId);
+      if (result.ok) {
+        const sessions = state.sessions.filter((s) => s.id !== sessionId);
+        if (result.wasActiveSession) {
+          await createNewSession();
+        } else {
+          dispatch({ type: "SET_SESSIONS", sessions });
+        }
+      }
+    },
+    [state.sessions, createNewSession]
+  );
+
   const contextValue: ChatContextValue = {
     state,
     dispatch,
@@ -351,6 +380,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
       denyPermission,
       setSelectedSkills,
       editMessage,
+      renameSession,
+      deleteSession,
     },
   };
 

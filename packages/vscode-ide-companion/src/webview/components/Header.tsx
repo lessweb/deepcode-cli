@@ -12,9 +12,18 @@ interface HeaderProps {
   activeSessionId: string | null;
   onSelectSession: (sessionId: string) => void;
   onCreateNewSession: () => void;
+  onRenameSession: (sessionId: string, summary: string) => void;
+  onDeleteSession: (sessionId: string) => void;
 }
 
-export default function Header({ sessions, activeSessionId, onSelectSession, onCreateNewSession }: HeaderProps) {
+export default function Header({
+  sessions,
+  activeSessionId,
+  onSelectSession,
+  onCreateNewSession,
+  onRenameSession,
+  onDeleteSession,
+}: HeaderProps) {
   const handleSelect = useCallback(
     (sessionId: string) => {
       onSelectSession(sessionId);
@@ -76,6 +85,8 @@ export default function Header({ sessions, activeSessionId, onSelectSession, onC
           activeSessionId={activeSessionId}
           onSelect={handleSelect}
           onCreateNewSession={onCreateNewSession}
+          onRename={onRenameSession}
+          onDelete={onDeleteSession}
         />
       </div>
     </div>

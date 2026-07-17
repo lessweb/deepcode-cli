@@ -8,7 +8,7 @@ import ToolBubble, {
   type AskUserQuestionMetadata,
 } from "@/webview/components/bubbles/ToolBubble";
 import SystemBubble from "@/webview/components/bubbles/SystemBubble";
-import type { SessionMessage, EditingMessage } from "@/webview/types";
+import type { EditingMessage, SessionMessage } from "@/webview/types";
 
 interface MessagesProps {
   messages: SessionMessage[];
@@ -55,15 +55,17 @@ export default function Messages({ messages, loading, onEditMessage, onAskUserQu
             case "assistant": {
               const meta = msg.meta as { asThinking?: boolean } | undefined;
               if (meta?.asThinking) {
-                return <ThinkingBubble key={`msg-${index}`} content={msg.content} shouldConnect={shouldConnect} />;
+                return (
+                  <ThinkingBubble key={`msg-${index}`} content={msg.content || ""} shouldConnect={shouldConnect} />
+                );
               }
-              return <AssistantBubble key={`msg-${index}`} content={msg.content} shouldConnect={shouldConnect} />;
+              return <AssistantBubble key={`msg-${index}`} message={msg} />;
             }
             case "tool":
               return (
                 <ToolBubble
                   key={`msg-${index}`}
-                  content={msg.content}
+                  content={msg.content || ""}
                   meta={msg.meta as ToolBubbleProps["meta"]}
                   shouldConnect={shouldConnect}
                   isLastMessage={index === messages.length - 1}
@@ -74,7 +76,7 @@ export default function Messages({ messages, loading, onEditMessage, onAskUserQu
               return (
                 <SystemBubble
                   key={`msg-${index}`}
-                  content={msg.content}
+                  content={msg.content || ""}
                   meta={msg.meta}
                   shouldConnect={shouldConnect}
                 />

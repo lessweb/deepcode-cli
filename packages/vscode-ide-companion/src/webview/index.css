@@ -22,7 +22,7 @@
 
   /* VS Code CSS Variables for Webview Theming */
   /* Using oklch with alpha to support Tailwind's /opacity modifier */
-  --background: var(--vscode-editor-background, #ffffff);
+  --background: var(--vscode-sideBar-background, #ffffff);
   --foreground: var(--vscode-foreground, #333333);
   --card: var(--vscode-sideBar-background, #f0f0f0);
   --card-foreground: var(--vscode-foreground, #333333);
@@ -151,7 +151,7 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-popover text-foreground;
+    @apply bg-background text-foreground;
   }
   html {
     @apply font-sans;

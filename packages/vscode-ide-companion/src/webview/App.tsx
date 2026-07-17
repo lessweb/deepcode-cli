@@ -25,6 +25,8 @@ export default function App() {
         activeSessionId={state.activeSessionId}
         onSelectSession={actions.selectSession}
         onCreateNewSession={actions.createNewSession}
+        onRenameSession={actions.renameSession}
+        onDeleteSession={actions.deleteSession}
       />
       <Messages
         messages={state.messages}

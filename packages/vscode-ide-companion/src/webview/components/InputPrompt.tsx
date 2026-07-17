@@ -3,7 +3,7 @@ import SkillsPanel from "@/webview/components/SkillsPanel";
 import SkillsTags from "@/webview/components/SkillsTags";
 import ContextIndicator from "@/webview/components/ContextIndicator";
 import { PromptAttachments, usePromptAttachments } from "@/webview/components/PromptAttachments";
-import type { ActiveEditor, EditingMessage, SkillInfo, TokenTelemetry } from "@/webview/types";
+import type { ActiveEditor, EditingMessage, SessionMessage, SkillInfo, TokenTelemetry } from "@/webview/types";
 import { FileCodeIcon, Reply, Square } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/webview/components/ui/input-group";
 import { Separator } from "@/webview/components/ui/separator";
@@ -20,7 +20,7 @@ export interface InputPromptProps {
   tokenTelemetry?: TokenTelemetry;
   activeEditor: ActiveEditor | null;
   editingMessage: EditingMessage | null;
-  messages?: { role: string; content: string }[]; // Historical messages for history navigation
+  messages?: SessionMessage[]; // Historical messages for history navigation
   onSendPrompt: (
     prompt: string,
     skills?: SkillInfo[],
