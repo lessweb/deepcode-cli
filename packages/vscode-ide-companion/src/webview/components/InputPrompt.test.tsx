@@ -60,6 +60,12 @@ vi.mock("@/webview/components/ui/input-group", () => ({
 vi.mock("@/webview/components/ui/field", () => ({
   Field: vi.fn(({ children }) => <div data-testid="field">{children}</div>),
   FieldGroup: vi.fn(({ children }) => <div data-testid="field-group">{children}</div>),
+  FieldDescription: vi.fn(({ children }) => <div>{children}</div>),
+  FieldSet: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
+vi.mock("@/webview/components/ui/spinner", () => ({
+  Spinner: vi.fn(({ className }) => <span data-testid="spinner" className={className} />),
 }));
 
 vi.mock("@/webview/components/ui/separator", () => ({

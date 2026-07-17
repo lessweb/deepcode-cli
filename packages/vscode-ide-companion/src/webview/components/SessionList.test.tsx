@@ -61,12 +61,61 @@ vi.mock("@/webview/components/ui/item", () => ({
   ItemContent: vi.fn(({ children }) => <div>{children}</div>),
   ItemGroup: vi.fn(({ children }) => <div data-testid="item-group">{children}</div>),
   ItemActions: vi.fn(({ children }) => <div>{children}</div>),
+  ItemTitle: vi.fn(({ children }) => <span>{children}</span>),
+  ItemDescription: vi.fn(({ children }) => <span>{children}</span>),
 }));
 
 vi.mock("@/webview/components/ui/tooltip", () => ({
   Tooltip: vi.fn(({ children }) => <div>{children}</div>),
   TooltipTrigger: vi.fn(({ children }) => <div>{children}</div>),
   TooltipContent: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
+vi.mock("@/webview/components/ui/context-menu", () => ({
+  ContextMenu: vi.fn(({ children }) => <div>{children}</div>),
+  ContextMenuTrigger: vi.fn(({ children }) => <div>{children}</div>),
+  ContextMenuContent: vi.fn(({ children }) => <div>{children}</div>),
+  ContextMenuItem: vi.fn(({ children }) => <div>{children}</div>),
+  ContextMenuSeparator: vi.fn(() => <div />),
+  ContextMenuShortcut: vi.fn(({ children }) => <span>{children}</span>),
+  ContextMenuGroup: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
+vi.mock("@/webview/components/ui/alert-dialog", () => ({
+  AlertDialog: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogAction: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogCancel: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogContent: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogDescription: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogFooter: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogHeader: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogMedia: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogTitle: vi.fn(({ children }) => <div>{children}</div>),
+  AlertDialogTrigger: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
+vi.mock("@/webview/components/ui/input", () => ({
+  Input: vi.fn(({ value, onChange, ...props }) => <input value={value} onChange={onChange} {...props} />),
+}));
+
+vi.mock("@/webview/components/ui/sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+  Toaster: vi.fn(() => null),
+}));
+
+vi.mock("@/webview/components/ui/field", () => ({
+  Field: vi.fn(({ children }) => <div>{children}</div>),
+  FieldDescription: vi.fn(({ children }) => <div>{children}</div>),
+  FieldSet: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
+vi.mock("@/webview/services/chatService", () => ({
+  chatService: {
+    openChatPanel: vi.fn(),
+    openChatInNewWindow: vi.fn(),
+    getSessionFilePath: vi.fn(),
+    openFile: vi.fn(),
+  },
 }));
 
 describe("SessionList", () => {

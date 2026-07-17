@@ -24,7 +24,7 @@ vi.mock("@/webview/components/bubbles/UserBubble", () => ({
 }));
 
 vi.mock("@/webview/components/bubbles/AssistantBubble", () => ({
-  default: vi.fn(({ content }) => <div data-testid="assistant-bubble">{content}</div>),
+  default: vi.fn(({ message }) => <div data-testid="assistant-bubble">{message.content}</div>),
 }));
 
 vi.mock("@/webview/components/bubbles/ThinkingBubble", () => ({
