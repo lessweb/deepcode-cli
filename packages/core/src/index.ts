@@ -12,6 +12,7 @@ export {
   writeModelConfigSelection,
   applyModelConfigSelection,
   modelConfigKey,
+  buildLoginSettings,
   getUserSettingsPath,
   getProjectSettingsPath,
   DEFAULT_MODEL,

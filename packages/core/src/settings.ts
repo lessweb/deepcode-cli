@@ -675,3 +675,39 @@ export function resolveCurrentSettings(projectRoot: string = process.cwd()): Res
     process.env
   );
 }
+
+/**
+ * Build the settings object to persist after `deepcode login`.
+ *
+ * Merges the user's existing settings with a ready-to-use default template
+ * (MODEL=deepseek-v4-pro, BASE_URL=https://api.deepseek.com, thinkingEnabled=true,
+ * reasoningEffort="max") so a fresh login works out of the box, while preserving
+ * any fields the user has already customized. The API key is always written to
+ * `env.API_KEY`, overriding any previous value. Missing defaults are filled in,
+ * existing non-empty values are left untouched.
+ */
+export function buildLoginSettings(
+  existing: DeepcodingSettings | null | undefined,
+  apiKey: string
+): DeepcodingSettings {
+  const trimmedKey = apiKey.trim();
+  const base: DeepcodingSettings = { ...(existing ?? {}) };
+  const env: DeepcodingEnv = { ...(base.env ?? {}) };
+
+  if (!trimString(env.MODEL)) {
+    env.MODEL = DEFAULT_MODEL;
+  }
+  if (!trimString(env.BASE_URL)) {
+    env.BASE_URL = DEFAULT_BASE_URL;
+  }
+  env.API_KEY = trimmedKey;
+
+  const result: DeepcodingSettings = { ...base, env };
+  if (base.thinkingEnabled === undefined) {
+    result.thinkingEnabled = true;
+  }
+  if (base.reasoningEffort === undefined) {
+    result.reasoningEffort = "max";
+  }
+  return result;
+}

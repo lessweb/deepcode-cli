@@ -7,6 +7,7 @@ import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
+import { runLogin, printLoginHelp } from "./commands/login";
 import { writeStderrLine, writeStdoutLine } from "./utils/stdio-helpers";
 import { getPackageJson } from "./utils/package";
 import { CLI_VERSION } from "./generated/git-commit";
@@ -20,6 +21,18 @@ async function main(): Promise<void> {
   // --version and --help are handled by yargs internally (prints output as side effect)
   // but with .exitProcess(false) we need to exit manually.
   if (parsed.version || parsed.help) {
+    process.exit(0);
+  }
+
+  // `login` is a standalone sub-command: it never starts the TUI and works
+  // without a TTY (so keys can be piped), so dispatch it before the
+  // interactive-terminal check and Windows shell configuration below.
+  if (parsed.command === "login") {
+    if (parsed.login?.help) {
+      printLoginHelp();
+      process.exit(0);
+    }
+    await runLogin({ apiKey: parsed.login?.apiKey, show: parsed.login?.show ?? false });
     process.exit(0);
   }
 

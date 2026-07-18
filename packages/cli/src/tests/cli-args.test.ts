@@ -209,3 +209,95 @@ test("parseArguments exits on invalid --resume session ID", async () => {
     assert.ok(exitSpy.calls.length >= 1);
   });
 });
+
+// ── parseArguments: login sub-command ─────────────────────────────────────────
+
+test("parseArguments detects the login sub-command", async () => {
+  const r = await parseArguments(["login"]);
+  assert.equal(r.command, "login");
+  assert.equal(r.login?.apiKey, undefined);
+  assert.equal(r.login?.show, false);
+  assert.equal(r.login?.help, false);
+  // login must not be confused with a normal launch
+  assert.equal(r.prompt, undefined);
+  assert.equal(r.resume, undefined);
+  assert.equal(r.version, false);
+  assert.equal(r.help, false);
+});
+
+test("parseArguments reads --api-key for login", async () => {
+  const r = await parseArguments(["login", "--api-key", "sk-abc"]);
+  assert.equal(r.command, "login");
+  assert.equal(r.login?.apiKey, "sk-abc");
+});
+
+test("parseArguments reads -k alias for login", async () => {
+  const r = await parseArguments(["login", "-k", "sk-abc"]);
+  assert.equal(r.login?.apiKey, "sk-abc");
+});
+
+test("parseArguments reads --api-key=value form for login", async () => {
+  const r = await parseArguments(["login", "--api-key=sk-xyz"]);
+  assert.equal(r.login?.apiKey, "sk-xyz");
+});
+
+test("parseArguments trims the login api key", async () => {
+  const r = await parseArguments(["login", "--api-key", "  sk-abc  "]);
+  assert.equal(r.login?.apiKey, "sk-abc");
+});
+
+test("parseArguments reads --show for login", async () => {
+  const r = await parseArguments(["login", "--show"]);
+  assert.equal(r.login?.show, true);
+});
+
+test("parseArguments reads --help / -h for login", async () => {
+  const r1 = await parseArguments(["login", "--help"]);
+  assert.equal(r1.command, "login");
+  assert.equal(r1.login?.help, true);
+
+  const r2 = await parseArguments(["login", "-h"]);
+  assert.equal(r2.login?.help, true);
+});
+
+test("parseArguments combines login flags", async () => {
+  const r = await parseArguments(["login", "--show", "--api-key", "sk-abc"]);
+  assert.equal(r.login?.apiKey, "sk-abc");
+  assert.equal(r.login?.show, true);
+});
+
+test("parseArguments exits on login --api-key without a value", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["login", "--api-key"]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.length >= 1);
+  });
+});
+
+test("parseArguments exits on unknown login option", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["login", "--bogus"]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.length >= 1);
+  });
+});
+
+// ── parseArguments: login does not interfere with normal usage ────────────────
+
+test("parseArguments still parses -p when first arg is not login", async () => {
+  const r = await parseArguments(["-p", "hello"]);
+  assert.equal(r.command, undefined);
+  assert.equal(r.prompt, "hello");
+});
+
+test("parseArguments does not treat login as a prompt when passed via -p", async () => {
+  const r = await parseArguments(["-p", "login"]);
+  assert.equal(r.command, undefined);
+  assert.equal(r.prompt, "login");
+});
