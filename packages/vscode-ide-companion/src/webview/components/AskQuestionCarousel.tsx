@@ -7,7 +7,6 @@ import { ChevronDownIcon, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Controller, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { buildAskUserQuestionReply } from "@/webview/utils";
-import { chatService } from "@/webview/services";
 import * as z from "zod";
 import { useChat } from "@/webview/context";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/webview/components/ui/collapsible";
@@ -66,6 +65,7 @@ export type AnswerFormValues = z.infer<typeof formSchema>;
 const AskQuestionCarousel: React.FC<AskQuestionCarouselProps> = ({ questions, onClose }) => {
   const { actions } = useChat();
   const [api, setApi] = React.useState<CarouselApi>();
+  const [open, setOpen] = React.useState(true);
   const [current, setCurrent] = React.useState(0);
   const [count, setCount] = React.useState(0);
 
@@ -112,18 +112,18 @@ const AskQuestionCarousel: React.FC<AskQuestionCarouselProps> = ({ questions, on
         })
         .join("\n\n");
 
-      // Insert system message via RPC (persisted in session)
-      try {
-        await chatService.addSystemMessage(summary, { kind: "ask_user_question_summary" });
-      } catch (err) {
-        console.error("Failed to add system message:", err);
-      }
+      // // Insert system message via RPC (persisted in session)
+      // try {
+      //   await chatService.addSystemMessage(summary, { kind: "ask_user_question_summary" });
+      // } catch (err) {
+      //   console.error("Failed to add system message:", err);
+      // }
 
       // Close the carousel
       onClose?.();
 
       // Send the user reply to backend
-      actions.sendPrompt(reply?.text || "");
+      actions.sendPrompt(summary || "", [], [], { askUserQuestionSummary: true });
     },
     [form, actions, questions, onClose]
   );
@@ -147,12 +147,10 @@ const AskQuestionCarousel: React.FC<AskQuestionCarouselProps> = ({ questions, on
     <form className="w-full max-w-237.5 mx-auto min-w-sm px-4 py-2" onSubmit={form.handleSubmit(onSubmit)}>
       <div className="border border-primary rounded-md w-full">
         <CardContent>
-          <Collapsible>
+          <Collapsible open={open} onOpenChange={setOpen}>
             <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="group bg-transparent! flex justify-between w-full">
-                <span className="text-primary truncate">
-                  {questions[current - 1]?.question || `Question ${current}`}
-                </span>
+              <div className="group flex justify-between items-center cursor-pointer px-2 w-full">
+                <span className="text-primary truncate">{questions[0]?.question || `Question ${current}`}</span>
                 <div className="flex items-center gap-1">
                   <Button
                     variant="ghost"
@@ -162,11 +160,11 @@ const AskQuestionCarousel: React.FC<AskQuestionCarouselProps> = ({ questions, on
                       onClose?.();
                     }}
                   >
-                    <X className="h-4 w-4" />
+                    <X className="size-4" />
                   </Button>
-                  <ChevronDownIcon className="ml-auto group-data-[state=open]:rotate-180" />
+                  <ChevronDownIcon className="ml-auto size-4 group-data-[state=open]:rotate-180" />
                 </div>
-              </Button>
+              </div>
             </CollapsibleTrigger>
             <CollapsibleContent className="flex flex-col items-start gap-2 text-sm">
               <Carousel setApi={setApi} className="w-full">

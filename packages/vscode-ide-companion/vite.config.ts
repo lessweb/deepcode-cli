@@ -29,6 +29,15 @@ export default defineConfig(({ command }) => {
       assetsInlineLimit: 10000,
       outDir: path.resolve(__dirname, "dist/webview"),
       emptyOutDir: true,
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (id.includes("node_modules")) {
+              return "vendor"; // 所有 node_modules 中的代码打包成 vendor.[hash].js
+            }
+          },
+        },
+      },
     },
   };
 });

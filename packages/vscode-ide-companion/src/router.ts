@@ -69,6 +69,8 @@ const sendPromptInput = z.object({
     )
     .optional(),
   alwaysAllows: z.array(z.string()).optional(),
+  planMode: z.boolean().optional(),
+  askUserQuestionSummary: z.boolean().optional(),
 });
 
 export const appRouter = router({
@@ -131,7 +133,7 @@ export const appRouter = router({
   // --- Mutations ---
 
   sendPrompt: procedure.input(sendPromptInput).resolve(async ({ ctx, input }) => {
-    const { prompt, skills, images, permissions, alwaysAllows } = input;
+    const { prompt, skills, images, permissions, alwaysAllows, planMode, askUserQuestionSummary } = input;
     const normalizedImages = images.filter(Boolean);
 
     const hasPayload =
@@ -161,6 +163,8 @@ export const appRouter = router({
         imageUrls: normalizedImages.length > 0 ? normalizedImages : undefined,
         permissions: permissions && permissions.length > 0 ? (permissions as UserToolPermission[]) : undefined,
         alwaysAllows: alwaysAllows && alwaysAllows.length > 0 ? (alwaysAllows as PermissionScope[]) : undefined,
+        planMode,
+        askUserQuestionSummary,
       };
       await ctx.sessionManager.handleUserPrompt(userPrompt);
 

@@ -25,7 +25,12 @@ interface ChatContextValue {
       prompt: string,
       skills?: SkillInfo[],
       images?: string[],
-      options?: { permissions?: unknown[]; alwaysAllows?: string[] }
+      options?: {
+        permissions?: unknown[];
+        alwaysAllows?: string[];
+        planMode?: boolean;
+        askUserQuestionSummary?: boolean;
+      }
     ) => Promise<void>;
     interrupt: () => Promise<void>;
     createNewSession: () => Promise<void>;
@@ -212,8 +217,6 @@ export function ChatProvider({ children }: ChatProviderProps) {
       const message = event.data as Record<string, unknown> | undefined;
       if (!message?.type) return;
 
-      console.log("[ChatProvider] postMessage received:", message.type, message);
-
       switch (message.type) {
         case "sessionStatus":
           dispatch({
@@ -274,7 +277,12 @@ export function ChatProvider({ children }: ChatProviderProps) {
       prompt: string,
       skills?: SkillInfo[],
       images?: string[],
-      options?: { permissions?: unknown[]; alwaysAllows?: string[] }
+      options?: {
+        permissions?: unknown[];
+        alwaysAllows?: string[];
+        planMode?: boolean;
+        askUserQuestionSummary?: boolean;
+      }
     ) => {
       dispatch({ type: "SET_LOADING", loading: true });
       try {
@@ -284,6 +292,8 @@ export function ChatProvider({ children }: ChatProviderProps) {
           images,
           permissions: options?.permissions as Array<{ toolCallId: string; permission: "allow" | "deny" }> | undefined,
           alwaysAllows: options?.alwaysAllows,
+          planMode: options?.planMode || false,
+          askUserQuestionSummary: options?.askUserQuestionSummary || false,
         });
       } catch (err) {
         console.error("[ChatProvider] sendPrompt failed:", err);

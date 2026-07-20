@@ -322,9 +322,9 @@ export default function SessionList({
         <div className="no-scrollbar overflow-y-auto">
           <div className="py-2 px-4 pt-0">
             {totalCount === 0 ? (
-              <Empty className="h-full bg-muted/30">
+              <Empty className="h-full">
                 <EmptyHeader>
-                  <EmptyMedia variant="icon">
+                  <EmptyMedia>
                     <MessageCircle />
                   </EmptyMedia>
                   <EmptyTitle>{query ? "No sessions found" : "No sessions yet"}</EmptyTitle>

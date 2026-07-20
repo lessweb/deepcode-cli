@@ -4,13 +4,15 @@ import SkillsTags from "@/webview/components/SkillsTags";
 import ContextIndicator from "@/webview/components/ContextIndicator";
 import { PromptAttachments, usePromptAttachments } from "@/webview/components/PromptAttachments";
 import type { ActiveEditor, EditingMessage, SessionMessage, SkillInfo, TokenTelemetry } from "@/webview/types";
-import { FileCodeIcon, Reply, Square } from "lucide-react";
+import { FileCodeIcon, Reply, Siren, Square } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/webview/components/ui/input-group";
 import { Separator } from "@/webview/components/ui/separator";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { cn } from "@/webview/lib/utils";
 import { Field, FieldDescription, FieldGroup } from "./ui/field";
 import { Spinner } from "@/webview/components/ui/spinner";
+import { Switch } from "@/webview/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/webview/components/ui/tooltip";
 
 export interface InputPromptProps {
   loading: boolean;
@@ -25,7 +27,12 @@ export interface InputPromptProps {
     prompt: string,
     skills?: SkillInfo[],
     images?: string[],
-    options?: { permissions?: unknown[]; alwaysAllows?: string[] }
+    options?: {
+      permissions?: unknown[];
+      alwaysAllows?: string[];
+      planMode?: boolean;
+      askUserQuestionSummary?: boolean;
+    }
   ) => void;
   onInterrupt: () => void;
   onSelectSkills: (skills: SkillInfo[]) => void;
@@ -46,9 +53,10 @@ export default function InputPrompt({
   onSelectSkills,
   onClearEditingMessage,
 }: InputPromptProps) {
-  const [value, setValue] = useState("");
+  const [value, setValue] = useState<string>("");
+  const [planMode, setPlanMode] = useState<boolean>(false);
   const [history, setHistory] = useState<string[]>([]);
-  const [historyIdx, setHistoryIdx] = useState(-1);
+  const [historyIdx, setHistoryIdx] = useState<number>(-1);
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls, loadImages } =
@@ -58,7 +66,13 @@ export default function InputPrompt({
   useEffect(() => {
     if (messages && messages.length > 0) {
       const userMessages = messages
-        .filter((m) => m.role === "user" && typeof m.content === "string" && m.content.trim())
+        .filter(
+          (m) =>
+            m.role === "user" &&
+            typeof m.content === "string" &&
+            m.content.trim() &&
+            !m?.meta?.userPrompt?.askUserQuestionSummary
+        )
         .map((m) => m.content);
       setHistory(userMessages);
       setHistoryIdx(-1);
@@ -111,7 +125,7 @@ export default function InputPrompt({
     setValue("");
     setHistoryIdx(-1);
 
-    onSendPrompt(trimmed, selectedSkills, images, reply || undefined);
+    onSendPrompt(trimmed, selectedSkills, images, { ...reply, planMode });
     onSelectSkills([]);
     clearAttachments();
     onClearEditingMessage();
@@ -125,6 +139,7 @@ export default function InputPrompt({
     getImageUrls,
     clearAttachments,
     onClearEditingMessage,
+    planMode,
   ]);
 
   const handleKeyDown = useCallback(
@@ -221,6 +236,18 @@ export default function InputPrompt({
                 }
               }}
             />
+            <Separator orientation="vertical" className="h-5 mt-1.5" />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <div className="flex items-center gap-1 cursor-pointer">
+                  <Siren className="size-3.5" />
+                  <Switch id="switch-size-sm" checked={planMode} onCheckedChange={(e) => setPlanMode(e)} size="sm" />
+                </div>
+              </TooltipTrigger>
+              <TooltipContent side="bottom">
+                <p>Plan Mode</p>
+              </TooltipContent>
+            </Tooltip>
             <Separator orientation="vertical" className="h-5 mt-1.5" />
             <ContextIndicator tokenTelemetry={tokenTelemetry} />
             <Separator orientation="vertical" className="h-5 mt-1.5" />

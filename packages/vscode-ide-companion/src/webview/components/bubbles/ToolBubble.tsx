@@ -20,6 +20,7 @@ export interface ToolBubbleProps {
   shouldConnect?: boolean;
   isLastMessage?: boolean;
   onAskUserQuestions?: (questions: AskUserQuestionMetadata["questions"]) => void;
+  onScrollToBottom?: () => void;
 }
 
 // ============================================================================
@@ -229,6 +230,7 @@ export default function ToolBubble({
   shouldConnect = false,
   isLastMessage = false,
   onAskUserQuestions,
+  onScrollToBottom,
 }: ToolBubbleProps) {
   const [open, setOpen] = useState<boolean>(false);
   const toolData = parseToolData(content);
@@ -246,15 +248,16 @@ export default function ToolBubble({
     if (isAskUserQuestion && isLastMessage && !hasDispatchedRef.current && onAskUserQuestions) {
       hasDispatchedRef.current = true;
       onAskUserQuestions((metadata as AskUserQuestionMetadata).questions);
+      onScrollToBottom?.();
     }
-  }, [isAskUserQuestion, isLastMessage, onAskUserQuestions, metadata]);
+  }, [isAskUserQuestion, isLastMessage, onAskUserQuestions, metadata, onScrollToBottom]);
 
   if (isAskUserQuestion) {
     if (isLastMessage)
       return (
         <ProgressShimmer>{(metadata as AskUserQuestionMetadata).questions.length} confirmation pending</ProgressShimmer>
       );
-    return <div>&nbsp;</div>;
+    return <div className="h-2">&nbsp;</div>;
   }
 
   return (

@@ -21,6 +21,8 @@ export interface SendPromptOptions {
   images?: string[];
   permissions?: Array<{ toolCallId: string; permission: "allow" | "deny" }>;
   alwaysAllows?: string[];
+  planMode?: boolean;
+  askUserQuestionSummary?: boolean;
 }
 
 export interface InitialData {
@@ -80,13 +82,15 @@ export const chatService = {
    */
   async sendPrompt(options: SendPromptOptions): Promise<{ ok: boolean; error?: string }> {
     const normalizedImages = (options.images ?? []).filter(Boolean);
-
+    console.log("options:", options);
     const result = await wrpc.sendPrompt.mutate({
       prompt: options.prompt,
       skills: options.skills ?? [],
       images: normalizedImages,
       permissions: options.permissions,
       alwaysAllows: options.alwaysAllows,
+      planMode: options.planMode,
+      askUserQuestionSummary: options.askUserQuestionSummary,
     });
 
     return result as { ok: boolean; error?: string };

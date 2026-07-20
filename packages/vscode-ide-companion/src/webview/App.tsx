@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import Header from "@/webview/components/Header";
 import Messages from "@/webview/components/Messages";
 import InputPrompt from "@/webview/components/InputPrompt";
@@ -10,6 +10,7 @@ import type { AskUserQuestionMetadata } from "@/webview/components/bubbles/ToolB
 
 export default function App() {
   const { state, dispatch, actions } = useChat();
+  const messagesRef = useRef(null);
 
   const handleAskUserQuestions = useCallback(
     (questions: AskUserQuestionMetadata["questions"]) => {
@@ -29,6 +30,7 @@ export default function App() {
         onDeleteSession={actions.deleteSession}
       />
       <Messages
+        ref={messagesRef}
         messages={state.messages}
         loading={state.loading}
         onEditMessage={actions.editMessage}

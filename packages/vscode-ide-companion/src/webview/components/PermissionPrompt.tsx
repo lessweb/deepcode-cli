@@ -2,6 +2,7 @@ import { useMemo, useCallback, useState, useEffect } from "react";
 import { Button } from "@/webview/components/ui/button";
 import type { AppAction, AskPermissionRequest, PermissionPromptState, SkillInfo } from "@/webview/types";
 import { ShieldAlert, X } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/webview/components/ui/alert";
 
 export interface PermissionPromptProps {
   askPermissions: AskPermissionRequest[];
@@ -230,14 +231,12 @@ export default function PermissionPrompt({
 
   if (isDenied) {
     return (
-      <div className="px-4 py-2">
-        <div className="rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">
-          <div className="flex items-center gap-2 mb-1">
-            <ShieldAlert className="h-4 w-4 text-destructive" />
-            <span className="font-medium">Permission denied</span>
-          </div>
-          <p className="text-muted-foreground text-xs">Add a reply, then press Enter to continue with the denial.</p>
-        </div>
+      <div className="px-4 w-full max-w-237.5 mx-auto min-w-sm">
+        <Alert variant="destructive">
+          <ShieldAlert />
+          <AlertTitle>Permission denied</AlertTitle>
+          <AlertDescription>Add a reply, then press Enter to continue with the denial.</AlertDescription>
+        </Alert>
       </div>
     );
   }
@@ -248,7 +247,7 @@ export default function PermissionPrompt({
   const canAlwaysAllow = VALID_SCOPES.includes(prompt.scope);
 
   return (
-    <div className="px-4 py-2">
+    <div className="px-4 py-2 w-full max-w-237.5 mx-auto min-w-sm">
       <div className="rounded-md border border-(--vscode-focusBorder) bg-(--vscode-editor-background) p-3 text-sm">
         <div className="flex items-center justify-between mb-2">
           <div>
@@ -257,14 +256,15 @@ export default function PermissionPrompt({
               {effectiveIndex + 1}/{prompts.length}
             </span>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="icon-sm"
             className="cursor-pointer border-none bg-transparent p-0 text-muted-foreground hover:text-foreground"
             onClick={handleCancel}
             title="Interrupt"
           >
             <X className="h-4 w-4" />
-          </button>
+          </Button>
         </div>
 
         <div className="font-semibold mb-1">{prompt.request.name}</div>
