@@ -190,15 +190,19 @@ export default function SessionList({
   const handleContextMenuOpen = useCallback(
     async (sessionId: string, mode: "open" | "beside" | "newWindow") => {
       try {
-        onCreateNewSession(); // 这里执行是为了清空现有的聊天界面
+        if (sessionId === activeSessionId) {
+          onCreateNewSession(); // 这里执行是为了清空现有的聊天界面
+        }
         switch (mode) {
           case "open":
-            onSelect(sessionId);
+            // onSelect(sessionId);
             handleCloseDrawer();
-            await chatService.openChatPanel(sessionId, 1); // ViewColumn.Active
+            // vscodeApi.ViewColumn.Active
+            await chatService.openChatPanel(sessionId, -1); // ViewColumn.Active
             break;
           case "beside":
-            await chatService.openChatPanel(sessionId, 2); // ViewColumn.Beside
+            // vscodeApi.ViewColumn.Beside
+            await chatService.openChatPanel(sessionId, -2); // ViewColumn.Beside
             break;
           case "newWindow":
             await chatService.openChatInNewWindow(sessionId);
