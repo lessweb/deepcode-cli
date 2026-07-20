@@ -33,6 +33,8 @@ export interface ParsedCliArgs {
   version: boolean;
   /** True when --help / -h was passed */
   help: boolean;
+  /** True when --headless was passed (non-interactive, run-and-exit mode) */
+  headless: boolean;
 }
 
 const EPILOG = [
@@ -75,7 +77,7 @@ async function configureYargs(argv?: string[]) {
     .locale("en")
     .scriptName("deepcode")
     .usage(
-      "Usage: $0 [options] [command]\n\nDeep Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode"
+      "Usage: $0 [options] [command]\n\nDeep Code - Launch an interactive CLI, use -p/--prompt with --headless for non-interactive mode"
     )
     .command("$0 [query..]", "Launch Deep Code CLI", (yargsInstance: Argv) =>
       yargsInstance
@@ -83,6 +85,10 @@ async function configureYargs(argv?: string[]) {
           alias: "p",
           type: "string",
           describe: "Submit a prompt on launch",
+        })
+        .option("headless", {
+          type: "boolean",
+          describe: "Run in non-interactive (headless) mode. Use with --prompt to execute and exit automatically.",
         })
         .option("resume", {
           alias: "r",
@@ -107,6 +113,10 @@ async function configureYargs(argv?: string[]) {
           // empty prompt is meaningless
           if (argv["prompt"] === "") {
             return "--prompt / -p requires a non-empty value.";
+          }
+          // headless mode requires --prompt
+          if (argv["headless"] && !argv["prompt"]) {
+            return "--headless mode requires --prompt / -p with a non-empty value.";
           }
           return true;
         })
@@ -158,5 +168,6 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
     resume,
     version: parsed.version === true,
     help: parsed.help === true,
+    headless: parsed.headless === true,
   };
 }

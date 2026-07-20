@@ -3,7 +3,14 @@ import { render } from "ink";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
+import {
+  setShellIfWindows,
+  getProjectCode,
+  SessionManager,
+  createOpenAIClient,
+  resolveCurrentSettings,
+} from "@vegamo/deepcode-core";
+import type { SessionMessage, LlmStreamProgress } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
@@ -31,6 +38,11 @@ async function main(): Promise<void> {
   let initialPrompt = parsed.prompt;
   let resumeSessionId = parsed.resume;
   const projectRoot = process.cwd();
+
+  if (parsed.headless && parsed.prompt) {
+    await runHeadless(parsed.prompt, projectRoot);
+    return;
+  }
 
   if (!process.stdin.isTTY) {
     writeStderrLine("deepcode requires an interactive terminal (TTY). Re-run from a real terminal session.\n");
@@ -114,4 +126,66 @@ function configureWindowsShell(): void {
     writeStderrLine(`deepcode: ${message}\n`);
     process.exit(1);
   }
+}
+
+/**
+ * Run in headless (non-interactive) mode.
+ * Creates a SessionManager, submits the prompt, outputs the final response, and exits.
+ */
+async function runHeadless(promptText: string, projectRoot: string): Promise<void> {
+  process.stderr.write("[headless] Starting non-interactive mode...\n");
+
+  const assistantMessages: SessionMessage[] = [];
+
+  const sessionManager = new SessionManager({
+    projectRoot,
+    createOpenAIClient: () => createOpenAIClient(projectRoot),
+    getResolvedSettings: () => {
+      const settings = resolveCurrentSettings(projectRoot);
+      // Headless = no user to ask → auto-approve all permissions
+      return {
+        ...settings,
+        permissions: {
+          allow: [],
+          deny: [],
+          ask: [],
+          defaultMode: "allowAll" as const,
+        },
+      };
+    },
+    renderMarkdown: (text: string) => text,
+    onAssistantMessage: (message: SessionMessage) => {
+      assistantMessages.push(message);
+      // Stream content to stdout as it arrives
+      if (message.content) {
+        process.stdout.write(message.content as string);
+      }
+    },
+    onLlmStreamProgress: (progress: LlmStreamProgress) => {
+      if (progress.phase === "start") {
+        process.stderr.write("[headless] Model is thinking...\n");
+      } else if (progress.phase === "end") {
+        process.stderr.write("[headless] Response complete.\n");
+      }
+    },
+  });
+
+  try {
+    // Initialize MCP servers from settings
+    const settings = resolveCurrentSettings(projectRoot);
+    await sessionManager.initMcpServers(settings.mcpServers);
+
+    // Submit the prompt
+    await sessionManager.handleUserPrompt({ text: promptText });
+
+    process.stdout.write("\n");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`[headless] Error: ${message}\n`);
+    process.exit(1);
+  } finally {
+    sessionManager.dispose();
+  }
+
+  process.exit(0);
 }
