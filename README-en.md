@@ -141,7 +141,7 @@ Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compati
 
 ### How do I configure MCP?
 
-Deep Code supports MCP (Model Context Protocol) to connect external services such as GitHub, browsers, databases, and more. Configure the `mcpServers` field in `settings.json` to enable it, then use the `/mcp` command to view MCP server status and available tools.
+Deep Code supports MCP (Model Context Protocol) to connect external services such as GitHub, browsers, databases, and more. Configure the `mcpServers` field in `settings.json` to enable it — both local stdio servers and remote Streamable HTTP servers are supported — then use the `/mcp` command to view MCP server status and available tools.
 
 For detailed setup instructions, see: [docs/mcp.md](docs/mcp.md)
 

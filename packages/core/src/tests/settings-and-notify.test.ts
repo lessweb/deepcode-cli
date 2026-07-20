@@ -303,6 +303,40 @@ test("resolveSettingsSources merges MCP env with documented priority", () => {
   });
 });
 
+test("resolveSettingsSources resolves remote MCP servers with merged headers", () => {
+  const resolved = resolveSettingsSources(
+    {
+      mcpServers: {
+        remote: {
+          url: "https://user.example/mcp",
+          headers: { Authorization: "Bearer user", "X-User": "1" },
+        },
+      },
+    },
+    {
+      mcpServers: {
+        remote: {
+          url: "https://project.example/mcp",
+          headers: { Authorization: "Bearer project" },
+        },
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    {}
+  );
+
+  const remote = resolved.mcpServers?.remote;
+  assert.equal(remote?.type, "http");
+  // Project url and header win; user-only header is preserved.
+  assert.equal(remote?.url, "https://project.example/mcp");
+  assert.deepEqual(remote?.headers, { Authorization: "Bearer project", "X-User": "1" });
+  // Remote servers carry no stdio fields.
+  assert.equal(remote?.command, undefined);
+});
+
 test("resolveSettings defaults DeepSeek v4 models to thinking mode", () => {
   const resolved = resolveSettings(
     {

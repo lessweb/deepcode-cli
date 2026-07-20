@@ -1,7 +1,11 @@
-import { spawn, type ChildProcess } from "child_process";
-import { createInterface, type Interface } from "readline";
-import * as path from "path";
-import { killProcessTree } from "../common/process-tree";
+import type { McpServerConfig } from "../settings";
+import type { McpTransport } from "./mcp-transport";
+import { StdioTransport, createMcpSpawnSpec } from "./mcp-stdio-transport";
+import { HttpTransport } from "./mcp-http-transport";
+
+export { createMcpSpawnSpec };
+export type { McpSpawnSpec } from "./mcp-stdio-transport";
+export type { McpTransport } from "./mcp-transport";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -96,31 +100,27 @@ type ReadResourceResult = {
 
 export type McpNotificationHandler = (method: string, params?: Record<string, unknown>) => void;
 
-export type McpSpawnSpec = {
-  command: string;
-  args: string[];
-  shell: boolean;
-  windowsHide?: boolean;
-};
+const PROTOCOL_VERSION = "2025-03-26";
+const SUPPORTED_PROTOCOL_VERSIONS = new Set([PROTOCOL_VERSION, "2024-11-05"]);
 
+/**
+ * MCP JSON-RPC client. Owns request/response correlation, the initialize
+ * handshake and notification dispatch; the underlying byte transport (stdio
+ * subprocess or remote HTTP) is injected via {@link McpTransport}.
+ */
 export class McpClient {
-  private process: ChildProcess | null = null;
-  private reader: Interface | null = null;
   private nextId = 1;
   private pendingRequests = new Map<
     number,
     { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
   >();
-  private stderrBuffer = "";
-  private notificationHandler: McpNotificationHandler | null = null;
-  private disconnectHandler: ((reason: string) => void) | null = null;
-  private intentionallyDisconnected = false;
+  private notificationHandler: McpNotificationHandler | null;
+  private disconnectHandler: ((reason: string) => void) | null;
+  private connected = false;
 
   constructor(
     private readonly serverName: string,
-    private readonly command: string,
-    private readonly args: string[] = [],
-    private readonly env?: Record<string, string>,
+    private readonly transport: McpTransport,
     onNotification?: McpNotificationHandler,
     onDisconnect?: (reason: string) => void
   ) {
@@ -129,93 +129,33 @@ export class McpClient {
   }
 
   async connect(timeoutMs: number): Promise<void> {
-    return new Promise((resolve, reject) => {
-      this.intentionallyDisconnected = false;
-      const childEnv = {
-        ...process.env,
-        ...this.env,
-      };
-      const args = this.withNpxYesArg(this.command, this.args);
-      const spawnSpec = createMcpSpawnSpec(this.command, args);
-
-      this.process = spawn(spawnSpec.command, spawnSpec.args, {
-        stdio: ["pipe", "pipe", "pipe"],
-        env: childEnv,
-        shell: spawnSpec.shell,
-        windowsHide: spawnSpec.windowsHide,
-      });
-
-      let resolved = false;
-      const safeReject = (err: Error) => {
-        if (!resolved) {
-          resolved = true;
-          reject(err);
-        }
-      };
-
-      this.process.on("error", (err) => {
-        safeReject(
-          this.withStderr(`Failed to start MCP server "${this.serverName}" (${this.command}): ${err.message}`)
-        );
-      });
-
-      this.process.on("close", (code) => {
-        const reason = `MCP server "${this.serverName}" exited with code ${code}`;
-        const error = this.withStderr(reason);
-        for (const [, pending] of this.pendingRequests) {
-          clearTimeout(pending.timer);
-          pending.reject(error);
-        }
-        this.pendingRequests.clear();
-        this.reader?.close();
-        this.reader = null;
-        this.process = null;
-        if (!this.intentionallyDisconnected && this.disconnectHandler) {
-          this.disconnectHandler(reason);
-        }
-        safeReject(error);
-      });
-
-      if (this.process.stderr) {
-        this.process.stderr.on("data", (data: Buffer) => {
-          this.appendStderr(data.toString("utf8"));
-        });
-      }
-
-      this.reader = createInterface({ input: this.process.stdout! });
-      this.reader.on("line", (line: string) => {
-        this.handleLine(line);
-      });
-
-      // Send initialize request (MCP protocol handshake)
-      this.sendRequest(
-        "initialize",
-        {
-          protocolVersion: "2025-03-26",
-          capabilities: {},
-          clientInfo: { name: "deepcode-cli", version: "0.1.0" },
-        },
-        timeoutMs
-      )
-        .then((result) => {
-          // Validate protocol version from server response (per MCP spec §4.2.1.2)
-          const initResult = result as { protocolVersion?: string } | undefined;
-          const serverVersion = initResult?.protocolVersion;
-          if (serverVersion && serverVersion !== "2025-03-26" && serverVersion !== "2024-11-05") {
-            reject(
-              new Error(
-                `Unsupported MCP protocol version "${serverVersion}" from server "${this.serverName}". ` +
-                  `Client supports 2025-03-26 and 2024-11-05.`
-              )
-            );
-            return;
-          }
-          // Send initialized notification
-          this.sendNotification("notifications/initialized");
-          resolve();
-        })
-        .catch(reject);
+    await this.transport.start({
+      onMessage: (message) => this.handleSingleMessage(message),
+      onClose: (reason) => this.handleTransportClose(reason),
     });
+
+    // MCP protocol handshake
+    const result = await this.sendRequest(
+      "initialize",
+      {
+        protocolVersion: PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: { name: "deepcode-cli", version: "0.1.0" },
+      },
+      timeoutMs
+    );
+
+    // Validate protocol version from server response (per MCP spec §4.2.1.2)
+    const serverVersion = (result as { protocolVersion?: string } | undefined)?.protocolVersion;
+    if (serverVersion && !SUPPORTED_PROTOCOL_VERSIONS.has(serverVersion)) {
+      throw new Error(
+        `Unsupported MCP protocol version "${serverVersion}" from server "${this.serverName}". ` +
+          `Client supports ${[...SUPPORTED_PROTOCOL_VERSIONS].join(" and ")}.`
+      );
+    }
+
+    this.sendNotification("notifications/initialized");
+    this.connected = true;
   }
 
   async listTools(timeoutMs: number): Promise<McpToolDefinition[]> {
@@ -232,7 +172,7 @@ export class McpClient {
       }
     }
 
-    throw this.withStderr(`MCP server "${this.serverName}" returned too many tools/list pages`);
+    throw this.transport.decorateError(`MCP server "${this.serverName}" returned too many tools/list pages`);
   }
 
   async callTool(name: string, args: Record<string, unknown>, timeoutMs = 60_000): Promise<CallToolResult> {
@@ -253,7 +193,7 @@ export class McpClient {
       }
     }
 
-    throw this.withStderr(`MCP server "${this.serverName}" returned too many prompts/list pages`);
+    throw this.transport.decorateError(`MCP server "${this.serverName}" returned too many prompts/list pages`);
   }
 
   async getPrompt(name: string, args: Record<string, unknown>, timeoutMs = 30_000): Promise<GetPromptResult> {
@@ -274,7 +214,7 @@ export class McpClient {
       }
     }
 
-    throw this.withStderr(`MCP server "${this.serverName}" returned too many resources/list pages`);
+    throw this.transport.decorateError(`MCP server "${this.serverName}" returned too many resources/list pages`);
   }
 
   async readResource(uri: string, timeoutMs = 30_000): Promise<ReadResourceResult> {
@@ -282,23 +222,12 @@ export class McpClient {
   }
 
   disconnect(): void {
-    this.intentionallyDisconnected = true;
-    if (this.reader) {
-      this.reader.close();
-      this.reader = null;
-    }
-    if (this.process) {
-      if (typeof this.process.pid === "number") {
-        killProcessTree(this.process.pid, "SIGTERM", { killGroupOnNonWindows: false });
-      } else {
-        this.process.kill();
-      }
-      this.process = null;
-    }
+    this.connected = false;
+    this.transport.close();
   }
 
   isConnected(): boolean {
-    return this.process !== null && this.process.exitCode === null;
+    return this.connected && this.transport.isConnected();
   }
 
   private sendRequest(method: string, params: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
@@ -313,52 +242,39 @@ export class McpClient {
       const timer = setTimeout(() => {
         this.pendingRequests.delete(id);
         reject(
-          this.withStderr(
+          this.transport.decorateError(
             `Timed out after ${timeoutMs}ms waiting for MCP server "${this.serverName}" to respond to ${method}`
           )
         );
       }, timeoutMs);
       this.pendingRequests.set(id, { resolve, reject, timer });
-      this.writeLine(JSON.stringify(request));
+      this.transport.send(request);
     });
   }
 
   private sendNotification(method: string, params?: Record<string, unknown>): void {
-    const notification = {
-      jsonrpc: "2.0" as const,
+    const notification: JsonRpcNotification = {
+      jsonrpc: "2.0",
       method,
       params,
     };
-    this.writeLine(JSON.stringify(notification));
+    this.transport.send(notification);
   }
 
-  private writeLine(data: string): void {
-    if (this.process?.stdin) {
-      this.process.stdin.write(data + "\n");
+  private handleTransportClose(reason: string): void {
+    const error = this.transport.decorateError(reason);
+    for (const [, pending] of this.pendingRequests) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
     }
-  }
+    this.pendingRequests.clear();
 
-  private handleLine(line: string): void {
-    try {
-      const parsed: unknown = JSON.parse(line);
-
-      // Handle JSON-RPC batch (array of requests/notifications/responses)
-      // Per MCP 2025-03-26 §4.1.1.3: implementations MUST support receiving batches.
-      if (Array.isArray(parsed)) {
-        for (const item of parsed) {
-          if (item && typeof item === "object") {
-            this.handleSingleMessage(item);
-          }
-        }
-        return;
-      }
-
-      // Handle single message
-      if (parsed && typeof parsed === "object") {
-        this.handleSingleMessage(parsed);
-      }
-    } catch {
-      // Ignore unparseable lines
+    // Only surface a crash once the server was fully connected; failures during
+    // the initial handshake are reported via connect() rejecting instead.
+    const wasConnected = this.connected;
+    this.connected = false;
+    if (wasConnected) {
+      this.disconnectHandler?.(reason);
     }
   }
 
@@ -383,69 +299,28 @@ export class McpClient {
       this.pendingRequests.delete(message.id);
       clearTimeout(pending.timer);
       if (message.error) {
-        pending.reject(this.withStderr(`MCP error: ${message.error.message}`));
+        pending.reject(this.transport.decorateError(`MCP error: ${message.error.message}`));
       } else {
         pending.resolve(message.result);
       }
     }
   }
-
-  private withNpxYesArg(command: string, args: string[]): string[] {
-    const executable = path
-      .basename(command)
-      .toLowerCase()
-      .replace(/\.cmd$/, "");
-    if (executable !== "npx") {
-      return args;
-    }
-    if (args.includes("-y") || args.includes("--yes")) {
-      return args;
-    }
-    return ["-y", ...args];
-  }
-
-  private appendStderr(text: string): void {
-    this.stderrBuffer = `${this.stderrBuffer}${text}`;
-    if (this.stderrBuffer.length > 4000) {
-      this.stderrBuffer = this.stderrBuffer.slice(-4000);
-    }
-  }
-
-  private withStderr(message: string): Error {
-    const stderr = this.stderrBuffer.trim();
-    return new Error(stderr ? `${message}. stderr: ${stderr}` : message);
-  }
 }
 
-export function createMcpSpawnSpec(
-  command: string,
-  args: string[],
-  platform: NodeJS.Platform = process.platform
-): McpSpawnSpec {
-  if (platform === "win32") {
-    return {
-      // On Windows, shell: true lets cmd.exe resolve the command via PATHEXT
-      // (npx -> npx.cmd, etc.). Join command and args into a single string
-      // with empty spawn args to avoid Node 24 DEP0190.
-      // Only quote arguments that need protection from cmd.exe to prevent
-      // double-wrapping by Node.js's own shell quoting.
-      command: [command, ...args].map(quoteWindowsArgIfNeeded).join(" "),
-      args: [],
-      shell: true,
-      windowsHide: true,
-    };
-  }
-
-  return {
-    command,
-    args,
-    shell: false,
-  };
-}
-
-function quoteWindowsArgIfNeeded(arg: string): string {
-  if (/[\s"&|<>^()]/.test(arg)) {
-    return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/\\+$/g, "$&$&")}"`;
-  }
-  return arg;
+/**
+ * Build an {@link McpClient} for a configured server, selecting the transport
+ * from the config (remote Streamable HTTP when a `url`/`type: "http"` is given,
+ * otherwise a local stdio subprocess).
+ */
+export function createMcpClient(
+  serverName: string,
+  config: McpServerConfig,
+  onNotification?: McpNotificationHandler,
+  onDisconnect?: (reason: string) => void
+): McpClient {
+  const isRemote = config.type === "http" || (config.type !== "stdio" && !!config.url);
+  const transport: McpTransport = isRemote
+    ? new HttpTransport(serverName, { url: config.url ?? "", headers: config.headers })
+    : new StdioTransport(serverName, config.command ?? "", config.args ?? [], config.env);
+  return new McpClient(serverName, transport, onNotification, onDisconnect);
 }

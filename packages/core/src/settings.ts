@@ -17,9 +17,18 @@ export type DeepcodingEnv = Record<string, string | undefined> & {
 export type ReasoningEffort = "high" | "max";
 
 export type McpServerConfig = {
-  command: string;
+  /**
+   * Transport kind. Defaults to "stdio" when a `command` is given and "http"
+   * when a `url` is given, so it is usually optional.
+   */
+  type?: "stdio" | "http";
+  // stdio transport (local subprocess)
+  command?: string;
   args?: string[];
   env?: Record<string, string>;
+  // remote transport (Streamable HTTP)
+  url?: string;
+  headers?: Record<string, string>;
 };
 
 export type PermissionScope =
@@ -433,6 +442,24 @@ function mergeMcpServers(
   for (const name of serverNames) {
     const userConfig = userServers[name];
     const projectConfig = projectServers[name];
+
+    // Remote (Streamable HTTP) server: selected by a url or an explicit
+    // type: "http". Project settings override user settings; headers merge.
+    const url = trimString(projectConfig?.url) || trimString(userConfig?.url);
+    const type = projectConfig?.type ?? userConfig?.type;
+    if (url && type !== "stdio") {
+      const headers = {
+        ...(userConfig?.headers ?? {}),
+        ...(projectConfig?.headers ?? {}),
+      };
+      const config: McpServerConfig = { type: "http", url };
+      if (Object.keys(headers).length > 0) {
+        config.headers = headers;
+      }
+      merged[name] = config;
+      continue;
+    }
+
     const command = projectConfig?.command ?? userConfig?.command;
     if (!command) {
       continue;
