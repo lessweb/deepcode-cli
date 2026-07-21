@@ -41,6 +41,7 @@ interface ChatContextValue {
     renameSession: (sessionId: string, summary: string) => Promise<void>;
     deleteSession: (sessionId: string) => Promise<void>;
     dismissContinuePrompt: () => void;
+    continueGeneration: () => Promise<void>;
   };
 }
 
@@ -93,20 +94,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
         permissionPromptState: null,
         pendingPermissionReply: null,
         loading: action.status === "processing" || action.status === "pending",
-        showContinuePrompt:
-          action.status === "interrupted"
-            ? localStorage.getItem(`deepcode:continuePromptDismissed:${action.sessionId}`) !== "1"
-            : false,
+        showContinuePrompt: action.status === "interrupted",
       };
     case "SET_SESSIONS":
       return { ...state, sessions: action.sessions };
     case "SESSION_STATUS": {
       const isInterrupted = action.status === "interrupted";
-      const sessionId = action.sessionId || state.activeSessionId;
-      const dismissed =
-        isInterrupted && sessionId
-          ? localStorage.getItem(`deepcode:continuePromptDismissed:${sessionId}`) === "1"
-          : true;
 
       return {
         ...state,
@@ -115,7 +108,7 @@ function appReducer(state: AppState, action: AppAction): AppState {
         processes: action.processes ?? state.processes,
         tokenTelemetry: action.tokenTelemetry ?? state.tokenTelemetry,
         loading: action.status === "processing" || action.status === "pending",
-        showContinuePrompt: isInterrupted && !dismissed,
+        showContinuePrompt: isInterrupted,
       };
     }
     case "LLM_STREAM_PROGRESS":
@@ -124,7 +117,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
       }
       return { ...state, llmStreamProgress: action.progress };
     case "USER_MESSAGE": {
-      const newMsg: SessionMessage = { role: "user", content: action.content, meta: action.meta };
+      const newMsg: SessionMessage = {
+        id: crypto.randomUUID(),
+        role: "user",
+        content: action.content,
+        meta: action.meta,
+      };
       return {
         ...state,
         messages: [...state.messages, newMsg],
@@ -399,11 +397,17 @@ export function ChatProvider({ children }: ChatProviderProps) {
   );
 
   const dismissContinuePrompt = useCallback(() => {
-    if (state.activeSessionId) {
-      localStorage.setItem(`deepcode:continuePromptDismissed:${state.activeSessionId}`, "1");
-    }
     dispatch({ type: "DISMISS_CONTINUE_PROMPT" });
-  }, [state.activeSessionId]);
+  }, []);
+
+  const continueGeneration = useCallback(async () => {
+    dispatch({ type: "DISMISS_CONTINUE_PROMPT" });
+    try {
+      await chatService.sendPrompt({ prompt: "/continue" });
+    } catch (err) {
+      console.error("[ChatProvider] continueGeneration failed:", err);
+    }
+  }, []);
 
   const contextValue: ChatContextValue = {
     state,
@@ -419,6 +423,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
       renameSession,
       deleteSession,
       dismissContinuePrompt,
+      continueGeneration,
     },
   };
 

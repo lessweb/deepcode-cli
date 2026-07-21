@@ -143,13 +143,15 @@ export const appRouter = router({
     }
 
     const displayPrompt = prompt || (normalizedImages.length > 0 ? "粘贴的图像" : "");
+    const promptTrimmed = prompt.trim();
     const isPermissionContinue =
-      prompt === "/continue" &&
+      promptTrimmed === "/continue" &&
       normalizedImages.length === 0 &&
       ((permissions?.length ?? 0) > 0 || (alwaysAllows?.length ?? 0) > 0);
+    const isPlainContinue = promptTrimmed === "/continue" && normalizedImages.length === 0;
 
-    // Show user message in webview
-    if (displayPrompt && !isPermissionContinue) {
+    // Show user message in webview (skip for /continue commands)
+    if (displayPrompt && !isPermissionContinue && !isPlainContinue) {
       ctx.postMessage({ type: "userMessage", content: displayPrompt });
     }
 

@@ -49,7 +49,7 @@ export default function App() {
         onInterrupt={actions.interrupt}
       />
       {state.showContinuePrompt && (
-        <ContinuePrompt onContinue={actions.dismissContinuePrompt} onDismiss={actions.dismissContinuePrompt} />
+        <ContinuePrompt onContinue={actions.continueGeneration} onDismiss={actions.dismissContinuePrompt} />
       )}
       {state.loading && (
         <ThinkingLiveBubble
