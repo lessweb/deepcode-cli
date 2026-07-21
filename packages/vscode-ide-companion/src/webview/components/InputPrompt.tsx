@@ -302,7 +302,7 @@ export default function InputPrompt({
                           <ItemContent>
                             <ItemTitle className="text-xs">Default</ItemTitle>
                             <ItemDescription className="text-[10px]">
-                              Deep code will ask for approval before making each edit
+                              Deep Code will make edits and run commands to complete your task
                             </ItemDescription>
                           </ItemContent>
                         </Item>

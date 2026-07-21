@@ -50,9 +50,9 @@ describe("Messages", () => {
     processes: null,
   };
 
-  it("renders empty messages", () => {
+  it("renders welcome screen when no messages", () => {
     render(<Messages {...defaultProps} />);
-    expect(screen.getByTestId("scroll-area")).toBeInTheDocument();
+    expect(screen.getByText("Welcome to the Deep Code AI IDE!")).toBeInTheDocument();
   });
 
   it("renders user message", () => {

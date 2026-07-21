@@ -77,6 +77,18 @@ vi.mock("@/webview/components/ui/dropdown-menu", () => ({
   DropdownMenuTrigger: vi.fn(({ children }) => <div data-testid="dropdown-trigger">{children}</div>),
   DropdownMenuContent: vi.fn(({ children }) => <div data-testid="dropdown-content">{children}</div>),
   DropdownMenuItem: vi.fn(({ children }) => <div data-testid="dropdown-item">{children}</div>),
+  DropdownMenuGroup: vi.fn(({ children }) => <div>{children}</div>),
+  DropdownMenuLabel: vi.fn(({ children }) => <div>{children}</div>),
+  DropdownMenuRadioGroup: vi.fn(({ children }) => <div>{children}</div>),
+  DropdownMenuRadioItem: vi.fn(({ children }) => <div>{children}</div>),
+}));
+
+vi.mock("@/webview/components/ui/item", () => ({
+  Item: vi.fn(({ children }) => <div>{children}</div>),
+  ItemContent: vi.fn(({ children }) => <div>{children}</div>),
+  ItemDescription: vi.fn(({ children }) => <div>{children}</div>),
+  ItemMedia: vi.fn(({ children }) => <div>{children}</div>),
+  ItemTitle: vi.fn(({ children }) => <div>{children}</div>),
 }));
 
 vi.mock("@/webview/components/ui/scroll-area", () => ({
@@ -141,6 +153,8 @@ vi.mock("lucide-react", () => ({
   Loader2Icon: vi.fn(() => <span data-testid="loader-icon" />),
   Settings: vi.fn(() => <span data-testid="settings-icon" />),
   Info: vi.fn(() => <span data-testid="info-icon" />),
+  Hand: vi.fn(() => <span data-testid="hand-icon" />),
+  SquareChartGantt: vi.fn(() => <span data-testid="gantt-icon" />),
 }));
 
 const mockOnSendPrompt =
@@ -505,12 +519,12 @@ describe("InputPrompt", () => {
   describe("Loading state", () => {
     it("renders interrupt button when loading", () => {
       render(<InputPrompt {...defaultProps} loading={true} />);
-      expect(screen.getByTestId("input-group-button")).toBeInTheDocument();
+      expect(screen.getByTitle("Stop")).toBeInTheDocument();
     });
 
     it("calls onInterrupt when interrupt button clicked", () => {
       render(<InputPrompt {...defaultProps} loading={true} />);
-      const button = screen.getByTestId("input-group-button");
+      const button = screen.getByTitle("Stop");
       fireEvent.click(button);
       expect(mockOnInterrupt).toHaveBeenCalled();
     });
