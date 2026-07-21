@@ -110,6 +110,7 @@ describe("useChat", () => {
     expect(result.current.actions.selectSession).toBeInstanceOf(Function);
     expect(result.current.actions.denyPermission).toBeInstanceOf(Function);
     expect(result.current.actions.setSelectedSkills).toBeInstanceOf(Function);
+    expect(result.current.actions.dismissContinuePrompt).toBeInstanceOf(Function);
   });
 
   it("renders children correctly", () => {
@@ -764,6 +765,233 @@ describe("appReducer - SESSION_STATUS", () => {
   });
 });
 
+describe("appReducer - Continue prompt", () => {
+  beforeEach(() => {
+    clearMessageHandlers();
+    vi.clearAllMocks();
+    localStorage.clear();
+  });
+
+  it("showContinuePrompt defaults to false", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(false);
+  });
+
+  it("DISMISS_CONTINUE_PROMPT sets showContinuePrompt to false", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // First show
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "interrupted",
+        sessionId: "s1",
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(true);
+
+    // Then dismiss
+    act(() => {
+      result.current.dispatch({ type: "DISMISS_CONTINUE_PROMPT" });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(false);
+  });
+
+  it("SESSION_STATUS interrupted sets showContinuePrompt true without localStorage key", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Ensure no localStorage entry
+    localStorage.removeItem("deepcode:continuePromptDismissed:s1");
+
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "interrupted",
+        sessionId: "s1",
+      });
+    });
+
+    expect(result.current.state.activeSessionStatus).toBe("interrupted");
+    expect(result.current.state.showContinuePrompt).toBe(true);
+    expect(result.current.state.loading).toBe(false);
+  });
+
+  it("SESSION_STATUS interrupted does not show prompt when dismissed in localStorage", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Simulate that user previously dismissed
+    localStorage.setItem("deepcode:continuePromptDismissed:s1", "1");
+
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "interrupted",
+        sessionId: "s1",
+      });
+    });
+
+    expect(result.current.state.activeSessionStatus).toBe("interrupted");
+    expect(result.current.state.showContinuePrompt).toBe(false);
+  });
+
+  it("SESSION_STATUS with non-interrupted status sets showContinuePrompt false", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // First set interrupted
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "interrupted",
+        sessionId: "s1",
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(true);
+
+    // Then change to processing
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "processing",
+        sessionId: "s1",
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(false);
+  });
+
+  it("LOAD_SESSION with interrupted status shows prompt without localStorage", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    localStorage.removeItem("deepcode:continuePromptDismissed:s1");
+
+    act(() => {
+      result.current.dispatch({
+        type: "LOAD_SESSION",
+        sessionId: "s1",
+        status: "interrupted",
+        messages: [],
+        sessions: [],
+      });
+    });
+
+    expect(result.current.state.activeSessionStatus).toBe("interrupted");
+    expect(result.current.state.showContinuePrompt).toBe(true);
+  });
+
+  it("LOAD_SESSION with interrupted status does not show prompt when dismissed", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    localStorage.setItem("deepcode:continuePromptDismissed:s1", "1");
+
+    act(() => {
+      result.current.dispatch({
+        type: "LOAD_SESSION",
+        sessionId: "s1",
+        status: "interrupted",
+        messages: [],
+        sessions: [],
+      });
+    });
+
+    expect(result.current.state.activeSessionStatus).toBe("interrupted");
+    expect(result.current.state.showContinuePrompt).toBe(false);
+  });
+
+  it("LOAD_SESSION with non-interrupted status does not show prompt", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.dispatch({
+        type: "LOAD_SESSION",
+        sessionId: "s1",
+        status: "completed",
+        messages: [{ role: "user" as const, content: "Hello" }],
+        sessions: [],
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(false);
+  });
+
+  it("dismissContinuePrompt action persists to localStorage and dispatches", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Simulate loaded session with interrupted status
+    act(() => {
+      result.current.dispatch({
+        type: "LOAD_SESSION",
+        sessionId: "s1",
+        status: "interrupted",
+        messages: [],
+        sessions: [],
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(true);
+
+    // Call dismissContinuePrompt
+    act(() => {
+      result.current.actions.dismissContinuePrompt();
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(false);
+    expect(localStorage.getItem("deepcode:continuePromptDismissed:s1")).toBe("1");
+  });
+
+  it("different sessions have independent dismiss state", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Dismiss session 1
+    localStorage.setItem("deepcode:continuePromptDismissed:s1", "1");
+
+    // Session 1 should not show prompt
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "interrupted",
+        sessionId: "s1",
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(false);
+
+    // Session 2 should show prompt (not dismissed)
+    act(() => {
+      result.current.dispatch({
+        type: "SESSION_STATUS",
+        status: "interrupted",
+        sessionId: "s2",
+      });
+    });
+
+    expect(result.current.state.showContinuePrompt).toBe(true);
+  });
+});
+
 describe("Message event handling", () => {
   beforeEach(() => {
     clearMessageHandlers();
@@ -853,5 +1081,69 @@ describe("Message event handling", () => {
     });
 
     expect(result.current.state.loading).toBe(false);
+  });
+
+  it("filters out interrupt messages from appendMessage", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Simulate an "Interrupted." message from core
+    act(() => {
+      postMessage({
+        type: "appendMessage",
+        message: { role: "user", content: "Interrupted." },
+        shouldConnect: false,
+      });
+    });
+
+    // Should NOT be appended to messages
+    expect(result.current.state.messages).toHaveLength(0);
+
+    // Normal message should still work
+    act(() => {
+      postMessage({
+        type: "appendMessage",
+        message: { role: "assistant", content: "Hello there" },
+        shouldConnect: false,
+      });
+    });
+
+    expect(result.current.state.messages).toHaveLength(1);
+    expect(result.current.state.messages[0].content).toBe("Hello there");
+  });
+
+  it("filters out interrupt message with process info", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // "Interrupted. Killed processes: ..." also filtered
+    act(() => {
+      postMessage({
+        type: "appendMessage",
+        message: { role: "user", content: "Interrupted. Killed processes: 12345." },
+        shouldConnect: false,
+      });
+    });
+
+    expect(result.current.state.messages).toHaveLength(0);
+  });
+
+  it("does NOT filter messages that merely contain 'Interrupted' in the middle", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      postMessage({
+        type: "appendMessage",
+        message: { role: "user", content: "The process was Interrupted." },
+        shouldConnect: false,
+      });
+    });
+
+    // Messages with "Interrupted" not at the start should still be appended
+    expect(result.current.state.messages).toHaveLength(1);
   });
 });

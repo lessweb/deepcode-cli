@@ -114,6 +114,7 @@ export interface AppState {
   activeEditor: ActiveEditor | null;
   editingMessage: EditingMessage | null;
   askUserQuestions: AskUserQuestionData | null;
+  showContinuePrompt: boolean;
 }
 
 // --- App actions ---
@@ -134,6 +135,7 @@ export type AppAction =
   | {
       type: "SESSION_STATUS";
       status: string | null;
+      sessionId?: string;
       askPermissions?: AskPermissionRequest[];
       processes?: Record<string, { startTime: string; command: string }> | null;
       tokenTelemetry?: TokenTelemetry | undefined;
@@ -150,4 +152,5 @@ export type AppAction =
   | { type: "CLEAR_MESSAGES" }
   | { type: "SET_ACTIVE_EDITOR"; editor: ActiveEditor | null }
   | { type: "SET_EDITING_MESSAGE"; editingMessage: EditingMessage | null }
-  | { type: "SET_ASK_USER_QUESTIONS"; data: AskUserQuestionData | null };
+  | { type: "SET_ASK_USER_QUESTIONS"; data: AskUserQuestionData | null }
+  | { type: "DISMISS_CONTINUE_PROMPT" };

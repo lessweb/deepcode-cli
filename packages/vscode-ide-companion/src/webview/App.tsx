@@ -4,6 +4,7 @@ import Messages from "@/webview/components/Messages";
 import InputPrompt from "@/webview/components/InputPrompt";
 import ThinkingLiveBubble from "@/webview/components/ThinkingLiveBubble";
 import PermissionPrompt from "@/webview/components/PermissionPrompt";
+import ContinuePrompt from "@/webview/components/ContinuePrompt";
 import { useChat } from "@/webview/context/ChatProvider";
 import AskQuestionCarousel from "@/webview/components/AskQuestionCarousel";
 import type { AskUserQuestionMetadata } from "@/webview/components/bubbles/ToolBubble";
@@ -47,6 +48,9 @@ export default function App() {
         activeSessionId={state.activeSessionId}
         onInterrupt={actions.interrupt}
       />
+      {state.showContinuePrompt && (
+        <ContinuePrompt onContinue={actions.dismissContinuePrompt} onDismiss={actions.dismissContinuePrompt} />
+      )}
       {state.loading && (
         <ThinkingLiveBubble
           llmStreamProgress={state.llmStreamProgress}

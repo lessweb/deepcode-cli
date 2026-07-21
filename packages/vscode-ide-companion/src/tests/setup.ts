@@ -81,12 +81,19 @@ Object.defineProperty(window, "acquireVsCodeApi", {
   value: () => mockVSCode,
 });
 
-// Mock localStorage
+// Mock localStorage with real in-memory storage
+const storageStore = new Map<string, string>();
 const localStorageMock = {
-  getItem: vi.fn(),
-  setItem: vi.fn(),
-  removeItem: vi.fn(),
-  clear: vi.fn(),
+  getItem: vi.fn((key: string) => storageStore.get(key) ?? null),
+  setItem: vi.fn((key: string, value: string) => {
+    storageStore.set(key, value);
+  }),
+  removeItem: vi.fn((key: string) => {
+    storageStore.delete(key);
+  }),
+  clear: vi.fn(() => {
+    storageStore.clear();
+  }),
 };
 Object.defineProperty(window, "localStorage", {
   writable: true,
