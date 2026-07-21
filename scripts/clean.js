@@ -32,8 +32,6 @@ for (const pkgDir of packageDirs) {
 
 // VSCode companion specific artifacts
 const vscodeDir = join(root, "packages", "vscode-ide-companion");
-rmSync(join(vscodeDir, "out"), RMRF);
-console.log("  rm packages/vscode-ide-companion/out/");
 
 rmSync(join(vscodeDir, "templates"), RMRF);
 console.log("  rm packages/vscode-ide-companion/templates/");
