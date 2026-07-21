@@ -332,6 +332,7 @@ describe("appReducer - USER_MESSAGE", () => {
 
     expect(result.current.state.messages).toHaveLength(1);
     expect(result.current.state.messages[0]).toEqual({
+      id: expect.any(String),
       role: "user",
       content: "Hello world",
       meta: { timestamp: 123 },
@@ -769,7 +770,6 @@ describe("appReducer - Continue prompt", () => {
   beforeEach(() => {
     clearMessageHandlers();
     vi.clearAllMocks();
-    localStorage.clear();
   });
 
   it("showContinuePrompt defaults to false", () => {
@@ -804,13 +804,10 @@ describe("appReducer - Continue prompt", () => {
     expect(result.current.state.showContinuePrompt).toBe(false);
   });
 
-  it("SESSION_STATUS interrupted sets showContinuePrompt true without localStorage key", () => {
+  it("SESSION_STATUS interrupted sets showContinuePrompt true", () => {
     const { result } = renderHook(() => useChat(), {
       wrapper: createWrapper(),
     });
-
-    // Ensure no localStorage entry
-    localStorage.removeItem("deepcode:continuePromptDismissed:s1");
 
     act(() => {
       result.current.dispatch({
@@ -823,26 +820,6 @@ describe("appReducer - Continue prompt", () => {
     expect(result.current.state.activeSessionStatus).toBe("interrupted");
     expect(result.current.state.showContinuePrompt).toBe(true);
     expect(result.current.state.loading).toBe(false);
-  });
-
-  it("SESSION_STATUS interrupted does not show prompt when dismissed in localStorage", () => {
-    const { result } = renderHook(() => useChat(), {
-      wrapper: createWrapper(),
-    });
-
-    // Simulate that user previously dismissed
-    localStorage.setItem("deepcode:continuePromptDismissed:s1", "1");
-
-    act(() => {
-      result.current.dispatch({
-        type: "SESSION_STATUS",
-        status: "interrupted",
-        sessionId: "s1",
-      });
-    });
-
-    expect(result.current.state.activeSessionStatus).toBe("interrupted");
-    expect(result.current.state.showContinuePrompt).toBe(false);
   });
 
   it("SESSION_STATUS with non-interrupted status sets showContinuePrompt false", () => {
@@ -873,12 +850,10 @@ describe("appReducer - Continue prompt", () => {
     expect(result.current.state.showContinuePrompt).toBe(false);
   });
 
-  it("LOAD_SESSION with interrupted status shows prompt without localStorage", () => {
+  it("LOAD_SESSION with interrupted status shows prompt", () => {
     const { result } = renderHook(() => useChat(), {
       wrapper: createWrapper(),
     });
-
-    localStorage.removeItem("deepcode:continuePromptDismissed:s1");
 
     act(() => {
       result.current.dispatch({
@@ -892,27 +867,6 @@ describe("appReducer - Continue prompt", () => {
 
     expect(result.current.state.activeSessionStatus).toBe("interrupted");
     expect(result.current.state.showContinuePrompt).toBe(true);
-  });
-
-  it("LOAD_SESSION with interrupted status does not show prompt when dismissed", () => {
-    const { result } = renderHook(() => useChat(), {
-      wrapper: createWrapper(),
-    });
-
-    localStorage.setItem("deepcode:continuePromptDismissed:s1", "1");
-
-    act(() => {
-      result.current.dispatch({
-        type: "LOAD_SESSION",
-        sessionId: "s1",
-        status: "interrupted",
-        messages: [],
-        sessions: [],
-      });
-    });
-
-    expect(result.current.state.activeSessionStatus).toBe("interrupted");
-    expect(result.current.state.showContinuePrompt).toBe(false);
   });
 
   it("LOAD_SESSION with non-interrupted status does not show prompt", () => {
@@ -933,7 +887,7 @@ describe("appReducer - Continue prompt", () => {
     expect(result.current.state.showContinuePrompt).toBe(false);
   });
 
-  it("dismissContinuePrompt action persists to localStorage and dispatches", () => {
+  it("dismissContinuePrompt action dispatches DISMISS_CONTINUE_PROMPT", () => {
     const { result } = renderHook(() => useChat(), {
       wrapper: createWrapper(),
     });
@@ -957,18 +911,14 @@ describe("appReducer - Continue prompt", () => {
     });
 
     expect(result.current.state.showContinuePrompt).toBe(false);
-    expect(localStorage.getItem("deepcode:continuePromptDismissed:s1")).toBe("1");
   });
 
-  it("different sessions have independent dismiss state", () => {
+  it("SESSION_STATUS interrupted always shows prompt when interrupted", () => {
     const { result } = renderHook(() => useChat(), {
       wrapper: createWrapper(),
     });
 
-    // Dismiss session 1
-    localStorage.setItem("deepcode:continuePromptDismissed:s1", "1");
-
-    // Session 1 should not show prompt
+    // Dismiss once
     act(() => {
       result.current.dispatch({
         type: "SESSION_STATUS",
@@ -977,9 +927,15 @@ describe("appReducer - Continue prompt", () => {
       });
     });
 
+    expect(result.current.state.showContinuePrompt).toBe(true);
+
+    act(() => {
+      result.current.actions.dismissContinuePrompt();
+    });
+
     expect(result.current.state.showContinuePrompt).toBe(false);
 
-    // Session 2 should show prompt (not dismissed)
+    // Next interruption should always show the prompt (no localStorage persistence)
     act(() => {
       result.current.dispatch({
         type: "SESSION_STATUS",
