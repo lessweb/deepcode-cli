@@ -400,23 +400,23 @@ export default function SessionList({
                                 </Item>
                               </ContextMenuTrigger>
                               <ContextMenuContent className="w-64" side="right">
-                                <ContextMenuGroup>
-                                  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "open")}>
-                                    <FileText className="h-4 w-4" />
-                                    Open as Editor
-                                    <ContextMenuShortcut>⌃⏎</ContextMenuShortcut>
-                                  </ContextMenuItem>
-                                  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "beside")}>
-                                    <Columns2 className="h-4 w-4" />
-                                    Open to the Side
-                                    <ContextMenuShortcut>⌃⌥⏎</ContextMenuShortcut>
-                                  </ContextMenuItem>
-                                  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "newWindow")}>
-                                    <ExternalLink className="h-4 w-4" />
-                                    Open in new Window
-                                  </ContextMenuItem>
-                                </ContextMenuGroup>
-                                <ContextMenuSeparator />
+                                {/*<ContextMenuGroup>*/}
+                                {/*  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "open")}>*/}
+                                {/*    <FileText className="h-4 w-4" />*/}
+                                {/*    Open as Editor*/}
+                                {/*    <ContextMenuShortcut>⌃⏎</ContextMenuShortcut>*/}
+                                {/*  </ContextMenuItem>*/}
+                                {/*  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "beside")}>*/}
+                                {/*    <Columns2 className="h-4 w-4" />*/}
+                                {/*    Open to the Side*/}
+                                {/*    <ContextMenuShortcut>⌃⌥⏎</ContextMenuShortcut>*/}
+                                {/*  </ContextMenuItem>*/}
+                                {/*  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "newWindow")}>*/}
+                                {/*    <ExternalLink className="h-4 w-4" />*/}
+                                {/*    Open in new Window*/}
+                                {/*  </ContextMenuItem>*/}
+                                {/*</ContextMenuGroup>*/}
+                                {/*<ContextMenuSeparator />*/}
                                 <ContextMenuGroup>
                                   <ContextMenuItem onClick={async () => handleInspectJsonl(s.id)}>
                                     <FileText className="h-4 w-4" />
