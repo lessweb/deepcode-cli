@@ -399,7 +399,7 @@ export default function SessionList({
                                   <ItemActions className="shrink-0 text-xs text-muted-foreground"></ItemActions>
                                 </Item>
                               </ContextMenuTrigger>
-                              <ContextMenuContent className="w-64" side="right">
+                              <ContextMenuContent className="w-52" side="right">
                                 {/*<ContextMenuGroup>*/}
                                 {/*  <ContextMenuItem onClick={() => handleContextMenuOpen(s.id, "open")}>*/}
                                 {/*    <FileText className="h-4 w-4" />*/}
