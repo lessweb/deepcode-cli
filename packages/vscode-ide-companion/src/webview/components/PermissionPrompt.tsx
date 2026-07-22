@@ -259,7 +259,7 @@ export default function PermissionPrompt({
           </div>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon-xs"
             className="cursor-pointer border-none bg-transparent p-0 text-muted-foreground hover:text-foreground"
             onClick={handleCancel}
             title="Interrupt"
@@ -281,15 +281,15 @@ export default function PermissionPrompt({
         <div className="text-xs mb-2">Do you want to proceed?</div>
 
         <div className="flex gap-2 flex-wrap">
-          <Button size="sm" variant="default" onClick={() => commitDecision("allow")}>
+          <Button size="xs" variant="default" onClick={() => commitDecision("allow")}>
             Yes
           </Button>
           {canAlwaysAllow && (
-            <Button size="sm" variant="secondary" onClick={() => commitDecision("always")}>
+            <Button size="xs" variant="secondary" onClick={() => commitDecision("always")}>
               Yes, and always allow this scope
             </Button>
           )}
-          <Button size="sm" variant="outline" onClick={() => commitDecision("deny")}>
+          <Button size="xs" variant="outline" onClick={() => commitDecision("deny")}>
             No
           </Button>
         </div>

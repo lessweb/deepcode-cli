@@ -29,6 +29,8 @@ const Messages = forwardRef<MessagesHandle, MessagesProps>(
     const bottomRef = useRef<HTMLDivElement>(null);
     const suppressScrollRef = useRef(false);
     const highlightedElRef = useRef<Element | null>(null);
+    const observerRef = useRef<IntersectionObserver | null>(null);
+    const observerFallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
     const handleToBottom = () => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -40,19 +42,57 @@ const Messages = forwardRef<MessagesHandle, MessagesProps>(
       }
     }, [messages, loading]);
 
+    // Cleanup observer on unmount
+    useEffect(() => {
+      return () => {
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+        }
+        if (observerFallbackRef.current) {
+          clearTimeout(observerFallbackRef.current);
+        }
+      };
+    }, []);
+
     useImperativeHandle(ref, () => ({
       scrollToMessage: (messageId: string) => {
         suppressScrollRef.current = true;
 
+        // Clean up previous observer and fallback timer
+        if (observerRef.current) {
+          observerRef.current.disconnect();
+          observerRef.current = null;
+        }
+        if (observerFallbackRef.current) {
+          clearTimeout(observerFallbackRef.current);
+          observerFallbackRef.current = null;
+        }
+
         // Remove highlight from previously highlighted element
         if (highlightedElRef.current) {
           highlightedElRef.current.classList.remove("msg-highlight-breathe");
+          highlightedElRef.current = null;
         }
 
         const el = document.querySelector(`[data-message-id="${messageId}"]`);
-        if (el) {
-          el.scrollIntoView({ behavior: "smooth", block: "center" });
-          // Apply breathing light effect
+        if (!el) {
+          setTimeout(() => {
+            suppressScrollRef.current = false;
+          }, 500);
+          return;
+        }
+
+        // Scroll the element into view first (smooth)
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+        // Get the scrollable viewport as the IntersectionObserver root
+        const viewport = scrollAreaRef.current?.querySelector("[data-radix-scroll-area-viewport]") || null;
+
+        let highlightApplied = false;
+
+        const applyHighlight = () => {
+          if (highlightApplied) return;
+          highlightApplied = true;
           el.classList.add("msg-highlight-breathe");
           highlightedElRef.current = el;
           // Remove the class after animation completes (3 iterations * 0.8s)
@@ -62,7 +102,43 @@ const Messages = forwardRef<MessagesHandle, MessagesProps>(
               highlightedElRef.current = null;
             }
           }, 2600);
-        }
+        };
+
+        // Use IntersectionObserver to wait until the element is fully visible
+        const observer = new IntersectionObserver(
+          (entries) => {
+            for (const entry of entries) {
+              if (entry.intersectionRatio >= 0.99) {
+                // Clear fallback timer
+                if (observerFallbackRef.current) {
+                  clearTimeout(observerFallbackRef.current);
+                  observerFallbackRef.current = null;
+                }
+                applyHighlight();
+                observer.disconnect();
+                observerRef.current = null;
+                return;
+              }
+            }
+          },
+          {
+            root: viewport,
+            threshold: [0.99],
+          }
+        );
+
+        observer.observe(el);
+        observerRef.current = observer;
+
+        // Fallback: if the element never becomes fully visible within 2s
+        // (e.g., element is too large to fit), apply animation anyway
+        observerFallbackRef.current = setTimeout(() => {
+          if (observerRef.current) {
+            observerRef.current.disconnect();
+            observerRef.current = null;
+          }
+          applyHighlight();
+        }, 2000);
 
         // Re-enable auto-scroll after a delay
         setTimeout(() => {
@@ -85,19 +161,16 @@ const Messages = forwardRef<MessagesHandle, MessagesProps>(
     return (
       <ScrollArea
         ref={scrollAreaRef}
-        onScroll={(e) => {
-          console.log("eeeee", e);
-        }}
-        className="flex-1 w-full max-w-237.5 mx-auto min-w-sm min-h-0 overflow-hidden"
+        className="flex-1 w-full max-w-237.5 mx-auto min-w-sm min-h-0 px-4 overflow-hidden"
       >
-        <div className="flex flex-col gap-0 px-4 py-4">
+        <div className="flex w-full flex-col gap-0 py-4">
           {messages.map((msg, index) => {
             const prevMsg = index > 0 ? messages[index - 1] : null;
             const shouldConnect = prevMsg ? prevMsg.role !== "user" && msg.role !== "user" : false;
             const msgId = msg.id || `msg-${index}`;
 
             const wrapWithId = (element: React.ReactNode, key: string) => (
-              <div key={key} data-message-id={msgId}>
+              <div key={key} data-message-id={msgId} className="w-full">
                 {element}
               </div>
             );

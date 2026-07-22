@@ -9,6 +9,12 @@ export interface SessionMessage {
   content: string;
   meta?: MessageMeta;
   visible?: boolean;
+  checkpointHash?: string;
+  compacted?: boolean;
+  contentParams?: Record<string, string | number | boolean>;
+  messageParams?: Record<string, string | number | boolean>;
+  createTime?: string;
+  updateTime?: string;
 }
 
 // --- Editing state ---

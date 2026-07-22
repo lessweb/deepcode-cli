@@ -217,7 +217,7 @@ export default function SessionList({
         console.error("Failed to open chat panel:", err);
       }
     },
-    [onSelect, onCreateNewSession, handleCloseDrawer, activeSessionId]
+    [onCreateNewSession, handleCloseDrawer, activeSessionId]
   );
 
   const handleInspectJsonl = useCallback(async (sessionId: string) => {
@@ -314,6 +314,7 @@ export default function SessionList({
           <DrawerTitle>Sessions</DrawerTitle>
           <InputGroup className="w-full mt-4">
             <InputGroupInput
+              className="text-sm"
               placeholder="Search sessions..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -357,7 +358,7 @@ export default function SessionList({
                                 ref={editInputRef}
                                 autoFocus
                                 placeholder="Enter new session title"
-                                className="flex-1 h-10 bg-transparent border-b shadow-none outline-0 border-primary outline-none text-xs px-1 py-0"
+                                className="flex-1 h-10 bg-transparent rounded border-b shadow-none outline-0 border-primary outline-none text-xs px-1 py-0"
                                 value={editValue}
                                 onChange={(e) => setEditValue(e.target.value)}
                                 onKeyDown={(e) => handleRenameKeyDown(e, s.id)}
@@ -488,7 +489,7 @@ export default function SessionList({
         </div>
         <DrawerFooter>
           <DrawerClose asChild>
-            <Button onClick={onCreateNewSession} variant="outline" className="cursor-pointer">
+            <Button onClick={onCreateNewSession} variant="default" className="cursor-pointer">
               New Session
             </Button>
           </DrawerClose>

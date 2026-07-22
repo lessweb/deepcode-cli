@@ -14,7 +14,7 @@ export default function ContinuePrompt({ onContinue, onDismiss }: ContinuePrompt
           <span className="font-medium">Session interrupted</span>
           <Button
             variant="ghost"
-            size="icon-sm"
+            size="icon-xs"
             className="cursor-pointer border-none bg-transparent p-0 text-muted-foreground hover:text-foreground"
             onClick={onDismiss}
             title="Dismiss"
@@ -28,7 +28,7 @@ export default function ContinuePrompt({ onContinue, onDismiss }: ContinuePrompt
         </p>
 
         <div className="flex gap-2">
-          <Button size="sm" variant="default" onClick={onContinue}>
+          <Button size="xs" variant="default" onClick={onContinue}>
             Continue
           </Button>
         </div>

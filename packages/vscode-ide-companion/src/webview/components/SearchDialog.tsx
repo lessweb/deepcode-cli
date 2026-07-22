@@ -22,13 +22,13 @@ interface SearchDialogProps {
 function getRoleIcon(role: string) {
   switch (role) {
     case "user":
-      return <User className="size-4 shrink-0 text-blue-400" />;
+      return <User className="size-5 shrink-0 text-blue-400" strokeWidth={1.5} />;
     case "assistant":
-      return <Bot className="size-4 shrink-0 text-green-400" />;
+      return <Bot className="size-5 shrink-0 text-green-400" strokeWidth={1.5} />;
     case "tool":
-      return <Wrench className="size-4 shrink-0 text-yellow-400" />;
+      return <Wrench className="size-5 shrink-0 text-yellow-400" strokeWidth={1.5} />;
     case "system":
-      return <Info className="size-4 shrink-0 text-muted-foreground" />;
+      return <Info className="size-5 shrink-0 text-muted-foreground" strokeWidth={1.5} />;
     default:
       return null;
   }
@@ -50,6 +50,7 @@ function getRoleLabel(role: string) {
 }
 
 const SearchDialog = memo(function SearchDialog({ open, onOpenChange, messages, onSelectMessage }: SearchDialogProps) {
+  console.log("messages:", messages);
   // Build a flat list of searchable items with their message IDs.
   // Only recompute when messages reference changes (shallow compare via React.memo).
   const searchableItems = useMemo(
@@ -63,11 +64,13 @@ const SearchDialog = memo(function SearchDialog({ open, onOpenChange, messages, 
             role: msg.role,
             content: msg.content,
             searchValue: `${preview} ${getRoleLabel(msg.role)}`,
+            visible: msg.visible,
+            createTime: msg.createTime,
             index,
             preview,
           };
         })
-        .filter((item) => item.content.trim()),
+        .filter((item) => item.visible && item.content.trim()),
     [messages]
   );
 
@@ -82,16 +85,21 @@ const SearchDialog = memo(function SearchDialog({ open, onOpenChange, messages, 
   return (
     <CommandDialog open={open} onOpenChange={onOpenChange} title="Search Messages" className="max-w-lg">
       <Command>
-        <CommandInput placeholder="Search messages..." />
+        <CommandInput className="text-sm" placeholder="Search messages..." />
         <CommandList>
           <CommandEmpty>No messages found.</CommandEmpty>
           <CommandGroup heading="Messages">
             {searchableItems.map((item) => (
-              <CommandItem key={item.id} value={item.searchValue} onSelect={() => handleSelect(item.id)}>
+              <CommandItem key={item.id} onSelect={() => handleSelect(item.id)}>
                 <div className="flex items-center gap-2 min-w-0">
-                  {getRoleIcon(item.role)}
-                  <div className="flex flex-col min-w-0">
-                    <span className="text-xs text-muted-foreground">{getRoleLabel(item.role)}</span>
+                  <div className="size-5">{getRoleIcon(item.role)}</div>
+                  <div className="flex flex-col min-w-0 gap-1">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="text-xs font-semibold text-muted-foreground">{getRoleLabel(item.role)}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {new Date(item.createTime || 0).toLocaleString()}
+                      </span>
+                    </div>
                     <span className="text-sm truncate">{item.preview}</span>
                   </div>
                 </div>
