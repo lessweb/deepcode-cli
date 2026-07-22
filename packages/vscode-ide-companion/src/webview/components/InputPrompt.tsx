@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import SkillsPanel from "@/webview/components/SkillsPanel";
 import SkillsTags from "@/webview/components/SkillsTags";
 import ContextIndicator from "@/webview/components/ContextIndicator";
-import { PromptAttachments, usePromptAttachments } from "@/webview/components/PromptAttachments";
+import { PromptAttachments } from "@/webview/components/PromptAttachments";
 import type { ActiveEditor, EditingMessage, SessionMessage, SkillInfo, TokenTelemetry } from "@/webview/types";
 import { FileCodeIcon, Hand, Reply, Square, SquareChartGantt } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/webview/components/ui/input-group";
@@ -21,6 +21,7 @@ import {
   DropdownMenuTrigger,
 } from "@/webview/components/ui/dropdown-menu";
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/webview/components/ui/item";
+import { usePromptAttachments } from "@/webview/hooks/usePromptAttachments";
 
 export interface InputPromptProps {
   loading: boolean;

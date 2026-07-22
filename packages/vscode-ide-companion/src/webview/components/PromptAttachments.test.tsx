@@ -5,7 +5,8 @@
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { PromptAttachments, usePromptAttachments } from "./PromptAttachments";
+import { PromptAttachments } from "./PromptAttachments";
+import { usePromptAttachments } from "@/webview/hooks/usePromptAttachments";
 
 describe("PromptAttachments", () => {
   it("renders nothing when no attachments", () => {
