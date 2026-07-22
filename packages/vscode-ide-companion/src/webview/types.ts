@@ -116,6 +116,7 @@ export interface AppState {
   askUserQuestions: AskUserQuestionData | null;
   showContinuePrompt: boolean;
   sessionListOpen: boolean;
+  searchPanelOpen: boolean;
 }
 
 // --- App actions ---
@@ -155,4 +156,6 @@ export type AppAction =
   | { type: "SET_EDITING_MESSAGE"; editingMessage: EditingMessage | null }
   | { type: "SET_ASK_USER_QUESTIONS"; data: AskUserQuestionData | null }
   | { type: "DISMISS_CONTINUE_PROMPT" }
-  | { type: "TOGGLE_SESSION_LIST"; open?: boolean };
+  | { type: "SET_ACTIVE_SESSION_ID"; sessionId: string }
+  | { type: "TOGGLE_SESSION_LIST"; open?: boolean }
+  | { type: "TOGGLE_SEARCH_PANEL"; open?: boolean };

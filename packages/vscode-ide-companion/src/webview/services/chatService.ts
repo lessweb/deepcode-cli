@@ -78,9 +78,17 @@ export const chatService = {
   },
 
   /**
+   * Get list of all sessions
+   */
+  async getSessions(): Promise<SessionSummary[]> {
+    const result = await wrpc.getSessions.query();
+    return (result?.sessions as SessionSummary[]) ?? [];
+  },
+
+  /**
    * Send a prompt to the chat
    */
-  async sendPrompt(options: SendPromptOptions): Promise<{ ok: boolean; error?: string }> {
+  async sendPrompt(options: SendPromptOptions): Promise<{ ok: boolean; error?: string; sessionId?: string }> {
     const normalizedImages = (options.images ?? []).filter(Boolean);
     console.log("options:", options);
     const result = await wrpc.sendPrompt.mutate({
@@ -93,7 +101,7 @@ export const chatService = {
       askUserQuestionSummary: options.askUserQuestionSummary,
     });
 
-    return result as { ok: boolean; error?: string };
+    return result as { ok: boolean; error?: string; sessionId?: string };
   },
 
   /**
@@ -162,7 +170,7 @@ export const chatService = {
    */
   async addSystemMessage(content: string, meta?: Record<string, unknown>): Promise<{ ok: boolean; error?: string }> {
     const result = await wrpc.addSystemMessage.mutate({ content, meta });
-    return result as { ok: boolean; error?: string };
+    return result as { ok: boolean; error?: string; sessionId?: string };
   },
 
   /**
@@ -170,7 +178,7 @@ export const chatService = {
    */
   async renameSession(sessionId: string, summary: string): Promise<{ ok: boolean; error?: string }> {
     const result = await wrpc.renameSession.mutate({ sessionId, summary });
-    return result as { ok: boolean; error?: string };
+    return result as { ok: boolean; error?: string; sessionId?: string };
   },
 
   /**

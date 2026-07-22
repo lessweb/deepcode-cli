@@ -43,6 +43,7 @@ interface ChatContextValue {
     dismissContinuePrompt: () => void;
     continueGeneration: () => Promise<void>;
     toggleSessionList: (open?: boolean) => void;
+    toggleSearchPanel: (open?: boolean) => void;
   };
 }
 
@@ -72,6 +73,7 @@ const initialState: AppState = {
   askUserQuestions: null,
   showContinuePrompt: false,
   sessionListOpen: false,
+  searchPanelOpen: false,
 };
 
 function appReducer(state: AppState, action: AppAction): AppState {
@@ -175,8 +177,12 @@ function appReducer(state: AppState, action: AppAction): AppState {
       return { ...state, askUserQuestions: action.data };
     case "DISMISS_CONTINUE_PROMPT":
       return { ...state, showContinuePrompt: false };
+    case "SET_ACTIVE_SESSION_ID":
+      return { ...state, activeSessionId: action.sessionId };
     case "TOGGLE_SESSION_LIST":
       return { ...state, sessionListOpen: action.open !== undefined ? action.open : !state.sessionListOpen };
+    case "TOGGLE_SEARCH_PANEL":
+      return { ...state, searchPanelOpen: action.open !== undefined ? action.open : !state.searchPanelOpen };
     default:
       return state;
   }
@@ -192,6 +198,10 @@ interface ChatProviderProps {
 
 export function ChatProvider({ children }: ChatProviderProps) {
   const [state, dispatch] = useReducer(appReducer, initialState);
+
+  // Ref to track current activeSessionId for use in stable callbacks
+  const activeSessionIdRef = useRef<string | null>(null);
+  activeSessionIdRef.current = state.activeSessionId;
 
   // Load initial data via RPC
   const { data: initialData } = wrpc.useQuery("getInitialData");
@@ -322,8 +332,9 @@ export function ChatProvider({ children }: ChatProviderProps) {
       }
     ) => {
       dispatch({ type: "SET_LOADING", loading: true });
+      let sessionId: string | undefined;
       try {
-        await chatService.sendPrompt({
+        const result = await chatService.sendPrompt({
           prompt,
           skills,
           images,
@@ -332,9 +343,19 @@ export function ChatProvider({ children }: ChatProviderProps) {
           planMode: options?.planMode || false,
           askUserQuestionSummary: options?.askUserQuestionSummary || false,
         });
+        sessionId = result.sessionId;
       } catch (err) {
         console.error("[ChatProvider] sendPrompt failed:", err);
         dispatch({ type: "SET_LOADING", loading: false });
+      }
+      // If a new session was just created (no active session before), set it
+      if (sessionId && !activeSessionIdRef.current) {
+        dispatch({ type: "SET_ACTIVE_SESSION_ID", sessionId });
+      }
+      // Refresh sessions list (e.g. new session created by first message)
+      const freshSessions = await chatService.getSessions();
+      if (freshSessions.length > 0) {
+        dispatch({ type: "SET_SESSIONS", sessions: freshSessions });
       }
       const freshSkills = await chatService.getSkills();
       if (freshSkills.length > 0) {
@@ -433,6 +454,10 @@ export function ChatProvider({ children }: ChatProviderProps) {
     dispatch({ type: "TOGGLE_SESSION_LIST", open });
   }, []);
 
+  const toggleSearchPanel = useCallback((open?: boolean) => {
+    dispatch({ type: "TOGGLE_SEARCH_PANEL", open });
+  }, []);
+
   const contextValue: ChatContextValue = {
     state,
     dispatch,
@@ -449,6 +474,7 @@ export function ChatProvider({ children }: ChatProviderProps) {
       dismissContinuePrompt,
       continueGeneration,
       toggleSessionList,
+      toggleSearchPanel,
     },
   };
 

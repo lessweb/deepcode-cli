@@ -27,6 +27,7 @@ vi.mock("@/webview/services/chatService", () => ({
   chatService: {
     getInitialData: vi.fn().mockResolvedValue(null),
     getSkills: vi.fn().mockResolvedValue([]),
+    getSessions: vi.fn().mockResolvedValue([]),
     sendPrompt: vi.fn().mockResolvedValue({ ok: true }),
     interrupt: vi.fn().mockResolvedValue({ ok: true }),
     createNewSession: vi.fn().mockResolvedValue({ sessions: [] }),
@@ -1101,5 +1102,238 @@ describe("Message event handling", () => {
 
     // Messages with "Interrupted" not at the start should still be appended
     expect(result.current.state.messages).toHaveLength(1);
+  });
+});
+
+describe("appReducer - SET_SESSIONS", () => {
+  beforeEach(() => {
+    clearMessageHandlers();
+    vi.clearAllMocks();
+  });
+
+  it("updates sessions without resetting other state", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    const mockSessions = [
+      {
+        id: "s1",
+        summary: "Session 1",
+        createTime: "2024-01-01T00:00:00Z",
+        updateTime: "2024-01-01T00:00:00Z",
+        status: "idle",
+      },
+    ];
+
+    act(() => {
+      result.current.dispatch({ type: "SET_SESSIONS", sessions: mockSessions });
+    });
+
+    expect(result.current.state.sessions).toEqual(mockSessions);
+    expect(result.current.state.sessions).toHaveLength(1);
+    // Other state should remain unchanged
+    expect(result.current.state.activeSessionId).toBeNull();
+    expect(result.current.state.messages).toEqual([]);
+    expect(result.current.state.loading).toBe(false);
+  });
+
+  it("replaces existing sessions with new list", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    const initialSessions = [
+      {
+        id: "s1",
+        summary: "Old Session",
+        createTime: "2024-01-01T00:00:00Z",
+        updateTime: "2024-01-01T00:00:00Z",
+        status: "idle",
+      },
+    ];
+
+    const newSessions = [
+      {
+        id: "s2",
+        summary: "New Session",
+        createTime: "2024-01-02T00:00:00Z",
+        updateTime: "2024-01-02T00:00:00Z",
+        status: "processing",
+      },
+      {
+        id: "s3",
+        summary: "Another",
+        createTime: "2024-01-03T00:00:00Z",
+        updateTime: "2024-01-03T00:00:00Z",
+        status: "idle",
+      },
+    ];
+
+    act(() => {
+      result.current.dispatch({ type: "SET_SESSIONS", sessions: initialSessions });
+    });
+
+    expect(result.current.state.sessions).toHaveLength(1);
+
+    act(() => {
+      result.current.dispatch({ type: "SET_SESSIONS", sessions: newSessions });
+    });
+
+    expect(result.current.state.sessions).toEqual(newSessions);
+    expect(result.current.state.sessions).toHaveLength(2);
+  });
+});
+
+describe("appReducer - SET_ACTIVE_SESSION_ID", () => {
+  beforeEach(() => {
+    clearMessageHandlers();
+    vi.clearAllMocks();
+  });
+
+  it("sets activeSessionId to a valid session ID", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    act(() => {
+      result.current.dispatch({ type: "SET_ACTIVE_SESSION_ID", sessionId: "session-xyz" });
+    });
+
+    expect(result.current.state.activeSessionId).toBe("session-xyz");
+  });
+
+  it("does not affect sessions or messages", () => {
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Preload some messages
+    act(() => {
+      result.current.dispatch({ type: "USER_MESSAGE", content: "Hello" });
+    });
+
+    act(() => {
+      result.current.dispatch({ type: "SET_ACTIVE_SESSION_ID", sessionId: "session-123" });
+    });
+
+    expect(result.current.state.activeSessionId).toBe("session-123");
+    expect(result.current.state.messages).toHaveLength(1);
+    expect(result.current.state.loading).toBe(false);
+  });
+});
+
+describe("sendPrompt action - activeSessionId syncing", () => {
+  beforeEach(() => {
+    clearMessageHandlers();
+    vi.clearAllMocks();
+  });
+
+  it("sets activeSessionId when creating a new session from empty state", async () => {
+    const { chatService: mockChatService } = await import("@/webview/services/chatService");
+
+    vi.mocked(mockChatService.sendPrompt).mockResolvedValue({ ok: true, sessionId: "new-session-id" });
+    vi.mocked(mockChatService.getSessions).mockResolvedValue([
+      {
+        id: "new-session-id",
+        summary: "Untitled",
+        createTime: "2024-01-01T00:00:00Z",
+        updateTime: "2024-01-01T00:00:00Z",
+        status: "processing",
+      },
+    ]);
+    vi.mocked(mockChatService.getSkills).mockResolvedValue([]);
+
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Initially no active session
+    expect(result.current.state.activeSessionId).toBeNull();
+
+    // Send a prompt (creates a new session)
+    await act(async () => {
+      await result.current.actions.sendPrompt("Hello world");
+    });
+
+    expect(result.current.state.activeSessionId).toBe("new-session-id");
+    expect(mockChatService.sendPrompt).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps existing activeSessionId when already set", async () => {
+    const { chatService: mockChatService } = await import("@/webview/services/chatService");
+
+    vi.mocked(mockChatService.sendPrompt).mockResolvedValue({ ok: true, sessionId: "existing-session" });
+    vi.mocked(mockChatService.getSessions).mockResolvedValue([]);
+    vi.mocked(mockChatService.getSkills).mockResolvedValue([]);
+
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    // Pre-set active session
+    act(() => {
+      result.current.dispatch({ type: "SET_ACTIVE_SESSION_ID", sessionId: "existing-session" });
+    });
+
+    expect(result.current.state.activeSessionId).toBe("existing-session");
+
+    await act(async () => {
+      await result.current.actions.sendPrompt("Second message");
+    });
+
+    // activeSessionId should remain unchanged
+    expect(result.current.state.activeSessionId).toBe("existing-session");
+  });
+
+  it("refreshes sessions and skills after sending prompt", async () => {
+    const { chatService: mockChatService } = await import("@/webview/services/chatService");
+
+    vi.mocked(mockChatService.sendPrompt).mockResolvedValue({ ok: true, sessionId: "session-1" });
+    vi.mocked(mockChatService.getSessions).mockResolvedValue([
+      {
+        id: "session-1",
+        summary: "After prompt",
+        createTime: "2024-01-01T00:00:00Z",
+        updateTime: "2024-01-01T00:00:00Z",
+        status: "processing",
+      },
+    ]);
+    vi.mocked(mockChatService.getSkills).mockResolvedValue([{ name: "skill1" }]);
+
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    await act(async () => {
+      await result.current.actions.sendPrompt("Hello");
+    });
+
+    expect(mockChatService.getSessions).toHaveBeenCalledTimes(1);
+    expect(mockChatService.getSkills).toHaveBeenCalledTimes(1);
+    expect(result.current.state.sessions).toHaveLength(1);
+    expect(result.current.state.skills).toEqual([{ name: "skill1" }]);
+  });
+
+  it("does not set activeSessionId when sendPrompt returns no sessionId", async () => {
+    const { chatService: mockChatService } = await import("@/webview/services/chatService");
+
+    // sendPrompt returns without sessionId (e.g. for /continue)
+    vi.mocked(mockChatService.sendPrompt).mockResolvedValue({ ok: true });
+    vi.mocked(mockChatService.getSessions).mockResolvedValue([]);
+    vi.mocked(mockChatService.getSkills).mockResolvedValue([]);
+
+    const { result } = renderHook(() => useChat(), {
+      wrapper: createWrapper(),
+    });
+
+    expect(result.current.state.activeSessionId).toBeNull();
+
+    await act(async () => {
+      await result.current.actions.sendPrompt("/continue");
+    });
+
+    // No sessionId returned → activeSessionId stays null
+    expect(result.current.state.activeSessionId).toBeNull();
   });
 });

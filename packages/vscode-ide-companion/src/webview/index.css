@@ -181,3 +181,13 @@
      background-position: -120% 0;
    }
  }
+
+@keyframes msg-highlight-breathe {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(77, 107, 254, 0.12); }
+}
+
+.msg-highlight-breathe {
+  animation: msg-highlight-breathe 0.8s ease-in-out 3;
+  border-radius: 0.5rem;
+}

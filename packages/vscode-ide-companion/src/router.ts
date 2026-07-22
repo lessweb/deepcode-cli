@@ -172,7 +172,8 @@ export const appRouter = router({
       };
       await ctx.sessionManager.handleUserPrompt(userPrompt);
 
-      return { ok: true };
+      const sessionId = ctx.sessionManager.getActiveSessionId();
+      return { ok: true, sessionId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       ctx.postMessage({

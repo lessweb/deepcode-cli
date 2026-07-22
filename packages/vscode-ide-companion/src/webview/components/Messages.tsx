@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, forwardRef } from "react";
+import React, { useRef, useEffect, forwardRef, useImperativeHandle } from "react";
 import { ScrollArea, ScrollBar } from "@/webview/components/ui/scroll-area";
 import UserBubble from "@/webview/components/bubbles/UserBubble";
 import AssistantBubble from "@/webview/components/bubbles/AssistantBubble";
@@ -19,20 +19,57 @@ interface MessagesProps {
   onAskUserQuestions?: (questions: AskUserQuestionMetadata["questions"]) => void;
 }
 
-const Messages = forwardRef<HTMLDivElement, MessagesProps>(
+export interface MessagesHandle {
+  scrollToMessage: (messageId: string) => void;
+}
+
+const Messages = forwardRef<MessagesHandle, MessagesProps>(
   ({ messages, loading, onEditMessage, onAskUserQuestions }, ref) => {
+    const scrollAreaRef = useRef<HTMLDivElement>(null);
     const bottomRef = useRef<HTMLDivElement>(null);
+    const suppressScrollRef = useRef(false);
+    const highlightedElRef = useRef<Element | null>(null);
 
     const handleToBottom = () => {
       bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     };
+
     useEffect(() => {
-      handleToBottom();
+      if (!suppressScrollRef.current) {
+        handleToBottom();
+      }
     }, [messages, loading]);
 
-    // useImperativeHandle(ref, ()=> {
-    //   return bottomRef.current ? bottomRef.current : undefined;
-    // })
+    useImperativeHandle(ref, () => ({
+      scrollToMessage: (messageId: string) => {
+        suppressScrollRef.current = true;
+
+        // Remove highlight from previously highlighted element
+        if (highlightedElRef.current) {
+          highlightedElRef.current.classList.remove("msg-highlight-breathe");
+        }
+
+        const el = document.querySelector(`[data-message-id="${messageId}"]`);
+        if (el) {
+          el.scrollIntoView({ behavior: "smooth", block: "center" });
+          // Apply breathing light effect
+          el.classList.add("msg-highlight-breathe");
+          highlightedElRef.current = el;
+          // Remove the class after animation completes (3 iterations * 0.8s)
+          setTimeout(() => {
+            el.classList.remove("msg-highlight-breathe");
+            if (highlightedElRef.current === el) {
+              highlightedElRef.current = null;
+            }
+          }, 2600);
+        }
+
+        // Re-enable auto-scroll after a delay
+        setTimeout(() => {
+          suppressScrollRef.current = false;
+        }, 1500);
+      },
+    }));
 
     if (messages.length === 0) {
       return (
@@ -47,7 +84,7 @@ const Messages = forwardRef<HTMLDivElement, MessagesProps>(
     }
     return (
       <ScrollArea
-        ref={ref}
+        ref={scrollAreaRef}
         onScroll={(e) => {
           console.log("eeeee", e);
         }}
@@ -57,15 +94,21 @@ const Messages = forwardRef<HTMLDivElement, MessagesProps>(
           {messages.map((msg, index) => {
             const prevMsg = index > 0 ? messages[index - 1] : null;
             const shouldConnect = prevMsg ? prevMsg.role !== "user" && msg.role !== "user" : false;
+            const msgId = msg.id || `msg-${index}`;
+
+            const wrapWithId = (element: React.ReactNode, key: string) => (
+              <div key={key} data-message-id={msgId}>
+                {element}
+              </div>
+            );
 
             switch (msg.role) {
               case "user": {
                 if (msg.meta?.userPrompt?.askUserQuestionSummary) {
-                  return <AskQuestionSummary key={`msg-${index}`} content={msg.content} meta={msg.meta} />;
+                  return wrapWithId(<AskQuestionSummary content={msg.content} meta={msg.meta} />, `msg-${index}`);
                 }
-                return (
+                return wrapWithId(
                   <UserBubble
-                    key={`msg-${index}`}
                     content={msg.content}
                     meta={msg.meta}
                     onEdit={
@@ -80,38 +123,36 @@ const Messages = forwardRef<HTMLDivElement, MessagesProps>(
                           }
                         : undefined
                     }
-                  />
+                  />,
+                  `msg-${index}`
                 );
               }
               case "assistant": {
                 const meta = msg.meta as { asThinking?: boolean } | undefined;
                 if (meta?.asThinking) {
-                  return (
-                    <ThinkingBubble key={`msg-${index}`} content={msg.content || ""} shouldConnect={shouldConnect} />
+                  return wrapWithId(
+                    <ThinkingBubble content={msg.content || ""} shouldConnect={shouldConnect} />,
+                    `msg-${index}`
                   );
                 }
-                return <AssistantBubble key={`msg-${index}`} message={msg} />;
+                return wrapWithId(<AssistantBubble message={msg} />, `msg-${index}`);
               }
               case "tool":
-                return (
+                return wrapWithId(
                   <ToolBubble
-                    key={`msg-${index}`}
                     content={msg.content || ""}
                     meta={msg.meta as ToolBubbleProps["meta"]}
                     shouldConnect={shouldConnect}
                     isLastMessage={index === messages.length - 1}
                     onAskUserQuestions={onAskUserQuestions}
                     onScrollToBottom={handleToBottom}
-                  />
+                  />,
+                  `msg-${index}`
                 );
               case "system":
-                return (
-                  <SystemBubble
-                    key={`msg-${index}`}
-                    content={msg.content || ""}
-                    meta={msg.meta}
-                    shouldConnect={shouldConnect}
-                  />
+                return wrapWithId(
+                  <SystemBubble content={msg.content || ""} meta={msg.meta} shouldConnect={shouldConnect} />,
+                  `msg-${index}`
                 );
               default:
                 return null;

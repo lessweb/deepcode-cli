@@ -21,6 +21,9 @@ vi.mock("@/webview/wrpc", () => ({
     getSkills: {
       query: vi.fn(),
     },
+    getSessions: {
+      query: vi.fn(),
+    },
     sendPrompt: {
       mutate: vi.fn(),
     },
@@ -112,7 +115,7 @@ describe("chatService", () => {
 
   describe("sendPrompt", () => {
     it("sends prompt with all options", async () => {
-      vi.mocked(wrpc.sendPrompt.mutate).mockResolvedValue({ ok: true } as any);
+      vi.mocked(wrpc.sendPrompt.mutate).mockResolvedValue({ ok: true, sessionId: "new-session-1" } as any);
 
       const result = await chatService.sendPrompt({
         prompt: "Hello",
@@ -122,7 +125,7 @@ describe("chatService", () => {
         alwaysAllows: ["read-in-cwd"],
       });
 
-      expect(result).toEqual({ ok: true });
+      expect(result).toEqual({ ok: true, sessionId: "new-session-1" });
       expect(wrpc.sendPrompt.mutate).toHaveBeenCalledWith({
         prompt: "Hello",
         skills: [{ name: "skill1" }],
@@ -169,6 +172,14 @@ describe("chatService", () => {
       const result = await chatService.sendPrompt({ prompt: "Hello" });
 
       expect(result).toEqual({ ok: false, error: "Network error" });
+    });
+
+    it("returns sessionId from the server response", async () => {
+      vi.mocked(wrpc.sendPrompt.mutate).mockResolvedValue({ ok: true, sessionId: "session-abc" } as any);
+
+      const result = await chatService.sendPrompt({ prompt: "Create a session" });
+
+      expect(result.sessionId).toBe("session-abc");
     });
   });
 
@@ -278,6 +289,37 @@ describe("chatService", () => {
       const result = await chatService.openSettings();
 
       expect(result).toEqual({ ok: true });
+    });
+  });
+
+  describe("getSessions", () => {
+    it("returns sessions array when available", async () => {
+      const mockSessions = [
+        { id: "s1", summary: "Session 1", createTime: "2024-01-01", updateTime: "2024-01-01", status: "idle" },
+        { id: "s2", summary: "Session 2", createTime: "2024-01-02", updateTime: "2024-01-02", status: "processing" },
+      ];
+      vi.mocked(wrpc.getSessions.query).mockResolvedValue({ sessions: mockSessions } as any);
+
+      const result = await chatService.getSessions();
+
+      expect(result).toEqual(mockSessions);
+      expect(wrpc.getSessions.query).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns empty array when no sessions", async () => {
+      vi.mocked(wrpc.getSessions.query).mockResolvedValue(null as any);
+
+      const result = await chatService.getSessions();
+
+      expect(result).toEqual([]);
+    });
+
+    it("returns empty array when result has no sessions field", async () => {
+      vi.mocked(wrpc.getSessions.query).mockResolvedValue({} as any);
+
+      const result = await chatService.getSessions();
+
+      expect(result).toEqual([]);
     });
   });
 

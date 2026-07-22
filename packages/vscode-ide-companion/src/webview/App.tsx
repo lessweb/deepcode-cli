@@ -1,23 +1,34 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useMemo } from "react";
 import Header from "@/webview/components/Header";
 import Messages from "@/webview/components/Messages";
+import type { MessagesHandle } from "@/webview/components/Messages";
 import InputPrompt from "@/webview/components/InputPrompt";
 import ThinkingLiveBubble from "@/webview/components/ThinkingLiveBubble";
 import PermissionPrompt from "@/webview/components/PermissionPrompt";
 import ContinuePrompt from "@/webview/components/ContinuePrompt";
 import { useChat } from "@/webview/context/ChatProvider";
 import AskQuestionCarousel from "@/webview/components/AskQuestionCarousel";
+import SearchDialog from "@/webview/components/SearchDialog";
 import type { AskUserQuestionMetadata } from "@/webview/components/bubbles/ToolBubble";
 
 export default function App() {
   const { state, dispatch, actions } = useChat();
-  const messagesRef = useRef(null);
+  const messagesRef = useRef<MessagesHandle>(null);
 
   const handleAskUserQuestions = useCallback(
     (questions: AskUserQuestionMetadata["questions"]) => {
       dispatch({ type: "SET_ASK_USER_QUESTIONS", data: { questions } });
     },
     [dispatch]
+  );
+
+  const handleSelectMessage = useCallback((messageId: string) => {
+    messagesRef.current?.scrollToMessage(messageId);
+  }, []);
+
+  const handleSearchOpenChange = useMemo(
+    () => (open: boolean) => actions.toggleSearchPanel(open),
+    [actions.toggleSearchPanel]
   );
 
   return (
@@ -31,6 +42,8 @@ export default function App() {
         onDeleteSession={actions.deleteSession}
         sessionListOpen={state.sessionListOpen}
         onToggleSessionList={actions.toggleSessionList}
+        hasMessages={state.messages.length > 0}
+        onToggleSearchPanel={actions.toggleSearchPanel}
       />
       <Messages
         ref={messagesRef}
@@ -66,6 +79,12 @@ export default function App() {
           onClose={() => dispatch({ type: "SET_ASK_USER_QUESTIONS", data: null })}
         />
       )}
+      <SearchDialog
+        open={state.searchPanelOpen}
+        onOpenChange={handleSearchOpenChange}
+        messages={state.messages}
+        onSelectMessage={handleSelectMessage}
+      />
       <InputPrompt
         loading={state.loading}
         selectedSkills={state.selectedSkills}
