@@ -46,22 +46,48 @@ export function formatUsageFieldLabel(label: string) {
 }
 
 /**
+ * Convert a string to title case.
+ * @param str
+ */
+const acronymMap: Record<string, string> = {
+  api: "API",
+  id: "ID",
+  url: "URL",
+  http: "HTTP",
+  https: "HTTPS",
+  cpu: "CPU",
+  gpu: "GPU",
+};
+
+/**
  * 将下划线命名的字符串转换为标题大小写的可读字符串。
  *
- * @param str - 下划线分隔的字符串，如 `'prompt_cache_miss_tokens'`
+ * @param str - 下划线分隔的字符串，如 `'prompt_cache_miss_tokens'` 或 `'api_key'`
  * @returns 转换后的字符串，如 `'Prompt Cache Miss Tokens'`
  *
  * @example
  * toTitleCase('prompt_cache_miss_tokens') // "Prompt Cache Miss Tokens"
+ * toTitleCase('api-key')                  // "Api Key"
  * toTitleCase('api_key')                  // "Api Key"
+ * toTitleCase('api__key')                 // "Api Key"
  * toTitleCase('')                         // ""
  */
 export function toTitleCase(str: string): string {
   if (!str) return "";
 
   return str
-    .split("_")
-    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .trim()
+    .split(/[\s_-]+/)
+    .filter(Boolean)
+    .map((word) => {
+      const lower = word.toLowerCase();
+
+      if (acronymMap[lower]) {
+        return acronymMap[lower];
+      }
+
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
     .join(" ");
 }
 

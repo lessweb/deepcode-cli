@@ -152,13 +152,14 @@ describe("toTitleCase", () => {
     expect(toTitleCase("prompt_cache_hit_tokens")).toBe("Prompt Cache Hit Tokens");
   });
 
-  it("handles already capitalized words", () => {
-    // toTitleCase capitalizes first letter of each word, rest stays as-is
-    expect(toTitleCase("API_KEY")).toBe("API KEY");
+  it("handles acronyms via acronymMap", () => {
+    // "api" matches acronymMap → "API", "key" doesn't → lowercased to "Key"
+    expect(toTitleCase("API_KEY")).toBe("API Key");
   });
 
-  it("handles mixed case", () => {
-    expect(toTitleCase("helloWorld")).toBe("HelloWorld");
+  it("handles mixed case by lowercasing after the first character", () => {
+    // word.slice(1).toLowerCase() converts "helloWorld" → "Helloworld"
+    expect(toTitleCase("helloWorld")).toBe("Helloworld");
   });
 });
 

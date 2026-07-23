@@ -248,7 +248,7 @@ export default function PermissionPrompt({
   const canAlwaysAllow = VALID_SCOPES.includes(prompt.scope);
 
   return (
-    <div className="px-4 py-2 w-full max-w-237.5 mx-auto min-w-sm">
+    <div className="px-4 pt-2 w-full max-w-237.5 mx-auto min-w-sm">
       <div className="rounded-md border border-primary bg-background p-3 text-sm">
         <div className="flex items-center justify-between mb-2">
           <div>

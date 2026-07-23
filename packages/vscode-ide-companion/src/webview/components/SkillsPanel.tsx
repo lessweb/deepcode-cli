@@ -11,6 +11,7 @@ import {
   CommandList,
 } from "@/webview/components/ui/command";
 import { GraduationCap } from "lucide-react";
+import { toTitleCase } from "@/webview/utils";
 
 interface SkillsPanelProps {
   availableSkills: SkillInfo[];
@@ -52,7 +53,7 @@ export default function SkillsPanel({ availableSkills, selectedSkills, onToggle 
                     title={skill.path}
                   >
                     <GraduationCap className="h-3 w-3 text-muted-foreground" />
-                    <span className="flex-1 truncate font-medium">{skill.name}</span>
+                    <span className="flex-1 truncate font-medium">{toTitleCase(skill.name)}</span>
                     <span className="text-xs text-muted-foreground truncate max-w-50">{skill.path}</span>
                   </CommandItem>
                 );

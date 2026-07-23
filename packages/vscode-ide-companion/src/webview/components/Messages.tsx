@@ -149,10 +149,10 @@ const Messages = forwardRef<MessagesHandle, MessagesProps>(
 
     if (messages.length === 0) {
       return (
-        <div className="flex-1 flex flex-col justify-center items-center w-full">
+        <div className="flex-1 flex flex-col justify-center items-center w-full px-4">
           <img src={icon} alt="" className="size-32 shrink-0 mb-6" />
-          <div className="mb-3 text-[16px] font-semibold">Welcome to the Deep Code AI IDE!</div>
-          <p className="text-xs text-muted-foreground">
+          <div className="mb-3 text-center text-[16px] font-semibold">Welcome to the Deep Code AI IDE!</div>
+          <p className="text-xs text-center text-muted-foreground">
             What would you like to do? Ask about this codebase or we can start writing code.
           </p>
         </div>

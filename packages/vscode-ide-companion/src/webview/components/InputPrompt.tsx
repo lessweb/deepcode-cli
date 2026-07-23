@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import SkillsPanel from "@/webview/components/SkillsPanel";
 import SkillsTags from "@/webview/components/SkillsTags";
 import ContextIndicator from "@/webview/components/ContextIndicator";
@@ -22,6 +22,8 @@ import {
 } from "@/webview/components/ui/dropdown-menu";
 import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/webview/components/ui/item";
 import { usePromptAttachments } from "@/webview/hooks/usePromptAttachments";
+import { toTitleCase } from "@/webview/utils";
+import { toast } from "@/webview/components/ui/sonner";
 
 export interface InputPromptProps {
   loading: boolean;
@@ -69,7 +71,11 @@ export default function InputPrompt({
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string>("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls, loadImages } =
-    usePromptAttachments();
+    usePromptAttachments({
+      onMaxExceeded: () => {
+        toast.warning("You can paste up to 10 images at a time", { position: "top-center" });
+      },
+    });
 
   // Rebuild history from messages when messages change (e.g., loading a session)
   useEffect(() => {
@@ -210,11 +216,42 @@ export default function InputPrompt({
     [handleSend, history, historyIdx, value, draftBeforeHistory]
   );
 
-  const hasContent = value.trim().length > 0 || attachments.length > 0;
+  /**
+   * Get the active skill badge to display when skills are loading
+   */
+  const getActiveSkill = useCallback(() => {
+    if (loading && availableSkills.length > 0 && availableSkills.filter((x) => x.isLoaded).length > 0) {
+      return (
+        <div className="flex flex-wrap gap-1 mb-0.5 py-1">
+          {availableSkills
+            .filter((x) => x.isLoaded)
+            .map((skill) => (
+              <div
+                key={skill.name}
+                className="relative flex items-center gap-1.5 border border-primary rounded-md px-2 py-0.5"
+              >
+                <span className="relative flex size-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75"></span>
+                  <span className="relative inline-flex size-2 rounded-full bg-primary"></span>
+                </span>
+                <span className="text-xs text-primary/85">{toTitleCase(skill.name)}</span>
+              </div>
+            ))}
+        </div>
+      );
+    }
+    return null;
+  }, [loading, availableSkills]);
+
+  /**
+   * Determine if the input has content (text or attachments)
+   */
+  const hasContent = useMemo(() => value.trim().length > 0 || attachments.length > 0, [value, attachments]);
 
   return (
     <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm px-4 pt-1.5 pb-1">
       <Field className="gap-0.5">
+        {getActiveSkill()}
         <InputGroup>
           <div className="flex flex-col w-full">
             <InputGroupTextarea
@@ -324,13 +361,7 @@ export default function InputPrompt({
                 </DropdownMenuContent>
               </DropdownMenu>
               {loading ? (
-                <InputGroupButton
-                  variant="secondary"
-                  size="icon-sm"
-                  className="group"
-                  onClick={onInterrupt}
-                  title="Stop"
-                >
+                <InputGroupButton variant="outline" size="icon-sm" className="group" onClick={onInterrupt} title="Stop">
                   <Square className="h-3 w-3 hidden fill-primary group-hover:block" strokeWidth={0} />
                   <Spinner className="h-4 w-4 block group-hover:hidden text-primary" />
                 </InputGroupButton>

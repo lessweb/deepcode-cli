@@ -1,7 +1,6 @@
 import * as React from "react";
 import type { Attachment } from "@/webview/components/PromptAttachments";
-
-const ATTACHMENT_LABEL = "Pasted Image";
+import { ATTACHMENT_LABEL, ATTACHMENT_PASTE_MAX } from "@/webview/constants";
 
 function isImageFile(file: File): boolean {
   return Boolean(file && typeof file.type === "string" && file.type.startsWith("image/"));
@@ -15,37 +14,80 @@ function readFileAsDataUrl(file: File): Promise<string> {
     reader.readAsDataURL(file);
   });
 }
-export function usePromptAttachments() {
+export function usePromptAttachments(options?: {
+  /** Maximum number of pasted images allowed. Defaults to ATTACHMENT_PASTE_MAX. */
+  maxImageCount?: number;
+  /** Called when the pasted images would exceed maxImageCount. */
+  onMaxExceeded?: () => void;
+}) {
+  const maxImageCount = options?.maxImageCount ?? ATTACHMENT_PASTE_MAX;
+  const onMaxExceeded = options?.onMaxExceeded;
+
   const [attachments, setAttachments] = React.useState<Attachment[]>([]);
   const nextIdRef = React.useRef(0);
 
-  const handlePaste = React.useCallback(async (event: React.ClipboardEvent) => {
-    const items = Array.from(event.clipboardData?.items || []);
-    for (const item of items) {
-      if (item.kind !== "file") continue;
-      const file = item.getAsFile();
-      if (file && isImageFile(file)) {
-        event.preventDefault();
-        try {
-          const dataUrl = await readFileAsDataUrl(file);
-          nextIdRef.current += 1;
-          setAttachments((prev) => [
-            ...prev,
-            {
+  // Ref to access the latest attachment count in the stale closure of handlePaste
+  const attachmentsRef = React.useRef(attachments);
+  attachmentsRef.current = attachments;
+
+  const handlePaste = React.useCallback(
+    async (event: React.ClipboardEvent) => {
+      const items = Array.from(event.clipboardData?.items || []);
+
+      // Collect all valid image files from the clipboard first
+      const imageFiles: File[] = [];
+      for (const item of items) {
+        if (item.kind !== "file") continue;
+        const file = item.getAsFile();
+        if (file && isImageFile(file)) {
+          event.preventDefault();
+          imageFiles.push(file);
+        }
+      }
+
+      if (imageFiles.length === 0) return;
+
+      const currentCount = attachmentsRef.current.length;
+      const remaining = maxImageCount - currentCount;
+
+      // Already at or above the limit
+      if (remaining <= 0) {
+        onMaxExceeded?.();
+        return;
+      }
+
+      // Only accept up to the remaining slots
+      const filesToAdd = imageFiles.slice(0, remaining);
+      if (imageFiles.length > remaining) {
+        onMaxExceeded?.();
+      }
+
+      // Read all files in parallel
+      const results = await Promise.allSettled(filesToAdd.map(readFileAsDataUrl));
+
+      setAttachments((prev) => {
+        const newAttachments: Attachment[] = [];
+        for (let i = 0; i < results.length; i++) {
+          const result = results[i];
+          if (result.status === "fulfilled") {
+            nextIdRef.current += 1;
+            const file = filesToAdd[i];
+            newAttachments.push({
               id: nextIdRef.current,
               name: file.name || ATTACHMENT_LABEL,
               mimeType: file.type || "image/png",
-              dataUrl,
+              dataUrl: result.value,
               label: ATTACHMENT_LABEL,
-            },
-          ]);
-        } catch (error) {
-          console.error("Failed to attach pasted image.", error);
+            });
+          } else {
+            console.error("Failed to attach pasted image.", result.reason);
+          }
         }
-        return;
-      }
-    }
-  }, []);
+        return [...prev, ...newAttachments];
+      });
+    },
+    [maxImageCount, onMaxExceeded]
+  );
 
   const removeAttachment = React.useCallback((id: number) => {
     setAttachments((prev) => prev.filter((a) => a.id !== id));

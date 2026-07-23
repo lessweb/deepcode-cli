@@ -5,6 +5,7 @@ import * as vscodeApi from "vscode";
 import z from "zod";
 import { getProjectCode } from "@vegamo/deepcode-core";
 import type { SessionManager, SkillInfo, UserToolPermission, PermissionScope } from "@vegamo/deepcode-core";
+import { ATTACHMENT_LABEL } from "@/webview/constants";
 
 export interface RouterContext {
   sessionManager: SessionManager;
@@ -144,7 +145,7 @@ export const appRouter = router({
       return { ok: false, error: "Empty prompt" };
     }
 
-    const displayPrompt = prompt || (normalizedImages.length > 0 ? "粘贴的图像" : "");
+    const displayPrompt = prompt || (normalizedImages.length > 0 ? ATTACHMENT_LABEL : "");
     const promptTrimmed = prompt.trim();
     const isPermissionContinue =
       promptTrimmed === "/continue" &&
