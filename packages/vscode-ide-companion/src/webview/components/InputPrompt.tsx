@@ -73,7 +73,7 @@ export default function InputPrompt({
   const { attachments, handlePaste, removeAttachment, clearAttachments, getImageUrls, loadImages } =
     usePromptAttachments({
       onMaxExceeded: () => {
-        toast.warning("You can paste up to 10 images at a time", { position: "top-center" });
+        toast.warning("You can paste up to 10 images at a time", { position: "bottom-right" });
       },
     });
 
