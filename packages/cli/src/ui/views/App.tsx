@@ -103,6 +103,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const initialPromptSubmittedRef = useRef(false);
   const resumeSessionIdRef = useRef(false);
   const startupDoneRef = useRef(false);
+  const shouldExitAfterInitialPromptRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
   const rawModeRef = useRef<RawMode>(mode);
   const writeRef = useRef(write);
@@ -325,6 +326,24 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     },
     [exit, sessionManager]
   );
+
+  /**
+   * Auto-exit after initial prompt completion when using -p/--prompt flag.
+   * This implements the documented "non-interactive mode" behavior.
+   */
+  useEffect(() => {
+    if (!shouldExitAfterInitialPromptRef.current) {
+      return;
+    }
+    // Wait for busy to become false (LLM response completed)
+    if (!busy && initialPromptSubmittedRef.current) {
+      shouldExitAfterInitialPromptRef.current = false;
+      // Small delay to ensure UI has rendered the response
+      setTimeout(() => {
+        handleExit({ showCommand: false, showSummary: false });
+      }, 100);
+    }
+  }, [busy, handleExit]);
 
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
@@ -585,6 +604,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       // Step 2: Submit prompt if provided
       if (initialPrompt && initialPrompt.trim()) {
         initialPromptSubmittedRef.current = true;
+        shouldExitAfterInitialPromptRef.current = true;
         handleSubmit({
           text: initialPrompt,
           imageUrls: [],
