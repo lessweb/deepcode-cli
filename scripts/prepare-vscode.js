@@ -80,6 +80,7 @@ const args = process.argv.slice(2);
 let version = null;
 let dryRun = false;
 let force = false;
+let preRelease = false;
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];
@@ -87,6 +88,8 @@ for (let i = 0; i < args.length; i++) {
     dryRun = true;
   } else if (arg === "--force") {
     force = true;
+  } else if (arg === "--pre-release") {
+    preRelease = true;
   } else if (!version) {
     version = arg;
   } else {
@@ -104,6 +107,7 @@ Arguments:
 Options:
   --dry-run          Preview all steps without executing
   --force            Skip branch check (publish from non-main branch)
+  --pre-release      Publish as a pre-release (auto-detected for -beta/-alpha versions)
 
 Environment:
   VSCE_PAT           Required. Azure DevOps Personal Access Token for marketplace auth.
@@ -122,13 +126,20 @@ if (!isValidSemver(version)) {
   fail(`Invalid semver version: ${version}`);
 }
 
+// Auto-detect pre-release: version contains a pre-release identifier (e.g. -beta.1, -alpha.0, -rc.2)
+const isPrereleaseVersion = /^\d+\.\d+\.\d+-/.test(version);
+if (!preRelease && isPrereleaseVersion) {
+  preRelease = true;
+  log("\n🔖  Detected pre-release version — enabling --pre-release flag.\n");
+}
+
 const TOTAL_STEPS = 7;
 
 // ── Banner ───────────────────────────────────────────────────────────────────
 
 log("=========================================");
 log(`  Deep Code VSCode — Publish v${version}`);
-log(`  dryRun=${dryRun}  force=${force}`);
+log(`  dryRun=${dryRun}  force=${force}  preRelease=${preRelease}`);
 log("=========================================");
 
 // ── 1. Git checks ────────────────────────────────────────────────────────────
@@ -219,6 +230,7 @@ step(7, TOTAL_STEPS, "Publishing deepcode-vscode to marketplace...");
 
 const vscodeRoot = join(root, "packages", "vscode-ide-companion");
 const vsceArgs = ["vsce", "publish", version, "--no-dependencies"];
+if (preRelease) vsceArgs.push("--pre-release");
 if (dryRun) vsceArgs.splice(2, 0, "--dry-run");
 
 run("npx", vsceArgs, {
