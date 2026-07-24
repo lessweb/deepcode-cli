@@ -397,7 +397,7 @@ export default function InputPrompt({
               {activeEditor && <Separator orientation="vertical" className="h-4 mt-2" />}
               {activeEditor && (
                 <Toggle
-                  aria-label="Toggle bookmark"
+                  aria-label={activeEditor.fileName}
                   size="sm"
                   variant="outline"
                   className="h-6 outline-0 border-none shadow-none rounded flex items-center justify-center"
