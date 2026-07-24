@@ -120,7 +120,9 @@ describe("useSize", () => {
 
     // Simulate ResizeObserver callback
     act(() => {
-      capturedCallback?.([{ target: el, contentRect: new DOMRectReadOnly(0, 0, 400, 300) }] as ResizeObserverEntry[]);
+      capturedCallback?.([
+        { target: el, contentRect: new DOMRectReadOnly(0, 0, 400, 300) },
+      ] as unknown as ResizeObserverEntry[]);
     });
 
     expect(result.current).toEqual({ width: 400, height: 300 });
