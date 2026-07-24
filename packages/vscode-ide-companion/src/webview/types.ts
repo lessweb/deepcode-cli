@@ -63,6 +63,13 @@ export interface SkillInfo {
   isLoaded?: boolean;
 }
 
+export interface CommandsItem {
+  label: string;
+  description?: string;
+  command: string;
+  arguments?: Record<string, string | number | boolean>;
+}
+
 // --- Session types ---
 
 export interface SessionSummary {

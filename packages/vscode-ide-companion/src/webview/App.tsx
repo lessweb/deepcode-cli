@@ -1,4 +1,4 @@
-import { useCallback, useRef, useMemo } from "react";
+import { useCallback, useRef } from "react";
 import Header from "@/webview/components/Header";
 import Messages from "@/webview/components/Messages";
 import type { MessagesHandle } from "@/webview/components/Messages";
@@ -26,10 +26,7 @@ export default function App() {
     messagesRef.current?.scrollToMessage(messageId);
   }, []);
 
-  const handleSearchOpenChange = useMemo(
-    () => (open: boolean) => actions.toggleSearchPanel(open),
-    [actions.toggleSearchPanel]
-  );
+  const handleSearchOpenChange = useCallback((open: boolean) => actions.toggleSearchPanel(open), [actions]);
 
   return (
     <div className="relative flex flex-col h-screen min-h-screen w-full overflow-hidden">
@@ -89,6 +86,11 @@ export default function App() {
         loading={state.loading}
         selectedSkills={state.selectedSkills}
         availableSkills={state.skills}
+        commands={
+          state.showContinuePrompt
+            ? [{ label: "Continue", description: "Continue the active conversation", command: "/continue" }]
+            : []
+        }
         pendingPermissionReply={state.pendingPermissionReply}
         // askPermissions={state.askPermissions}
         // activeSessionStatus={state.activeSessionStatus}

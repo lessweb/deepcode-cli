@@ -4,9 +4,10 @@
  * Tests cover:
  * - Disabled button when no skills available
  * - Enabled button when skills available
- * - CommandDialog open/close
+ * - Popover content rendering
  * - Skill selection and toggling
- * - Marking loaded skills as checked
+ * - Marking loaded/selected skills as checked
+ * - Size prop for positioning
  */
 
 import React from "react";
@@ -40,25 +41,6 @@ vi.mock("./ui/command", () => ({
       {children}
     </div>
   )),
-  CommandDialog: vi.fn(
-    ({
-      children,
-      open,
-      onOpenChange,
-    }: {
-      children: React.ReactNode;
-      open: boolean;
-      onOpenChange: (open: boolean) => void;
-    }) =>
-      open ? (
-        <div data-testid="command-dialog">
-          <button data-testid="command-close" onClick={() => onOpenChange(false)}>
-            Close
-          </button>
-          {children}
-        </div>
-      ) : null
-  ),
   CommandEmpty: vi.fn(({ children }: { children: React.ReactNode }) => (
     <div data-testid="command-empty">{children}</div>
   )),
@@ -66,9 +48,6 @@ vi.mock("./ui/command", () => ({
     <div data-testid="command-group" data-heading={heading}>
       {children}
     </div>
-  )),
-  CommandInput: vi.fn(({ placeholder }: { placeholder: string }) => (
-    <input data-testid="command-input" placeholder={placeholder} />
   )),
   CommandItem: vi.fn(
     ({
@@ -86,10 +65,66 @@ vi.mock("./ui/command", () => ({
     )
   ),
   CommandList: vi.fn(({ children }: { children: React.ReactNode }) => <div data-testid="command-list">{children}</div>),
+  CommandShortcut: vi.fn(({ children }: { children: React.ReactNode }) => (
+    <span data-testid="command-shortcut">{children}</span>
+  )),
+}));
+
+vi.mock("./ui/popover", () => ({
+  PopoverTrigger: vi.fn(({ children, asChild: _asChild }: { children: React.ReactNode; asChild?: boolean }) => (
+    <>{children}</>
+  )),
+  PopoverContent: vi.fn(
+    ({
+      children,
+      className: _className,
+      style,
+      sideOffset,
+      alignOffset,
+      side,
+      align,
+    }: {
+      children: React.ReactNode;
+      className?: string;
+      style?: React.CSSProperties;
+      sideOffset?: number;
+      alignOffset?: number;
+      side?: string;
+      align?: string;
+    }) => (
+      <div
+        data-testid="popover-content"
+        style={style}
+        data-side-offset={sideOffset}
+        data-align-offset={alignOffset}
+        data-side={side}
+        data-align={align}
+      >
+        {children}
+      </div>
+    )
+  ),
 }));
 
 vi.mock("lucide-react", () => ({
   GraduationCap: vi.fn(() => <span data-testid="grad-cap-icon" />),
+  Terminal: vi.fn(() => <span data-testid="terminal-icon" />),
+  ChevronRight: vi.fn(() => <span data-testid="chevron-right-icon" />),
+  FileQuestionMark: vi.fn(() => <span data-testid="file-question-icon" />),
+}));
+
+vi.mock("@/webview/lib/utils", () => ({
+  cn: vi.fn((...inputs: unknown[]) => inputs.filter(Boolean).join(" ")),
+}));
+
+vi.mock("@/webview/services", () => ({
+  chatService: {
+    openExternal: vi.fn(),
+  },
+}));
+
+vi.mock("@/webview/constants", () => ({
+  DEEPCODE_DOCS_URL: "https://docs.example.com",
 }));
 
 vi.mock("@/webview/utils", () => ({
@@ -127,34 +162,26 @@ describe("SkillsPanel", () => {
     expect(screen.getByText("Skills")).toBeInTheDocument();
   });
 
-  it("opens CommandDialog when button clicked", () => {
+  it("renders PopoverContent when skills available", () => {
     render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    expect(screen.queryByTestId("command-dialog")).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("skills-trigger"));
-    expect(screen.getByTestId("command-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("popover-content")).toBeInTheDocument();
   });
 
-  it("closes CommandDialog when onOpenChange called", () => {
-    render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
-    expect(screen.getByTestId("command-dialog")).toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId("command-close"));
-    expect(screen.queryByTestId("command-dialog")).not.toBeInTheDocument();
+  it("does not render PopoverContent when no skills available", () => {
+    render(<SkillsPanel availableSkills={[]} selectedSkills={[]} onToggle={vi.fn()} />);
+    expect(screen.queryByTestId("popover-content")).not.toBeInTheDocument();
   });
 
   it("renders all available skills in command group", () => {
     render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
 
     const items = screen.getAllByTestId("command-item");
-    expect(items).toHaveLength(3);
+    // 3 skills + 1 "View help docs" support item = 4
+    expect(items).toHaveLength(4);
   });
 
   it("displays skill names in title case", () => {
     render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
 
     expect(screen.getByText("Code Review")).toBeInTheDocument();
     expect(screen.getByText("Test Gen")).toBeInTheDocument();
@@ -163,7 +190,6 @@ describe("SkillsPanel", () => {
 
   it("marks loaded skills as checked", () => {
     render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
 
     const items = screen.getAllByTestId("command-item");
     // test-gen is loaded (index 1)
@@ -180,7 +206,6 @@ describe("SkillsPanel", () => {
         onToggle={vi.fn()}
       />
     );
-    fireEvent.click(screen.getByTestId("skills-trigger"));
 
     const items = screen.getAllByTestId("command-item");
     // code-review is selected (index 0)
@@ -190,25 +215,35 @@ describe("SkillsPanel", () => {
   it("calls onToggle when a skill is selected", () => {
     const onToggle = vi.fn();
     render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={onToggle} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
 
     fireEvent.click(screen.getAllByTestId("command-item")[0]);
     expect(onToggle).toHaveBeenCalledWith(mockSkills[0]);
   });
 
-  it("renders command input with search placeholder", () => {
-    render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
-
-    const input = screen.getByTestId("command-input");
-    expect(input).toHaveAttribute("placeholder", "Search skills...");
-  });
-
-  it("renders empty state message", () => {
-    render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
-    fireEvent.click(screen.getByTestId("skills-trigger"));
+  it("renders empty state when search query has no matches", () => {
+    render(
+      <SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} searchQuery="nonexistent" />
+    );
 
     expect(screen.getByTestId("command-empty")).toBeInTheDocument();
     expect(screen.getByText("No results found.")).toBeInTheDocument();
+  });
+
+  it("applies size prop to PopoverContent for positioning", () => {
+    const size = { width: 400, height: 60 };
+    render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} size={size} />);
+
+    const popover = screen.getByTestId("popover-content");
+    expect(popover.style.width).toBe(`${400 - 32}px`);
+    expect(popover.getAttribute("data-side-offset")).toBe("10");
+  });
+
+  it("uses default values when size prop is not provided", () => {
+    render(<SkillsPanel availableSkills={mockSkills} selectedSkills={[]} onToggle={vi.fn()} />);
+
+    const popover = screen.getByTestId("popover-content");
+    // When size is undefined, width is (0 - 32) = -32, which becomes an empty style string
+    expect(popover.style.width).toBe("");
+    expect(popover.getAttribute("data-side-offset")).toBe("50");
   });
 });

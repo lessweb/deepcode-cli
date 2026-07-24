@@ -3,13 +3,20 @@ import SkillsPanel from "@/webview/components/SkillsPanel";
 import SkillsTags from "@/webview/components/SkillsTags";
 import ContextIndicator from "@/webview/components/ContextIndicator";
 import { PromptAttachments } from "@/webview/components/PromptAttachments";
-import type { ActiveEditor, EditingMessage, SessionMessage, SkillInfo, TokenTelemetry } from "@/webview/types";
+import type {
+  ActiveEditor,
+  CommandsItem,
+  EditingMessage,
+  SessionMessage,
+  SkillInfo,
+  TokenTelemetry,
+} from "@/webview/types";
 import { FileCodeIcon, Hand, Reply, Square, SquareChartGantt } from "lucide-react";
 import { InputGroup, InputGroupAddon, InputGroupButton, InputGroupTextarea } from "@/webview/components/ui/input-group";
 import { Separator } from "@/webview/components/ui/separator";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "./ui/hover-card";
 import { cn } from "@/webview/lib/utils";
-import { Field, FieldDescription, FieldGroup } from "./ui/field";
+import { Field, FieldGroup } from "./ui/field";
 import { Spinner } from "@/webview/components/ui/spinner";
 import {
   DropdownMenu,
@@ -24,11 +31,14 @@ import { Item, ItemContent, ItemDescription, ItemMedia, ItemTitle } from "@/webv
 import { usePromptAttachments } from "@/webview/hooks/usePromptAttachments";
 import { toTitleCase } from "@/webview/utils";
 import { toast } from "@/webview/components/ui/sonner";
+import { Popover } from "./ui/popover";
+import { useSize } from "@/webview/hooks/useSize";
 
 export interface InputPromptProps {
   loading: boolean;
   selectedSkills: SkillInfo[];
   availableSkills: SkillInfo[];
+  commands?: Array<CommandsItem>;
   pendingPermissionReply: unknown;
   tokenTelemetry?: TokenTelemetry;
   activeEditor: ActiveEditor | null;
@@ -52,6 +62,7 @@ export interface InputPromptProps {
 
 export default function InputPrompt({
   loading,
+  commands,
   selectedSkills,
   availableSkills,
   pendingPermissionReply,
@@ -64,6 +75,9 @@ export default function InputPrompt({
   onSelectSkills,
   onClearEditingMessage,
 }: InputPromptProps) {
+  const fieldGroupRef = useRef<HTMLDivElement>(null);
+  const size = useSize(fieldGroupRef);
+  const [open, setOpen] = React.useState<boolean>(false);
   const [value, setValue] = useState<string>("");
   const [planMode, setPlanMode] = useState<"false" | "true">("false");
   const [history, setHistory] = useState<string[]>([]);
@@ -170,7 +184,18 @@ export default function InputPrompt({
         setHistoryIdx(-1);
       }
 
+      // Escape closes the skills popover in command mode
+      if (e.key === "Escape" && open) {
+        setOpen(false);
+        return;
+      }
+
       if (e.key === "Enter" && !e.shiftKey) {
+        // Don't send when in command mode (popover is open and value starts with "/")
+        if (value.startsWith("/") && open) {
+          e.preventDefault();
+          return;
+        }
         e.preventDefault();
         handleSend();
       } else if (e.key === "ArrowUp" && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
@@ -213,7 +238,7 @@ export default function InputPrompt({
         }
       }
     },
-    [handleSend, history, historyIdx, value, draftBeforeHistory]
+    [handleSend, history, historyIdx, value, draftBeforeHistory, open]
   );
 
   /**
@@ -248,146 +273,209 @@ export default function InputPrompt({
    */
   const hasContent = useMemo(() => value.trim().length > 0 || attachments.length > 0, [value, attachments]);
 
+  /**
+   * Extract search query from textarea value when in command mode (starts with "/")
+   */
+  const searchQuery = useMemo(() => {
+    if (value.startsWith("/")) {
+      return value.slice(1);
+    }
+    return "";
+  }, [value]);
+
+  /**
+   * Keep focus on textarea when popover opens in command mode.
+   * modal={false} means refocus won't trigger Radix dismiss.
+   */
+  useEffect(() => {
+    if (open && value.startsWith("/")) {
+      const raf = requestAnimationFrame(() => {
+        textareaRef.current?.focus();
+      });
+      return () => cancelAnimationFrame(raf);
+    }
+  }, [open, value]);
+
+  /**
+   * Prevent Radix from closing the popover via outside interaction when in command mode.
+   * Direct setOpen(false) calls (from selecting skills, etc.) bypass this callback.
+   */
+  const handleOpenChange = useCallback(
+    (nextOpen: boolean) => {
+      if (!nextOpen && value.startsWith("/")) {
+        return; // Don't allow automatic close while in "/" command mode
+      }
+      setOpen(nextOpen);
+    },
+    [value]
+  );
+
   return (
-    <FieldGroup className="w-full max-w-237.5 mx-auto min-w-sm px-4 pt-1.5 pb-4">
-      <Field className="gap-0.5">
-        {getActiveSkill()}
-        <InputGroup>
-          <div className="flex flex-col w-full">
-            <InputGroupTextarea
-              ref={textareaRef}
-              value={value}
-              onChange={(e) => {
-                setValue(e.target.value);
-                if (historyIdx !== -1) {
-                  setHistoryIdx(-1);
-                }
-              }}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-              className="text-[12px] max-h-50"
-              placeholder="Write a prompt... "
-            />
-          </div>
-          <InputGroupAddon className="flex items-center justify-center" align="block-end">
-            <SkillsPanel
-              availableSkills={availableSkills}
-              selectedSkills={selectedSkills}
-              onToggle={(skill) => {
-                const idx = selectedSkills.findIndex((s) => s.name === skill.name);
-                if (idx >= 0) {
-                  onSelectSkills(selectedSkills.filter((s) => s.name !== skill.name));
-                } else {
-                  onSelectSkills([...selectedSkills, skill]);
-                }
-              }}
-            />
-            <Separator orientation="vertical" className="h-5 mt-1.5" />
-            <ContextIndicator tokenTelemetry={tokenTelemetry} />
-            {activeEditor && <Separator orientation="vertical" className="h-5 mt-1.5" />}
-            {activeEditor && (
-              <HoverCard openDelay={300} closeDelay={100}>
-                <HoverCardTrigger asChild>
-                  <InputGroupButton
-                    className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
-                    title={activeEditor.fileName}
-                  >
-                    <FileCodeIcon className="h-3 w-3" />
-                    <span className="max-w-20 truncate">{activeEditor.fileName.split("/").pop()}</span>
-                  </InputGroupButton>
-                </HoverCardTrigger>
-                <HoverCardContent className="text-xs space-y-1">
-                  <div className="font-medium truncate">{activeEditor.fileName.split("/").pop()}</div>
-                  <p className="text-muted-foreground text-wrap break-all line-clamp-3">{activeEditor.fileName}</p>
-                  <div className="flex gap-3 text-muted-foreground">
-                    <span>{activeEditor.languageId}</span>
-                    <span>{activeEditor.lineCount} lines</span>
-                  </div>
-                </HoverCardContent>
-              </HoverCard>
-            )}
-            <div className="ml-auto flex gap-2 items-center">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <InputGroupButton variant="ghost" className="h-8">
-                    {planMode === "true" ? (
-                      <div className="flex items-center gap-0.5">
-                        <SquareChartGantt className="size-3.5" strokeWidth={1.5} />
-                        <span className="text-xs font-normal">Plan</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-0.5">
-                        <Hand className="size-3.5" strokeWidth={1.5} />
-                        <span className="text-xs font-normal">Default</span>
-                      </div>
-                    )}
-                  </InputGroupButton>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent className="w-80" side="top" align="end">
-                  <DropdownMenuGroup>
-                    <DropdownMenuLabel>Modes</DropdownMenuLabel>
-                    <DropdownMenuRadioGroup
-                      value={planMode}
-                      onValueChange={(value) => setPlanMode(value as "true" | "false")}
-                    >
-                      <DropdownMenuRadioItem value="false">
-                        <Item size="xs">
-                          <ItemMedia variant="icon">
-                            <Hand className="size-4.5 mt-2.5" strokeWidth={1.5} />
-                          </ItemMedia>
-                          <ItemContent>
-                            <ItemTitle className="text-xs">Default Mode</ItemTitle>
-                            <ItemDescription className="text-[10px]">
-                              Deep Code will make edits and run commands to complete your task
-                            </ItemDescription>
-                          </ItemContent>
-                        </Item>
-                      </DropdownMenuRadioItem>
-                      <DropdownMenuRadioItem value="true">
-                        <Item size="xs">
-                          <ItemMedia variant="icon">
-                            <SquareChartGantt className="size-4.5 mt-2.5" strokeWidth={1.5} />
-                          </ItemMedia>
-                          <ItemContent>
-                            <ItemTitle className="text-xs">Plan Mode</ItemTitle>
-                            <ItemDescription className="text-[8px]">
-                              Deep code will explore the code and present a plan before editing
-                            </ItemDescription>
-                          </ItemContent>
-                        </Item>
-                      </DropdownMenuRadioItem>
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuGroup>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              {loading ? (
-                <InputGroupButton variant="outline" size="icon-sm" className="group" onClick={onInterrupt} title="Stop">
-                  <Square className="h-3 w-3 hidden fill-primary group-hover:block" strokeWidth={0} />
-                  <Spinner className="h-4 w-4 block group-hover:hidden text-primary" />
-                </InputGroupButton>
-              ) : (
-                <InputGroupButton
-                  variant="default"
-                  className={cn("cursor-pointer", {
-                    "cursor-not-allowed!": !hasContent && !loading,
-                  })}
-                  onClick={handleSend}
-                  disabled={!hasContent && !loading}
-                  title="Send"
-                  size="icon-sm"
-                >
-                  <Reply className="rotate-x-180" />
-                </InputGroupButton>
-              )}
+    <Popover open={open} onOpenChange={handleOpenChange} modal={false}>
+      <FieldGroup ref={fieldGroupRef} className="w-full max-w-237.5 mx-auto min-w-sm px-4 pt-1.5 pb-4">
+        <Field className="gap-0.5">
+          {getActiveSkill()}
+          <InputGroup>
+            <div className="flex flex-col w-full">
+              <InputGroupTextarea
+                ref={textareaRef}
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value);
+                  if (e.target.value.startsWith("/")) {
+                    setOpen(true);
+                  } else {
+                    setOpen(false);
+                  }
+                  if (historyIdx !== -1) {
+                    setHistoryIdx(-1);
+                  }
+                }}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+                className="text-[12px] max-h-50"
+                placeholder="Write a prompt... "
+              />
             </div>
-          </InputGroupAddon>
-          <SkillsTags
-            selectedSkills={selectedSkills}
-            onRemove={(name) => onSelectSkills(selectedSkills.filter((s) => s.name !== name))}
-          />
-          <PromptAttachments attachments={attachments} onRemove={removeAttachment} />
-        </InputGroup>
-      </Field>
-    </FieldGroup>
+            <InputGroupAddon className="flex items-center justify-center" align="block-end">
+              <SkillsPanel
+                searchQuery={searchQuery}
+                size={size}
+                commands={commands}
+                availableSkills={availableSkills}
+                selectedSkills={selectedSkills}
+                onToggle={(skill) => {
+                  const idx = selectedSkills.findIndex((s) => s.name === skill.name);
+                  if (idx >= 0) {
+                    onSelectSkills(selectedSkills.filter((s) => s.name !== skill.name));
+                  } else {
+                    onSelectSkills([...selectedSkills, skill]);
+                    // If in command mode, clear the "/" text and close popover
+                    if (value.startsWith("/")) {
+                      setValue("");
+                      setOpen(false);
+                    }
+                  }
+                }}
+                onCancel={() => setOpen(false)}
+                onCommandInput={(command) => {
+                  setValue(`${command} `);
+                  textareaRef?.current?.focus();
+                }}
+              />
+              <Separator orientation="vertical" className="h-5 mt-1.5" />
+              <ContextIndicator tokenTelemetry={tokenTelemetry} />
+              {activeEditor && <Separator orientation="vertical" className="h-5 mt-1.5" />}
+              {activeEditor && (
+                <HoverCard openDelay={300} closeDelay={100}>
+                  <HoverCardTrigger asChild>
+                    <InputGroupButton
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors cursor-pointer"
+                      title={activeEditor.fileName}
+                    >
+                      <FileCodeIcon className="h-3 w-3" />
+                      <span className="max-w-20 truncate">{activeEditor.fileName.split("/").pop()}</span>
+                    </InputGroupButton>
+                  </HoverCardTrigger>
+                  <HoverCardContent className="text-xs space-y-1">
+                    <div className="font-medium truncate">{activeEditor.fileName.split("/").pop()}</div>
+                    <p className="text-muted-foreground text-wrap break-all line-clamp-3">{activeEditor.fileName}</p>
+                    <div className="flex gap-3 text-muted-foreground">
+                      <span>{activeEditor.languageId}</span>
+                      <span>{activeEditor.lineCount} lines</span>
+                    </div>
+                  </HoverCardContent>
+                </HoverCard>
+              )}
+              <div className="ml-auto flex gap-2 items-center">
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <InputGroupButton variant="ghost" className="h-8">
+                      {planMode === "true" ? (
+                        <div className="flex items-center gap-0.5">
+                          <SquareChartGantt className="size-3.5" strokeWidth={1.5} />
+                          <span className="text-xs font-normal">Plan</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-0.5">
+                          <Hand className="size-3.5" strokeWidth={1.5} />
+                          <span className="text-xs font-normal">Default</span>
+                        </div>
+                      )}
+                    </InputGroupButton>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent className="w-80" side="top" align="end">
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel>Modes</DropdownMenuLabel>
+                      <DropdownMenuRadioGroup
+                        value={planMode}
+                        onValueChange={(value) => setPlanMode(value as "true" | "false")}
+                      >
+                        <DropdownMenuRadioItem value="false">
+                          <Item size="xs">
+                            <ItemMedia variant="icon">
+                              <Hand className="size-4.5 mt-2.5" strokeWidth={1.5} />
+                            </ItemMedia>
+                            <ItemContent>
+                              <ItemTitle className="text-xs">Default Mode</ItemTitle>
+                              <ItemDescription className="text-[10px]">
+                                Deep Code will make edits and run commands to complete your task
+                              </ItemDescription>
+                            </ItemContent>
+                          </Item>
+                        </DropdownMenuRadioItem>
+                        <DropdownMenuRadioItem value="true">
+                          <Item size="xs">
+                            <ItemMedia variant="icon">
+                              <SquareChartGantt className="size-4.5 mt-2.5" strokeWidth={1.5} />
+                            </ItemMedia>
+                            <ItemContent>
+                              <ItemTitle className="text-xs">Plan Mode</ItemTitle>
+                              <ItemDescription className="text-[8px]">
+                                Deep code will explore the code and present a plan before editing
+                              </ItemDescription>
+                            </ItemContent>
+                          </Item>
+                        </DropdownMenuRadioItem>
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+                {loading ? (
+                  <InputGroupButton
+                    variant="outline"
+                    size="icon-sm"
+                    className="group"
+                    onClick={onInterrupt}
+                    title="Stop"
+                  >
+                    <Square className="h-3 w-3 hidden fill-primary group-hover:block" strokeWidth={0} />
+                    <Spinner className="h-4 w-4 block group-hover:hidden text-primary" />
+                  </InputGroupButton>
+                ) : (
+                  <InputGroupButton
+                    variant="default"
+                    className={cn("cursor-pointer", {
+                      "cursor-not-allowed!": !hasContent && !loading,
+                    })}
+                    onClick={handleSend}
+                    disabled={!hasContent && !loading}
+                    title="Send"
+                    size="icon-sm"
+                  >
+                    <Reply className="rotate-x-180" />
+                  </InputGroupButton>
+                )}
+              </div>
+            </InputGroupAddon>
+            <SkillsTags
+              selectedSkills={selectedSkills}
+              onRemove={(name) => onSelectSkills(selectedSkills.filter((s) => s.name !== name))}
+            />
+            <PromptAttachments attachments={attachments} onRemove={removeAttachment} />
+          </InputGroup>
+        </Field>
+      </FieldGroup>
+    </Popover>
   );
 }

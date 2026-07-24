@@ -41,9 +41,14 @@ export default tseslint.config(
       "react-hooks/exhaustive-deps": "warn",
     },
   },
-  // Test files: relaxed rules
+  // Test files: relaxed rules (both co-located *.test.ts(x) and tests/ directory)
   {
-    files: ["packages/*/src/tests/**/*.ts", "packages/*/src/tests/**/*.mjs"],
+    files: [
+      "packages/*/src/**/*.test.ts",
+      "packages/*/src/**/*.test.tsx",
+      "packages/*/src/tests/**/*.ts",
+      "packages/*/src/tests/**/*.mjs",
+    ],
     languageOptions: {
       globals: {
         process: "readonly",

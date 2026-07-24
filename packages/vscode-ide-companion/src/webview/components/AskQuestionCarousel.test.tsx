@@ -12,16 +12,12 @@
  */
 
 import React from "react";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import AskQuestionCarousel from "./AskQuestionCarousel";
 
-// Track the mock submit handler for testing
-let mockSubmitHandler: ((data: unknown) => void) | null = null;
-
 // Mock react-hook-form
 vi.mock("react-hook-form", () => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const createFakeAnswers = (defaultValues: any) => {
     const answers = defaultValues?.answers || [];
     return answers.map((a: { question?: string }, i: number) => ({
@@ -38,7 +34,6 @@ vi.mock("react-hook-form", () => {
         handleSubmit: (handler: (data: unknown) => void) => {
           // Return a submit function
           const submitFn = () => {
-            mockSubmitHandler = handler;
             return handler({ answers });
           };
           return submitFn;
@@ -278,7 +273,6 @@ const multiSelectQuestion: Question = {
 describe("AskQuestionCarousel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockSubmitHandler = null;
   });
 
   it("returns null when questions array is empty", () => {

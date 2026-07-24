@@ -44,6 +44,9 @@
     "onStartupFinished",
     "onView:deepcode.chatView"
   ],
+  "capabilities": {
+    "openExternal": true
+  },
   "contributes": {
     "markdown.markdownItPlugins": true,
     "commands": [
@@ -130,7 +133,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:ui": "vitest --ui",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint --fix src"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.2.8",
@@ -182,6 +186,8 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "esbuild": "^0.28.1",
+    "eslint": "^10.7.0",
+    "eslint-config-prettier": "^10.1.8",
     "jsdom": "^29.1.1",
     "postcss": "^8.5.15",
     "tailwind-merge": "^3.6.0",
