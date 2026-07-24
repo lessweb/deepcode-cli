@@ -75,14 +75,14 @@ async function configureYargs(argv?: string[]) {
     .locale("en")
     .scriptName("deepcode")
     .usage(
-      "Usage: $0 [options] [command]\n\nDeep Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode"
+      "Usage: $0 [options] [command]\n\nDeep Code - Launch an interactive CLI, use -p/--prompt for non-interactive mode (exits after response)"
     )
     .command("$0 [query..]", "Launch Deep Code CLI", (yargsInstance: Argv) =>
       yargsInstance
         .option("prompt", {
           alias: "p",
           type: "string",
-          describe: "Submit a prompt on launch",
+          describe: "Submit a prompt on launch and exit after response (non-interactive mode)",
         })
         .option("resume", {
           alias: "r",
