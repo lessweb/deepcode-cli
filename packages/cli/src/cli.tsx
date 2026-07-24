@@ -3,7 +3,14 @@ import { render } from "ink";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
+import {
+  setShellIfWindows,
+  getProjectCode,
+  createOpenAIClient,
+  resolveCurrentSettings,
+  SessionManager,
+} from "@vegamo/deepcode-core";
+import type { SessionMessage } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
@@ -31,6 +38,12 @@ async function main(): Promise<void> {
   let initialPrompt = parsed.prompt;
   let resumeSessionId = parsed.resume;
   const projectRoot = process.cwd();
+
+  // Non-interactive mode: when -p is provided, skip TUI and output plain text
+  if (initialPrompt) {
+    await runNonInteractiveMode(projectRoot, initialPrompt);
+    process.exit(0);
+  }
 
   if (!process.stdin.isTTY) {
     writeStderrLine("deepcode requires an interactive terminal (TTY). Re-run from a real terminal session.\n");
@@ -112,6 +125,64 @@ function configureWindowsShell(): void {
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     writeStderrLine(`deepcode: ${message}\n`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Run in non-interactive mode: process a single prompt and output plain text response.
+ * This mimics Claude Code's --print mode behavior.
+ */
+async function runNonInteractiveMode(projectRoot: string, prompt: string): Promise<void> {
+  let assistantResponse = "";
+  let hasError = false;
+
+  const sessionManager = new SessionManager({
+    projectRoot,
+    createOpenAIClient: () => createOpenAIClient(projectRoot),
+    getResolvedSettings: () => resolveCurrentSettings(projectRoot),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: (message: SessionMessage) => {
+      // Collect assistant's text response
+      if (message.role === "assistant" && typeof message.content === "string") {
+        assistantResponse = message.content;
+      }
+    },
+    onSessionEntryUpdated: () => {
+      // No-op for non-interactive mode
+    },
+    onLlmStreamProgress: () => {
+      // No-op for non-interactive mode
+    },
+    onMcpStatusChanged: () => {
+      // No-op for non-interactive mode
+    },
+    onProcessStdout: () => {
+      // No-op for non-interactive mode
+    },
+  });
+
+  try {
+    await sessionManager.handleUserPrompt({
+      text: prompt,
+      imageUrls: [],
+    });
+
+    // Output the response as plain text
+    if (assistantResponse) {
+      process.stdout.write(assistantResponse + "\n");
+    }
+  } catch (error) {
+    hasError = true;
+    const message = error instanceof Error ? error.message : String(error);
+    writeStderrLine(`Error: ${message}`);
+    process.exit(1);
+  } finally {
+    sessionManager.dispose();
+  }
+
+  if (!hasError && !assistantResponse) {
+    writeStderrLine("Warning: No response received from the model.");
     process.exit(1);
   }
 }
