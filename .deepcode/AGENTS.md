@@ -7,35 +7,41 @@ This is an **npm workspaces monorepo**. Packages live under `packages/`.
 ```
 packages/
 ├── core/src/               # LLM session, tool execution, shared utilities
+│   ├── index.ts            # Barrel export
+│   ├── session.ts          # SessionManager — LLM loop, compaction, tool orchestration
+│   ├── prompt.ts           # System prompt builder & tool definitions
+│   ├── settings.ts         # Settings resolution from ~/.deepcode/settings.json
 │   ├── common/             # File I/O, permissions, telemetry, OpenAI client, shell utils, etc.
 │   ├── tools/              # 7 built-in handlers (bash, read, write, edit, web-search, ask-user-question, update-plan)
 │   ├── mcp/                # MCP client & manager (JSON-RPC lifecycle)
-│   ├── session.ts          # SessionManager — LLM loop, compaction, tool orchestration
-│   ├── prompt.ts           # System prompt builder & tool definitions
-│   └── settings.ts         # Settings resolution from ~/.deepcode/settings.json
+│   └── tests/              # Core tests with run-tests.mjs runner
 ├── cli/src/                # Terminal UI (Ink/React)
 │   ├── cli.tsx             # Entry point — renders AppContainer
 │   ├── cli-args.ts         # CLI argument parsing (yargs: -p, -r, -v, -h)
 │   ├── common/             # Update checker
 │   ├── utils/              # stdio helpers, version, package info
-│   ├── generated/          # Build-time git commit info
-│   ├── ui/views/           # Top-level screens (App, PromptInput, SessionList, PermissionPrompt, WelcomeScreen, UpdatePrompt, McpStatusList, etc.)
-│   ├── ui/components/      # Reusable Ink components (MessageView, DropdownMenu, ModelsDropdown, etc.)
+│   ├── ui/views/           # Top-level screens (App, AppContainer, PromptInput, SessionList,
+│   │                       #   PermissionPrompt, WelcomeScreen, UpdatePrompt, McpStatusList,
+│   │                       #   AskUserQuestionPrompt, PlanImplementationPrompt, ProcessStdoutView,
+│   │                       #   SlashCommandMenu, UndoSelector, ThemedGradient)
+│   ├── ui/components/      # Reusable Ink components (MessageView, DropdownMenu, ModelsDropdown,
+│   │                       #   RawModeExitPrompt, SkillsDropdown, FileMentionMenu, etc.)
 │   ├── ui/core/            # Prompt buffer, slash commands, file mentions, clipboard, undo/redo
 │   ├── ui/hooks/           # Custom hooks (cursor, history navigation, paste handling, terminal input, statusline)
 │   ├── ui/contexts/        # React contexts (AppContext, RawModeContext)
 │   ├── ui/statusline/      # Pluggable statusline providers (command, module)
-│   ├── ui/utils/            # Shared UI utilities (writing, formatting)
+│   ├── ui/utils/           # Shared UI utilities (writing, formatting)
 │   └── tests/              # UI-focused tests with run-tests.mjs runner
 ├── vscode-ide-companion/   # VSCode extension companion
 │   └── src/                # extension.ts, provider.ts, utils.ts
-docs/                       # User-facing documentation (configuration, MCP, notify, permissions)
+docs/                       # User-facing documentation (configuration, MCP, permissions, plan-mode,
+│                           #   agent-skills, AGENTS.md, architecture, statusline, session-persistence, etc.)
+resources/                  # Static assets (intro screenshots)
 scripts/                    # Build, release, and packaging scripts
 dist/                       # Bundled CLI output — single-file dist/cli.js (gitignored)
-dist/bundled/               # Bundled skills & references shipped with the CLI
 ```
 
-Templates for tool descriptions and prompts are at `packages/cli/dist/templates/` (copied during build from `packages/core/templates/`). Built-in skills are under `packages/cli/dist/bundled/`.
+Templates for tool descriptions and prompts live at `packages/core/templates/` (copied to `packages/cli/dist/templates/` during build). Built-in skills are at `packages/core/templates/skills/bundled/`.
 
 ## Build, Test, and Development Commands
 
@@ -79,7 +85,7 @@ Run the CLI locally for manual testing: `node packages/cli/dist/cli.js` (after `
 
 **TypeScript**: Strict mode enabled (`strict: true`). Use `import type` for type-only imports (`@typescript-eslint/consistent-type-imports`). Unused variables prefixed with `_` are allowed (`argsIgnorePattern: "^_"`). Target ES2022, module ESNext with bundler resolution. JSX is `react-jsx`.
 
-**Formatting/Linting**: Prettier (double quotes, 2-space indent, semicolons) + ESLint (typescript-eslint, react-hooks). Run `npm run check` before pushing. On commit, Husky + lint-staged auto-formats staged `*.{ts,tsx,js,mjs,cjs,jsx}` and `*.json` files.
+**Formatting/Linting**: Prettier (double quotes, 2-space indent, semicolons) + ESLint (typescript-eslint, react-hooks). Run `npm run check` before pushing. On commit, Husky invokes lint-staged to auto-format staged files.
 
 **File naming**: `kebab-case.ts` for modules, `kebab-case.tsx` for React/Ink components. Test files: `*.test.ts` (always kebab-case).
 
@@ -135,5 +141,5 @@ A **file history system** (`packages/core/src/common/file-history.ts`) provides 
 
 - **AGENTS.md loading**: The CLI loads agent instructions from `./AGENTS.md`, `./.deepcode/AGENTS.md`, or `~/.deepcode/AGENTS.md` (first found wins).
 - **Skills**: Place skill definitions in `~/.agents/skills/<name>/SKILL.md` (user-level) or `./.agents/skills/<name>/SKILL.md` (project-level). Legacy path `./.deepcode/skills/` is also supported. Each SKILL.md uses YAML frontmatter with `name` and `description` fields.
-- **Built-in skills**: Four bundled skills ship with the CLI — `plan` (task planning workflow), `deepcode-self-refer` (Deep Code CLI documentation), `skill-digester` (digest & install skills), `skill-writer` (create & debug skills). Additionally, `karpathy-guidelines` (behavioral guidelines to reduce LLM coding mistakes) is injected as a default skill template.
+- **Built-in skills**: Three bundled skills ship with the CLI — `deepcode-self-refer` (Deep Code CLI documentation), `skill-digester` (digest & install skills), `skill-writer` (create & debug skills). Additionally, `karpathy-guidelines` (behavioral guidelines to reduce LLM coding mistakes) is injected as a default skill template. Plan Mode is driven by a prompt template at `packages/core/templates/prompts/plan.md`.
 - **Prompt file references**: Use `@path/to/file` syntax in prompts to load file contents through the read tool.

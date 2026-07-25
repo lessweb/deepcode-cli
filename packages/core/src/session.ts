@@ -30,12 +30,18 @@ import {
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
 import type { McpServerConfig, PermissionScope, PermissionSettings } from "./settings";
+import { DEFAULT_PRICING } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
 import { killProcessTree } from "./common/process-tree";
 import { GitFileHistory, type FileHistoryCheckpointResult } from "./common/file-history";
 import { clearSessionState, getSnippet, rebuildSessionStateFromHistory } from "./common/state";
+import { TaskPlanManager } from "./common/task-plan-manager";
+import type { TaskPlan } from "./common/task-plan";
+import { ContextManager } from "./common/context-manager";
+import { HooksManager } from "./common/hooks-manager";
+import { ShellSessionManager } from "./common/shell-sessions";
 import {
   appendProjectPermissionAllows,
   buildPermissionToolExecution,
@@ -190,6 +196,24 @@ function getTotalTokens(usage: ModelUsage | null | undefined): number {
   return typeof totalTokens === "number" ? totalTokens : 0;
 }
 
+function roundUSD(value: number): number {
+  return Number(Math.round(value * 1_000_000) / 1_000_000);
+}
+
+function computeSessionEntryCost(usage: ModelUsage): number {
+  const promptTokens = typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
+  const completionTokens = typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0;
+  const cachedHitTokens = typeof usage.prompt_cache_hit_tokens === "number" ? usage.prompt_cache_hit_tokens : 0;
+  const cacheMissTokens = Math.max(0, promptTokens - cachedHitTokens);
+
+  const TOKENS_PER_MILLION = 1_000_000;
+  const inputCost = (cacheMissTokens / TOKENS_PER_MILLION) * DEFAULT_PRICING.inputPerMillion;
+  const cacheHitCost = (cachedHitTokens / TOKENS_PER_MILLION) * DEFAULT_PRICING.inputCacheHitPerMillion;
+  const outputCost = (completionTokens / TOKENS_PER_MILLION) * DEFAULT_PRICING.outputPerMillion;
+
+  return roundUSD(inputCost + cacheHitCost + outputCost);
+}
+
 export type SessionStatus =
   | "failed"
   | "pending"
@@ -243,12 +267,21 @@ export type SessionEntry = {
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
+  taskPlan?: TaskPlan;
 };
 
 export type SessionsIndex = {
   version: 1;
   entries: SessionEntry[];
   originalPath: string;
+  /** Pre-computed total prompt tokens across all sessions. */
+  totalPromptTokens?: number;
+  /** Pre-computed total completion tokens across all sessions. */
+  totalCompletionTokens?: number;
+  /** Pre-computed total tokens (prompt + completion) across all sessions. */
+  totalTokens?: number;
+  /** Pre-computed total cost (USD) across all sessions. */
+  totalCost?: number;
 };
 
 export type SessionMessageRole = "system" | "user" | "assistant" | "tool";
@@ -353,6 +386,10 @@ export class SessionManager {
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
   private readonly mcpManager = new McpManager();
+  private readonly taskPlanManager = new TaskPlanManager();
+  private readonly contextManager = new ContextManager();
+  private readonly hooksManager = new HooksManager();
+  private readonly shellSessionManager = new ShellSessionManager();
   private mcpToolDefinitions: ToolDefinition[] = [];
   private readonly messageConverter: OpenAIMessageConverter;
 
@@ -365,7 +402,15 @@ export class SessionManager {
     this.onLlmStreamProgress = options.onLlmStreamProgress;
     this.onMcpStatusChanged = options.onMcpStatusChanged;
     this.onProcessStdout = options.onProcessStdout;
-    this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
+    this.toolExecutor = new ToolExecutor(
+      this.projectRoot,
+      this.createOpenAIClient,
+      this.mcpManager,
+      this.taskPlanManager,
+      this.contextManager,
+      this.hooksManager,
+      this.shellSessionManager
+    );
     this.mcpManager.prepare(this.getResolvedSettings().mcpServers);
     this.messageConverter = new OpenAIMessageConverter({
       renderInitPrompt: () => this.renderInitCommandPrompt(),
@@ -1352,6 +1397,7 @@ ${agentInstructions}
             this.updateSessionEntry(sessionId, (entry) => ({
               ...entry,
               toolCalls: pendingToolCallMessage.toolCalls,
+              taskPlan: this.taskPlanManager.getPlan(sessionId) ?? undefined,
               status: "waiting_for_user",
               updateTime: new Date().toISOString(),
             }));
@@ -1429,6 +1475,7 @@ ${agentInstructions}
         }
         this.appendSessionMessage(sessionId, assistantMessage);
         this.onAssistantMessage(assistantMessage, true);
+        this.contextManager.onAssistantMessage(sessionId, content);
 
         let waitingForUser = false;
         const responseUsage = response.usage ?? null;
@@ -1446,6 +1493,7 @@ ${agentInstructions}
               status: "ask_permission",
               failReason: null,
               askPermissions: permissionPlan.askPermissions,
+              taskPlan: this.taskPlanManager.getPlan(sessionId) ?? undefined,
               updateTime: new Date().toISOString(),
             }));
             return;
@@ -1472,6 +1520,7 @@ ${agentInstructions}
           status: refusal ? "failed" : waitingForUser ? "waiting_for_user" : toolCalls ? "processing" : "completed",
           failReason: refusal ? refusal : entry.failReason,
           askPermissions: undefined,
+          taskPlan: this.taskPlanManager.getPlan(sessionId) ?? undefined,
           updateTime: new Date().toISOString(),
         }));
 
@@ -1605,6 +1654,28 @@ ${agentInstructions}
       },
     };
     sessionMessages.splice(endIndex, 0, summaryMessage);
+
+    // Inject context index after the summary for "lossless memory"
+    const contextIndex = await this.contextManager.buildCompactionInjection(sessionId);
+    if (contextIndex) {
+      const indexMessage: SessionMessage = {
+        id: crypto.randomUUID(),
+        sessionId,
+        role: "system",
+        content: contextIndex,
+        contentParams: null,
+        messageParams: null,
+        compacted: false,
+        visible: false,
+        createTime: now,
+        updateTime: now,
+        meta: {
+          isSummary: true,
+        },
+      };
+      sessionMessages.splice(endIndex + 1, 0, indexMessage);
+    }
+
     this.saveSessionMessages(sessionId, sessionMessages);
   }
 
@@ -1823,9 +1894,7 @@ ${agentInstructions}
     const now = new Date().toISOString();
     const latestAssistant = [...keptMessages].reverse().find((message) => message.role === "assistant");
     const latestAssistantParams = latestAssistant?.messageParams as
-      | { tool_calls?: unknown[]; reasoning_content?: string }
-      | null
-      | undefined;
+      { tool_calls?: unknown[]; reasoning_content?: string } | null | undefined;
 
     this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
@@ -1992,6 +2061,7 @@ ${agentInstructions}
   private saveSessionsIndex(index: SessionsIndex): void {
     const { sessionsIndexPath } = this.getProjectStorage();
     this.ensureProjectDir();
+    const aggregates = this.computeAggregatedUsage(index.entries);
     const normalized = {
       version: 1,
       entries: index.entries.map((entry) => ({
@@ -1999,8 +2069,38 @@ ${agentInstructions}
         processes: this.serializeProcesses(entry.processes),
       })),
       originalPath: this.projectRoot,
+      ...aggregates,
     };
     fs.writeFileSync(sessionsIndexPath, JSON.stringify(normalized, null, 2), "utf8");
+  }
+
+  private computeAggregatedUsage(entries: SessionEntry[]): {
+    totalPromptTokens?: number;
+    totalCompletionTokens?: number;
+    totalTokens?: number;
+    totalCost?: number;
+  } {
+    let totalPromptTokens = 0;
+    let totalCompletionTokens = 0;
+    let totalTokens = 0;
+    let totalCost = 0;
+
+    for (const entry of entries) {
+      const usage = entry.usage;
+      if (usage) {
+        totalPromptTokens += typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
+        totalCompletionTokens += typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0;
+        totalTokens += typeof usage.total_tokens === "number" ? usage.total_tokens : 0;
+        totalCost += computeSessionEntryCost(usage);
+      }
+    }
+
+    return {
+      totalPromptTokens,
+      totalCompletionTokens,
+      totalTokens,
+      totalCost: roundUSD(totalCost),
+    };
   }
 
   private getSessionMessagesPath(sessionId: string): string {
@@ -2037,6 +2137,7 @@ ${agentInstructions}
 
     clearSessionState(sessionId);
     clearSessionWorkingDir(sessionId);
+    this.contextManager.clearSession(sessionId);
     const controller = this.sessionControllers.get(sessionId);
     if (controller && !controller.signal.aborted) {
       controller.abort();
@@ -2349,6 +2450,7 @@ ${agentInstructions}
       const toolMessage = this.buildToolMessage(sessionId, execution.toolCallId, execution.content, toolFunction);
       this.appendSessionMessage(sessionId, toolMessage);
       this.onAssistantMessage(toolMessage, true);
+      this.contextManager.onToolMessage(sessionId, toolMessage);
 
       for (const followUpMessage of execution.result.followUpMessages ?? []) {
         if (followUpMessage.role !== "system") {

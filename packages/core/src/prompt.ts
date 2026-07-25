@@ -579,6 +579,50 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
               type: "string",
               description: "Optional short reason for changing the plan.",
             },
+            steps: {
+              type: "array",
+              description:
+                "Optional structured execution steps with verification and fallback strategies. Use for multi-step tasks that require automated verification.",
+              items: {
+                type: "object",
+                properties: {
+                  description: { type: "string", description: "Step description." },
+                  verification: {
+                    type: "object",
+                    description: "How to verify this step succeeded.",
+                    properties: {
+                      type: {
+                        type: "string",
+                        enum: ["command", "file_exists", "test_pass", "manual"],
+                      },
+                      command: { type: "string", description: "Shell command to run for verification." },
+                      expected: { type: "string", description: "Expected output or behavior." },
+                    },
+                    required: ["type"],
+                    additionalProperties: false,
+                  },
+                  fallback: {
+                    type: "object",
+                    description: "What to do if this step fails after max retries.",
+                    properties: {
+                      type: {
+                        type: "string",
+                        enum: ["rollback_and_retry", "rollback_and_skip", "ask_user"],
+                      },
+                      alternativeApproach: { type: "string", description: "Alternative approach to try on retry." },
+                    },
+                    required: ["type"],
+                    additionalProperties: false,
+                  },
+                  maxRetries: {
+                    type: "number",
+                    description: "Max retry attempts before invoking fallback (default 2).",
+                  },
+                },
+                required: ["description"],
+                additionalProperties: false,
+              },
+            },
           },
           required: ["plan"],
           additionalProperties: false,
@@ -673,6 +717,76 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
       },
     },
   ];
+
+  tools.push({
+    type: "function",
+    function: {
+      name: "Recall",
+      description:
+        "Search the conversation history and code index for specific information. Use this when you need to recall function signatures, class definitions, past decisions, or errors from earlier in the conversation.",
+      parameters: {
+        type: "object",
+        properties: {
+          query: {
+            type: "string",
+            description: "Search query — keyword, function name, or concept.",
+          },
+          category: {
+            type: "string",
+            enum: ["code", "decision", "error", "fact", "all"],
+            description: "Category to search: code (entities), decision, error, fact, or all (default).",
+          },
+          filePath: {
+            type: "string",
+            description: "Optional file path to narrow search results.",
+          },
+          limit: {
+            type: "number",
+            description: "Maximum number of results (default 5, max 20).",
+          },
+        },
+        required: ["query"],
+        additionalProperties: false,
+      },
+    },
+  });
+
+  tools.push({
+    type: "function",
+    function: {
+      name: "Delegate",
+      description:
+        "Delegate tasks to sub-agents that execute independently with isolated context. Use for parallel code search, analysis, or multi-file refactoring.",
+      parameters: {
+        type: "object",
+        properties: {
+          tasks: {
+            type: "array",
+            description: "List of tasks to delegate.",
+            items: {
+              type: "object",
+              properties: {
+                description: { type: "string", description: "What the sub-agent should do." },
+                tools: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "Allowed tools (default: read, bash).",
+                },
+                context: { type: "string", description: "Additional system prompt context." },
+                maxIterations: { type: "number", description: "Max LLM iterations (default 12)." },
+                timeoutMs: { type: "number", description: "Timeout in ms (default 120000)." },
+              },
+              required: ["description"],
+              additionalProperties: false,
+            },
+          },
+          parallel: { type: "boolean", description: "Run tasks in parallel (default true)." },
+        },
+        required: ["tasks"],
+        additionalProperties: false,
+      },
+    },
+  });
 
   tools.push({
     type: "function",

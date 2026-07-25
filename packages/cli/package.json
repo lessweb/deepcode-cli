@@ -1,6 +1,6 @@
 {
   "name": "@vegamo/deepcode-cli",
-  "version": "0.1.34",
+  "version": "0.1.35",
   "description": "Deep Code CLI - Vibe coding for the deepseek-v4 model in your terminal",
   "license": "MIT",
   "type": "module",

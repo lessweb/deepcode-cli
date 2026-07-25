@@ -1,11 +1,17 @@
 import { handleAskUserQuestionTool } from "./ask-user-question-handler";
 import { handleBashTool } from "./bash-handler";
+import { handleDelegateTool } from "./delegate-handler";
 import { handleEditTool } from "./edit-handler";
 import { handleReadTool } from "./read-handler";
+import { handleRecallTool } from "./recall-handler";
 import { handleUpdatePlanTool } from "./update-plan-handler";
 import { handleWebSearchTool } from "./web-search-handler";
 import { handleWriteTool } from "./write-handler";
 import type { McpManager } from "../mcp/mcp-manager";
+import type { ContextManager } from "../common/context-manager";
+import type { TaskPlanManager } from "../common/task-plan-manager";
+import type { HooksManager, HookPhase } from "../common/hooks-manager";
+import type { ShellSessionManager } from "../common/shell-sessions";
 import type {
   CreateOpenAIClient,
   ToolCall,
@@ -40,12 +46,28 @@ export class ToolExecutor {
   private readonly projectRoot: string;
   private readonly createOpenAIClient?: CreateOpenAIClient;
   private readonly mcpManager?: McpManager;
+  private readonly taskPlanManager?: TaskPlanManager;
+  private readonly contextManager?: ContextManager;
+  private readonly hooksManager?: HooksManager;
+  private readonly shellSessions?: ShellSessionManager;
   private readonly toolHandlers = new Map<string, ToolHandler>();
 
-  constructor(projectRoot: string, createOpenAIClient?: CreateOpenAIClient, mcpManager?: McpManager) {
+  constructor(
+    projectRoot: string,
+    createOpenAIClient?: CreateOpenAIClient,
+    mcpManager?: McpManager,
+    taskPlanManager?: TaskPlanManager,
+    contextManager?: ContextManager,
+    hooksManager?: HooksManager,
+    shellSessions?: ShellSessionManager
+  ) {
     this.projectRoot = projectRoot;
     this.createOpenAIClient = createOpenAIClient;
     this.mcpManager = mcpManager;
+    this.taskPlanManager = taskPlanManager;
+    this.contextManager = contextManager;
+    this.hooksManager = hooksManager;
+    this.shellSessions = shellSessions;
     this.registerToolHandlers();
   }
 
@@ -83,6 +105,8 @@ export class ToolExecutor {
     this.toolHandlers.set("edit", handleEditTool);
     this.toolHandlers.set("AskUserQuestion", handleAskUserQuestionTool);
     this.toolHandlers.set("UpdatePlan", handleUpdatePlanTool);
+    this.toolHandlers.set("Recall", handleRecallTool);
+    this.toolHandlers.set("Delegate", handleDelegateTool);
     this.toolHandlers.set("WebSearch", handleWebSearchTool);
   }
 
@@ -153,11 +177,32 @@ export class ToolExecutor {
     }
 
     try {
-      return await handler(parsedArgs.args, {
+      // Pre-hook
+      const prePhase = this.getPreHookPhase(handlerName);
+      if (prePhase && this.hooksManager) {
+        const preResult = await this.hooksManager.runPreHook(prePhase, this.projectRoot, {
+          tool: handlerName,
+          sessionId,
+          projectRoot: this.projectRoot,
+          filePath: this.extractFilePath(parsedArgs.args),
+          command: this.extractCommand(handlerName, parsedArgs.args),
+        });
+        if (preResult.blocked) {
+          return {
+            ok: false,
+            name: toolName,
+            error: preResult.reason ?? `Blocked by ${prePhase} hook.`,
+          };
+        }
+      }
+
+      const result = await handler(parsedArgs.args, {
         sessionId,
         projectRoot: this.projectRoot,
         toolCall,
         createOpenAIClient: this.createOpenAIClient,
+        taskPlanManager: this.taskPlanManager,
+        contextManager: this.contextManager,
         onProcessStart: hooks?.onProcessStart,
         onProcessExit: hooks?.onProcessExit,
         onProcessStdout: hooks?.onProcessStdout,
@@ -166,6 +211,22 @@ export class ToolExecutor {
         onBeforeFileMutation: hooks?.onBeforeFileMutation,
         onAfterFileMutation: hooks?.onAfterFileMutation,
       });
+
+      // Post-hook (fire and forget, don't block)
+      const postPhase = this.getPostHookPhase(handlerName);
+      if (postPhase && this.hooksManager) {
+        this.hooksManager.runPostHook(postPhase, this.projectRoot, {
+          tool: handlerName,
+          sessionId,
+          projectRoot: this.projectRoot,
+          filePath: this.extractFilePath(parsedArgs.args),
+          command: this.extractCommand(handlerName, parsedArgs.args),
+          ok: result.ok,
+          error: result.error,
+        });
+      }
+
+      return result;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
@@ -223,5 +284,48 @@ export class ToolExecutor {
     }
 
     return JSON.stringify(payload, null, 2);
+  }
+
+  private getPreHookPhase(toolName: string): HookPhase | null {
+    switch (toolName) {
+      case "bash":
+        return "pre-bash";
+      case "read":
+        return "pre-read";
+      case "write":
+        return "pre-write";
+      case "edit":
+        return "pre-edit";
+      default:
+        return null;
+    }
+  }
+
+  private getPostHookPhase(toolName: string): HookPhase | null {
+    switch (toolName) {
+      case "bash":
+        return "post-bash";
+      case "read":
+        return "post-read";
+      case "write":
+        return "post-write";
+      case "edit":
+        return "post-edit";
+      default:
+        return null;
+    }
+  }
+
+  private extractFilePath(args: Record<string, unknown>): string | undefined {
+    if (typeof args.file_path === "string") return args.file_path;
+    if (typeof args.filePath === "string") return args.filePath;
+    return undefined;
+  }
+
+  private extractCommand(toolName: string, args: Record<string, unknown>): string | undefined {
+    if (toolName === "bash" && typeof args.command === "string") {
+      return args.command.slice(0, 200);
+    }
+    return undefined;
   }
 }
