@@ -20,7 +20,6 @@ import {
   formatAskUserQuestionAnswers,
 } from "../core/ask-user-question";
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
-import { PlanImplementationPrompt, extractProposedPlan, getImplementationPrompt } from "./PlanImplementationPrompt";
 import { buildExitSummaryText, buildResumeHintText } from "../exit-summary";
 import { RawMode, useRawModeContext } from "../contexts";
 import { renderMessageToStdout } from "../components/MessageView/utils";
@@ -134,8 +133,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
-  const [planMode, setPlanMode] = useState(false);
-  const [pendingPlanImplementation, setPendingPlanImplementation] = useState<string | null>(null);
 
   rawModeRef.current = mode;
   messagesRef.current = messages;
@@ -256,8 +253,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     setActiveStatus(null);
     setActiveAskPermissions(undefined);
     setPendingPermissionReply(null);
-    setPlanMode(false);
-    setPendingPlanImplementation(null);
     setDismissedQuestionIds(new Set());
     await resetStaticView([]);
     await refreshSkills();
@@ -366,6 +361,55 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         navigateToSubView("mcp-status");
         return;
       }
+      if (submission.command === "compact") {
+        const activeSessionId = sessionManager.getActiveSessionId();
+        if (!activeSessionId) {
+          setErrorLine("No active session to compact.");
+          return;
+        }
+        setBusy(true);
+        sessionManager.addSessionSystemMessage(
+          activeSessionId,
+          "Compacting conversation context to reduce token usage...",
+          true,
+          { asThinking: true }
+        );
+        sessionManager.compactSession(activeSessionId).then(() => {
+          setBusy(false);
+          refreshSessionsList();
+        }).catch((err) => {
+          setBusy(false);
+          setErrorLine(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return;
+      }
+      if (submission.command === "context") {
+        const sessionInfo = getSessionInfo();
+        if (!sessionInfo || !sessionInfo.activeSessionId) {
+          setErrorLine("No active session.");
+          return;
+        }
+        const pct = sessionInfo.maxContextTokens > 0
+          ? Math.round((sessionInfo.activeTokens / sessionInfo.maxContextTokens) * 100)
+          : 0;
+        const summary = [
+          `Model: ${sessionInfo.model}`,
+          `Messages: ${sessionInfo.messageCount}`,
+          `API requests: ${sessionInfo.requestCount}`,
+          `Active tokens: ${sessionInfo.activeTokens.toLocaleString()} / ${sessionInfo.maxContextTokens.toLocaleString()} (${pct}%)`,
+          `Total tokens used: ${sessionInfo.totalTokens.toLocaleString()}`,
+        ];
+        if (Object.keys(sessionInfo.toolUsage).length > 0) {
+          const tools = Object.entries(sessionInfo.toolUsage)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 5)
+            .map(([name, count]) => `  ${name}: ${count}x`)
+            .join("\n");
+          summary.push(`\nTop tools:\n${tools}`);
+        }
+        sessionManager.addSessionSystemMessage(sessionInfo.activeSessionId, summary.join("\n"), true, { asThinking: true });
+        return;
+      }
 
       const prompt: UserPromptContent = {
         text: submission.text,
@@ -374,7 +418,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           submission.selectedSkills && submission.selectedSkills.length > 0 ? submission.selectedSkills : undefined,
         permissions: submission.permissions,
         alwaysAllows: submission.alwaysAllows,
-        planMode: submission.planMode ?? planMode,
       };
       const activeSessionId = sessionManager.getActiveSessionId();
       const permissionReply =
@@ -410,12 +453,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         }
         await refreshSkills();
         refreshSessionsList();
-        const completedSession = sessionManager.getSession(sessionManager.getActiveSessionId() ?? "");
-        const proposedPlan =
-          prompt.planMode && completedSession?.status === "completed"
-            ? extractProposedPlan(completedSession.assistantReply)
-            : null;
-        setPendingPlanImplementation(proposedPlan);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         setErrorLine(message);
@@ -437,7 +474,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       refreshSessionsList,
       navigateToSubView,
       resetToWelcome,
-      planMode,
     ]
   );
 
@@ -509,25 +545,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     [handlePrompt]
   );
 
-  const handlePlanImplementationChoice = useCallback(
-    (choice: "implement" | "stay" | "default") => {
-      const proposedPlan = pendingPlanImplementation;
-      setPendingPlanImplementation(null);
-      if (choice === "stay") {
-        return;
-      }
-      setPlanMode(false);
-      if (choice === "implement" && proposedPlan) {
-        handleSubmit({
-          text: getImplementationPrompt(proposedPlan),
-          imageUrls: [],
-          planMode: false,
-        });
-      }
-    },
-    [handleSubmit, pendingPlanImplementation]
-  );
-
   const handleExitShortcut = useCallback(() => {
     handleExit({ showCommand: false, showSummary: false });
   }, [handleExit]);
@@ -549,8 +566,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       setRunningProcesses(session?.processes ?? null);
       setActiveStatus(session?.status ?? null);
       setActiveAskPermissions(session?.askPermissions);
-      setPlanMode(session?.planMode === true);
-      setPendingPlanImplementation(null);
       if (pendingPermissionReply && pendingPermissionReply.sessionId !== sessionId) {
         setPendingPermissionReply(null);
       }
@@ -999,8 +1014,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />
-      ) : pendingPlanImplementation && !busy ? (
-        <PlanImplementationPrompt onSelect={handlePlanImplementationChoice} />
       ) : isExiting ? null : (
         <PromptInput
           projectRoot={projectRoot}
@@ -1022,8 +1035,6 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           placeholder="Type your message..."
           statusLineSegments={statusLineSegments}
           statusLineSeparator={resolvedSettings.statusline.separator}
-          planMode={planMode}
-          onPlanModeChange={setPlanMode}
         />
       )}
     </Box>

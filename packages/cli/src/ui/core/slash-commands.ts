@@ -4,7 +4,6 @@ export type SlashCommandKind =
   | "skill"
   | "skills"
   | "model"
-  | "plan"
   | "new"
   | "init"
   | "resume"
@@ -12,6 +11,8 @@ export type SlashCommandKind =
   | "undo"
   | "mcp"
   | "raw"
+  | "compact"
+  | "context"
   | "exit";
 
 export type SlashCommandItem = {
@@ -35,12 +36,6 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "model",
     label: "/model",
     description: "Select model, thinking mode and effort control",
-  },
-  {
-    kind: "plan",
-    name: "plan",
-    label: "/plan",
-    description: "Switch the input to Plan Mode",
   },
   {
     kind: "new",
@@ -84,6 +79,18 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     label: "/raw",
     args: ["lite", "normal", "raw-scrollback"],
     description: "Toggle display mode for viewing or collapsing reasoning content",
+  },
+  {
+    kind: "compact",
+    name: "compact",
+    label: "/compact",
+    description: "Compress conversation context to reduce token usage",
+  },
+  {
+    kind: "context",
+    name: "context",
+    label: "/context",
+    description: "Show current conversation token usage and context stats",
   },
   {
     kind: "exit",

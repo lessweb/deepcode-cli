@@ -32,7 +32,9 @@ export type PermissionScope =
   | "query-git-log"
   | "mutate-git-log"
   | "network"
-  | "mcp";
+  | "mcp"
+  | "unknown"
+  | "doom-loop";
 
 export type PermissionDefaultMode = "allowAll" | "askAll";
 
@@ -73,6 +75,14 @@ export type StatusLineSettings = {
   providers?: StatusLineProviderConfig[];
 };
 
+export type HooksConfig = {
+  beforeWrite?: string;
+  afterWrite?: string;
+  beforeCommand?: string;
+  afterCommand?: string;
+  onError?: string;
+};
+
 export type ResolvedStatusLineSettings = {
   enabled: boolean;
   refreshMs: number;
@@ -90,6 +100,9 @@ export type DeepcodingSettings = {
   telemetryEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  hooks?: HooksConfig;
+  rulesDir?: string;
+  compressThreshold?: number;
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
@@ -108,6 +121,7 @@ export type ResolvedDeepcodingSettings = {
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  compressThreshold: number;
   mcpServers?: Record<string, McpServerConfig>;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
@@ -150,6 +164,14 @@ function parseTemperature(value: unknown): number | undefined {
     return undefined;
   }
   return raw;
+}
+
+function parseNumber(value: unknown): number | undefined {
+  const raw = typeof value === "number" ? value : typeof value === "string" && value.trim() ? Number(value) : NaN;
+  if (!Number.isFinite(raw) || raw < 100) {
+    return undefined;
+  }
+  return Math.round(raw);
 }
 
 function trimString(value: unknown): string {
@@ -531,6 +553,11 @@ export function resolveSettingsSources(
     trimString(userSettings?.webSearchTool) ||
     "";
 
+  const compressThreshold =
+    parseNumber(projectSettings?.compressThreshold) ??
+    parseNumber(userSettings?.compressThreshold) ??
+    10_000;
+
   return {
     env,
     apiKey: trimString(env.API_KEY) || undefined,
@@ -543,6 +570,7 @@ export function resolveSettingsSources(
     telemetryEnabled,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
+    compressThreshold,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),

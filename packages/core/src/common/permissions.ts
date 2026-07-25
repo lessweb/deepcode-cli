@@ -60,7 +60,6 @@ export type ComputeToolCallPermissionsOptions = {
   projectRoot: string;
   toolCalls: unknown[];
   settings?: Required<PermissionSettings>;
-  forceAskScopes?: readonly PermissionScope[];
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
 };
@@ -148,6 +147,14 @@ export function buildSyntheticToolExecution(toolCall: PermissionToolCall, error:
   };
 }
 
+/**
+ * Check if a permission scope is a "silent" auto-handled scope.
+ * These don't require user interaction — they're handled internally.
+ */
+export function isInternalPermissionScope(scope: PermissionScope): boolean {
+  return scope === "doom-loop";
+}
+
 export function computeToolCallPermissions(options: ComputeToolCallPermissionsOptions): PermissionPlan {
   const permissions: MessageToolPermission[] = [];
   const askPermissions: AskPermissionRequest[] = [];
@@ -164,18 +171,10 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
       readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
     });
-    const evaluatedPermission = evaluatePermissionScopes(request.scopes, options.settings);
-    const forcedAskScopes =
-      evaluatedPermission === "deny"
-        ? []
-        : getAllowedForcedAskScopes(request.scopes, options.settings, options.forceAskScopes);
-    const permission = forcedAskScopes.length > 0 ? "ask" : evaluatedPermission;
+    const permission = evaluatePermissionScopes(request.scopes, options.settings);
     permissions.push({ toolCallId: toolCall.id, permission });
     if (permission === "ask") {
-      const askScopes = mergeAskScopes(
-        getPermissionScopesRequiringAsk(request.scopes, options.settings),
-        forcedAskScopes
-      );
+      const askScopes = getPermissionScopesRequiringAsk(request.scopes, options.settings);
       askPermissions.push({
         toolCallId: toolCall.id,
         scopes: askScopes.length > 0 ? askScopes : request.scopes,
@@ -189,23 +188,37 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
   return { permissions, askPermissions };
 }
 
-function getAllowedForcedAskScopes(
-  scopes: AskPermissionScope[],
-  settings: Required<PermissionSettings> | undefined,
-  forceAskScopes: readonly PermissionScope[] | undefined
-): PermissionScope[] {
-  if (!forceAskScopes?.length) {
-    return [];
-  }
-
-  return scopes.filter(
-    (scope): scope is PermissionScope =>
-      scope !== "unknown" && forceAskScopes.includes(scope) && evaluatePermissionScopes([scope], settings) === "allow"
-  );
-}
-
-function mergeAskScopes(existing: AskPermissionScope[], forced: PermissionScope[]): AskPermissionScope[] {
-  return [...existing, ...forced.filter((scope) => !existing.includes(scope))];
+/**
+ * 异步审计 PermissionPlan（fire-and-forget，不阻塞主流程）
+ * 将每次权限检查结果写入 SQLite
+ */
+export function auditPermissionPlan(
+  sessionId: string,
+  plan: PermissionPlan,
+  toolCalls: PermissionToolCall[]
+): void {
+  // Fire-and-forget: 异步写入 SQLite，不 await
+  import("../common/session-log").then((log) => {
+    for (const perm of plan.permissions) {
+      const toolCall = toolCalls.find((tc) => tc.id === perm.toolCallId);
+      const scopes: string[] = [];
+      const askReq = plan.askPermissions.find((ap) => ap.toolCallId === perm.toolCallId);
+      if (askReq) {
+        scopes.push(...askReq.scopes.map(String));
+      }
+      log.logPermissionDecision(
+        sessionId,
+        perm.toolCallId,
+        toolCall?.function?.name ?? "unknown",
+        scopes.length > 0 ? scopes : [perm.permission],
+        perm.permission
+      ).catch(() => {
+        // 静默处理失败
+      });
+    }
+  }).catch(() => {
+    // 静默处理
+  });
 }
 
 export function describeToolPermissionRequest(options: {
