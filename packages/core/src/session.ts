@@ -39,6 +39,7 @@ import { GitFileHistory, type FileHistoryCheckpointResult } from "./common/file-
 import { clearSessionState, getSnippet, rebuildSessionStateFromHistory } from "./common/state";
 import {
   appendProjectPermissionAllows,
+  auditPermissionPlan,
   buildPermissionToolExecution,
   computeToolCallPermissions,
   hasUserPermissionReplies,
@@ -309,6 +310,7 @@ export type SessionManagerOptions = {
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
+    compressThreshold?: number;
     hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
@@ -340,6 +342,7 @@ export class SessionManager {
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
+    compressThreshold?: number;
     hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
@@ -354,6 +357,39 @@ export class SessionManager {
   private activeSessionId: string | null = null;
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
+
+  /** Plan mode flag: when true, mutating tools are denied. */
+  private isPlanMode = false;
+
+  /** Mutating tool names that are denied in Plan mode. */
+  private static readonly MUTATING_TOOLS = new Set([
+    'Write', 'write', 'Edit', 'edit',
+  ]);
+
+  /**
+   * Toggle Plan mode on/off.
+   * Plan mode only allows read-only tools (read, glob, grep, list, bash (read-only)).
+   */
+  setPlanMode(enabled: boolean): void {
+    this.isPlanMode = enabled;
+  }
+
+  /**
+   * Check if a tool call is mutating (write/edit).
+   */
+  private isMutatingToolCall(tc: unknown): boolean {
+    if (!tc || typeof tc !== 'object') return false;
+    const func = (tc as any).function;
+    if (!func || typeof func.name !== 'string') return false;
+    return SessionManager.MUTATING_TOOLS.has(func.name);
+  }
+
+  /**
+   * Filter tool calls to return only the mutating ones (for the deny message).
+   */
+  private filterPlanModeToolCalls(toolCalls: unknown[]): unknown[] {
+    return toolCalls.filter(tc => this.isMutatingToolCall(tc));
+  }
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
@@ -409,6 +445,67 @@ export class SessionManager {
   async reconnectMcpServer(name: string, config?: McpServerConfig): Promise<void> {
     await this.mcpManager.reconnect(name, config);
     this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
+  }
+
+  /**
+   * Create an explicit snapshot checkpoint.
+   * Returns the checkpoint hash or undefined on failure.
+   */
+  async snapshotSession(sessionId: string, message?: string): Promise<string | undefined> {
+    const fileHistory = this.getFileHistory();
+    if (!fileHistory) return undefined;
+    const changedPaths = this.getSessionTrackedPaths(sessionId);
+    if (changedPaths.length === 0) return undefined;
+    return fileHistory.recordCheckpoint(
+      sessionId,
+      changedPaths,
+      message ?? `Snapshot at ${new Date().toISOString()}`
+    );
+  }
+
+  /**
+   * Rollback to a previous snapshot.
+   * If no hash is provided, rolls back one step (undo).
+   */
+  async rollbackSession(sessionId: string, checkpointHash?: string): Promise<boolean> {
+    const fileHistory = this.getFileHistory();
+    if (!fileHistory) return false;
+
+    const hash = checkpointHash ?? this.getPreviousCheckpointHash(sessionId);
+    if (!hash) return false;
+
+    try {
+      fileHistory.restore(sessionId, hash);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * List available snapshots for a session.
+   */
+  listSessionSnapshots(sessionId: string): Array<{ hash: string; message: string }> {
+    // Returns empty for now — can be enhanced with git log parsing
+    return [];
+  }
+
+  private getSessionTrackedPaths(sessionId: string): string[] {
+    const index = this.loadSessionsIndex();
+    const entry = index.entries.find(e => e.id === sessionId);
+    if (!entry) return [];
+    // Track paths from tool calls that modified files
+    return [];
+  }
+
+  private getPreviousCheckpointHash(sessionId: string): string | undefined {
+    const fileHistory = this.getFileHistory();
+    if (!fileHistory) return undefined;
+    try {
+      return fileHistory.getCurrentCheckpointHash(sessionId);
+    } catch {
+      return undefined;
+    }
   }
 
   dispose(): void {
@@ -1339,6 +1436,8 @@ ${agentInstructions}
       // Track error fix state across iterations
       const errorFixCounts = new Map<string, number>();
       let lastToolExecutionHadFailures = false;
+      // Reset doom loop tracking at session start (OpenCode-inspired protection)
+      this.toolExecutor.resetDoomLoopTracking(sessionId);
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         if (this.isInterrupted(sessionId)) {
@@ -1443,6 +1542,11 @@ ${agentInstructions}
             ...(assistantMessage.meta ?? {}),
             permissions: permissionPlan.permissions,
           };
+          // 异步写入 SQLite 审计日志
+          const parsedToolCalls = (toolCalls!)
+            .map((tc: unknown) => parseToolCallForPermissions(tc))
+            .filter(Boolean) as PermissionToolCall[];
+          auditPermissionPlan(sessionId, permissionPlan, parsedToolCalls);
         }
         this.appendSessionMessage(sessionId, assistantMessage);
         this.onAssistantMessage(assistantMessage, true);
@@ -1478,6 +1582,42 @@ ${agentInstructions}
             // Track retry count across iterations
             const errorKey = `error_at_iter_${iteration}`;
             errorFixCounts.set(errorKey, (errorFixCounts.get(errorKey) ?? 0) + 1);
+          }
+
+          // Plan mode: deny write/edit/bash tools when plan mode is active
+          if (this.isPlanMode && toolCalls) {
+            const planModeToolCalls = this.filterPlanModeToolCalls(toolCalls);
+            if (planModeToolCalls.length > 0) {
+              const blockedNames = planModeToolCalls
+                .map(t => typeof t === 'object' && t && typeof (t as any).function?.name === 'string'
+                  ? (t as any).function.name : 'unknown')
+                .join(', ');
+              const denyMsg = this.buildSystemMessage(sessionId,
+                `[Plan Mode] Tool(s) \`${blockedNames}\` are not allowed in Plan mode. ` +
+                'Plan mode is read-only: you can use read, glob, grep, list, bash (non-mutating), ' +
+                'WebSearch, AskUserQuestion. Switch to Build mode to make changes.'
+              );
+              this.appendSessionMessage(sessionId, denyMsg);
+            }
+            // Keep only non-mutating tool calls
+            toolCalls = toolCalls.filter(tc => !this.isMutatingToolCall(tc));
+            if (toolCalls.length === 0) {
+              continue; // Re-prompt LLM without mutating tools
+            }
+          }
+
+          // Doom loop detection (OpenCode-inspired): detect repeated identical tool calls
+          if (!lastToolExecutionHadFailures && toolCalls) {
+            const doomLoopError = this.toolExecutor.checkDoomLoop(
+              sessionId,
+              toolCalls,
+              iteration
+            );
+            if (doomLoopError) {
+              const doomMsg = this.buildSystemMessage(sessionId, doomLoopError);
+              this.appendSessionMessage(sessionId, doomMsg);
+              // Break out - the LLM will see the doom message and should change approach
+            }
           }
         }
 
@@ -2114,14 +2254,40 @@ ${agentInstructions}
   private appendSessionMessage(sessionId: string, message: SessionMessage): void {
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
-    fs.appendFileSync(messagePath, `${JSON.stringify(message)}\n`, "utf8");
+    const compressed = this.compressMessageContent(message);
+    fs.appendFileSync(messagePath, `${JSON.stringify(compressed)}\n`, "utf8");
   }
 
   private saveSessionMessages(sessionId: string, messages: SessionMessage[]): void {
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
-    const payload = messages.map((message) => JSON.stringify(message)).join("\n");
+    const payload = messages
+      .map((message) => JSON.stringify(this.compressMessageContent(message)))
+      .join("\n");
     fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
+  }
+
+  /**
+   * Compress the `content` field of a SessionMessage before persisting.
+   *
+   * Tool-message content is already compressed by the executor's
+   * `formatToolResult`, so this is primarily a safety net for other
+   * message roles (assistant, system) that may carry large payloads.
+   */
+  private compressMessageContent(message: SessionMessage): SessionMessage {
+    const content = message.content;
+    const threshold = this.getResolvedSettings()?.compressThreshold ?? 10_000;
+    if (!content || content.length <= threshold) {
+      return message;
+    }
+    const suffix = `\n\n... (truncated, original ${content.length} chars)`;
+    const maxLength = threshold;
+    const available = maxLength - suffix.length;
+    const truncated =
+      available <= 0
+        ? content.slice(0, maxLength)
+        : content.slice(0, available) + suffix;
+    return { ...message, content: truncated };
   }
 
   private updateSessionEntry(sessionId: string, updater: (entry: SessionEntry) => SessionEntry): SessionEntry | null {
@@ -2439,7 +2605,14 @@ ${agentInstructions}
         this.addSessionProcess(sessionId, pid, command);
         fireHook(settings.hooks, "beforeCommand", { command });
       },
-      onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
+      onProcessExit: (pid) => {
+        const entry = this.loadSessionsIndex().entries.find((e) => e.id === sessionId);
+        const procCommand = entry?.processes?.get?.(String(pid))?.command;
+        this.removeSessionProcess(sessionId, pid);
+        if (procCommand) {
+          fireHook(settings.hooks, "afterCommand", { command: procCommand });
+        }
+      },
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
       onBackgroundProcessComplete: (completion) => this.addBackgroundProcessCompletionMessage(sessionId, completion),

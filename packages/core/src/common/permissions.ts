@@ -148,6 +148,14 @@ export function buildSyntheticToolExecution(toolCall: PermissionToolCall, error:
   };
 }
 
+/**
+ * Check if a permission scope is a "silent" auto-handled scope.
+ * These don't require user interaction — they're handled internally.
+ */
+export function isInternalPermissionScope(scope: PermissionScope): boolean {
+  return scope === "doom-loop";
+}
+
 export function computeToolCallPermissions(options: ComputeToolCallPermissionsOptions): PermissionPlan {
   const permissions: MessageToolPermission[] = [];
   const askPermissions: AskPermissionRequest[] = [];
@@ -206,6 +214,40 @@ function getAllowedForcedAskScopes(
 
 function mergeAskScopes(existing: AskPermissionScope[], forced: PermissionScope[]): AskPermissionScope[] {
   return [...existing, ...forced.filter((scope) => !existing.includes(scope))];
+}
+
+/**
+ * 异步审计 PermissionPlan（fire-and-forget，不阻塞主流程）
+ * 将每次权限检查结果写入 SQLite
+ */
+export function auditPermissionPlan(
+  sessionId: string,
+  plan: PermissionPlan,
+  toolCalls: PermissionToolCall[]
+): void {
+  // Fire-and-forget: 异步写入 SQLite，不 await
+  import("../common/session-log").then((log) => {
+    for (const perm of plan.permissions) {
+      const toolCall = toolCalls.find((tc) => tc.id === perm.toolCallId);
+      const scopes: string[] = [];
+      const askReq = plan.askPermissions.find((ap) => ap.toolCallId === perm.toolCallId);
+      if (askReq) {
+        scopes.push(...askReq.scopes.map(String));
+      }
+      log.logPermissionDecision(
+        sessionId,
+        perm.toolCallId,
+        toolCall?.function?.name ?? "unknown",
+        scopes.length > 0 ? scopes : [perm.permission],
+        perm.permission
+      ).catch(() => {
+        // 静默处理失败
+      });
+    }
+  }).catch(() => {
+    // 静默处理
+  });
+>>>>>>> ea93ba2 (feat: 全面架构升级 - Permission Profile / SQLite 日志 / Job 队列 / Skill 标准化)
 }
 
 export function describeToolPermissionRequest(options: {

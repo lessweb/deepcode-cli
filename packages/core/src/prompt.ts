@@ -91,6 +91,19 @@ Here's an example of how your output should be structured:
 
 </summary>`;
 
+const TOOL_CHAINING_PROMPT = `
+## Tool Chaining (Efficiency Pattern)
+
+When exploring an unfamiliar codebase, chain tools together for efficiency:
+1. \`GlobTool\` or \`ListTool\` — discover files in the relevant directory
+2. \`GrepTool\` — search for specific patterns, exports, or usages
+3. \`ReadTool\` — read the specific files identified above
+4. \`BashTool\` — run tests or verify the changes
+
+Each tool's output feeds naturally into the next. Let the results guide your next step
+rather than speculating about file contents.
+`;
+
 const AGENTIC_BEHAVIOR_PROMPT = `
 ## Agentic Behavior: Plan → Execute → Verify → Auto-Fix
 

@@ -5,6 +5,7 @@ import { handleReadTool } from "./read-handler";
 import { handleUpdatePlanTool } from "./update-plan-handler";
 import { handleWebSearchTool } from "./web-search-handler";
 import { handleWriteTool } from "./write-handler";
+import { compressContent } from "../context/compact";
 import type { McpManager } from "../mcp/mcp-manager";
 import type {
   CreateOpenAIClient,
@@ -42,11 +43,78 @@ export class ToolExecutor {
   private readonly mcpManager?: McpManager;
   private readonly toolHandlers = new Map<string, ToolHandler>();
 
+  /** Doom loop: tracks last N tool call shapes for cycle detection */
+  private readonly doomLoopBuffer = new Map<string, { name: string; args: string }[]>();
+
+  /** Max identical consecutive tool calls before triggering doom loop protection */
+  private static readonly DOOM_LOOP_THRESHOLD = 3;
+
+  /** Max total tool calls across all iterations before forced break */
+  private static readonly DOOM_LOOP_TOTAL_CAP = 50;
+
   constructor(projectRoot: string, createOpenAIClient?: CreateOpenAIClient, mcpManager?: McpManager) {
     this.projectRoot = projectRoot;
     this.createOpenAIClient = createOpenAIClient;
     this.mcpManager = mcpManager;
     this.registerToolHandlers();
+  }
+
+  /**
+   * Reset doom loop tracking for a new session / new user prompt.
+   */
+  resetDoomLoopTracking(sessionId: string): void {
+    this.doomLoopBuffer.set(sessionId, []);
+  }
+
+  /**
+   * Check if a tool call set constitutes a doom loop.
+   * Returns an error message when a loop is detected, or null if everything is fine.
+   */
+  checkDoomLoop(
+    sessionId: string,
+    toolCalls: unknown[],
+    iteration: number
+  ): string | null {
+    // Total cap check
+    if (iteration >= ToolExecutor.DOOM_LOOP_TOTAL_CAP) {
+      return `Doom loop detected: exceeded ${ToolExecutor.DOOM_LOOP_TOTAL_CAP} total tool call iterations without completion. The agent appears stuck in a loop.`;
+    }
+
+    const parsed = toolCalls
+      .map((tc) => this.parseToolCall(tc))
+      .filter((tc): tc is ToolCall => Boolean(tc));
+
+    if (parsed.length === 0) return null;
+
+    const buffer = this.doomLoopBuffer.get(sessionId) ?? [];
+    const currentShape = parsed.map((t) => ({
+      name: t.function.name,
+      args: t.function.arguments.replace(/\s+/g, "").slice(0, 80), // normalize whitespace
+    }));
+
+    buffer.push(...currentShape);
+    // Keep only last N entries for threshold check
+    if (buffer.length > ToolExecutor.DOOM_LOOP_THRESHOLD) {
+      buffer.splice(0, buffer.length - ToolExecutor.DOOM_LOOP_THRESHOLD);
+    }
+    this.doomLoopBuffer.set(sessionId, buffer);
+
+    // Check: if the last N entries are all the same tool call shape
+    if (buffer.length >= ToolExecutor.DOOM_LOOP_THRESHOLD) {
+      const allSame = buffer.every(
+        (e) => e.name === buffer[0].name && e.args === buffer[0].args
+      );
+      if (allSame) {
+        const { name } = buffer[0];
+        return (
+          `Doom loop detected: tool \`${name}\` was called ${ToolExecutor.DOOM_LOOP_THRESHOLD} times consecutively ` +
+          "with identical arguments and all returned without errors. " +
+          "The agent appears stuck. Try a different approach or explain the issue to the user."
+        );
+      }
+    }
+
+    return null;
   }
 
   async executeToolCalls(
@@ -57,6 +125,9 @@ export class ToolExecutor {
     const parsedCalls = toolCalls
       .map((toolCall) => this.parseToolCall(toolCall))
       .filter((toolCall): toolCall is ToolCall => Boolean(toolCall));
+
+    // Reset doom loop buffer for this batch
+    this.doomLoopBuffer.set(sessionId, []);
 
     const executions: ToolCallExecution[] = [];
     for (const toolCall of parsedCalls) {
@@ -222,6 +293,7 @@ export class ToolExecutor {
       payload.awaitUserResponse = true;
     }
 
-    return JSON.stringify(payload, null, 2);
+    const json = JSON.stringify(payload, null, 2);
+    return compressContent(json);
   }
 }

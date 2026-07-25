@@ -365,6 +365,55 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         navigateToSubView("mcp-status");
         return;
       }
+      if (submission.command === "compact") {
+        const activeSessionId = sessionManager.getActiveSessionId();
+        if (!activeSessionId) {
+          setErrorLine("No active session to compact.");
+          return;
+        }
+        setBusy(true);
+        sessionManager.addSessionSystemMessage(
+          activeSessionId,
+          "Compacting conversation context to reduce token usage...",
+          true,
+          { asThinking: true }
+        );
+        sessionManager.compactSession(activeSessionId).then(() => {
+          setBusy(false);
+          refreshSessionsList();
+        }).catch((err) => {
+          setBusy(false);
+          setErrorLine(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
+        });
+        return;
+      }
+      if (submission.command === "context") {
+        const sessionInfo = getSessionInfo();
+        if (!sessionInfo || !sessionInfo.activeSessionId) {
+          setErrorLine("No active session.");
+          return;
+        }
+        const pct = sessionInfo.maxContextTokens > 0
+          ? Math.round((sessionInfo.activeTokens / sessionInfo.maxContextTokens) * 100)
+          : 0;
+        const summary = [
+          `Model: ${sessionInfo.model}`,
+          `Messages: ${sessionInfo.messageCount}`,
+          `API requests: ${sessionInfo.requestCount}`,
+          `Active tokens: ${sessionInfo.activeTokens.toLocaleString()} / ${sessionInfo.maxContextTokens.toLocaleString()} (${pct}%)`,
+          `Total tokens used: ${sessionInfo.totalTokens.toLocaleString()}`,
+        ];
+        if (Object.keys(sessionInfo.toolUsage).length > 0) {
+          const tools = Object.entries(sessionInfo.toolUsage)
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, 5)
+            .map(([name, count]) => `  ${name}: ${count}x`)
+            .join("\n");
+          summary.push(`\nTop tools:\n${tools}`);
+        }
+        sessionManager.addSessionSystemMessage(sessionInfo.activeSessionId, summary.join("\n"), true, { asThinking: true });
+        return;
+      }
 
       const prompt: UserPromptContent = {
         text: submission.text,

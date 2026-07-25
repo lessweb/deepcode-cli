@@ -31,6 +31,7 @@ export type {
   StatusLineSettings,
   ResolvedStatusLineSettings,
   StatusLineProviderConfig,
+  HooksConfig,
 } from "./settings";
 
 // Session
@@ -125,6 +126,7 @@ export {
   appendProjectPermissionAllows,
   normalizeAskPermissions,
   parseToolCallForPermissions,
+  auditPermissionPlan,
 } from "./common/permissions";
 export type {
   AskPermissionRequest,
@@ -136,6 +138,76 @@ export type {
   UserToolPermission,
 } from "./common/permissions";
 
+// Compression
+export { compressContent, compressMessageHistory } from "./context/compact";
+export type { CompressOptions, CompressHistoryOptions, CompressableMessage } from "./context/compact";
+
 // State types
 export type { FileState, FileSnippet, FileLineEnding } from "./common/state";
 export type { FileReadMetadata } from "./common/file-utils";
+
+// Permission Profile（Codex 风格结构化权限）
+export {
+  STRICT_SANDBOX_PROFILE,
+  DEFAULT_DEV_PROFILE,
+  UNRESTRICTED_PROFILE,
+  legacyProfileFromScopes,
+  checkFileSystemAccess,
+  checkNetworkAccess,
+  checkGitAccess,
+  parsePermissionProfile,
+} from "./common/permission-profile";
+export type {
+  PermissionProfile,
+  FileSystemAccessLevel,
+  FileSystemPathKind,
+  FileSystemSandboxEntry,
+  NetworkPermissions,
+  GitPermissions,
+  ManagedPermissionConfig,
+} from "./common/permission-profile";
+
+// SQLite 会话日志
+export {
+  logAgentMessage,
+  logToolCall,
+  logPermissionDecision,
+  logTokenUsage,
+  saveCheckpoint,
+  queryRecentLogs,
+  queryLogsByJsonPath,
+  queryTokenStats,
+  queryPermissionHistory,
+  closeSession,
+  deleteSession,
+  closeAll,
+} from "./common/session-log";
+
+// Job 队列
+export {
+  JobQueue,
+  getGlobalJobQueue,
+  createSpawnRequest,
+} from "./common/job-queue";
+export type {
+  JobStatus,
+  SpawnRequest,
+  SpawnReady,
+  ExitPayload,
+  JobState,
+  JobEventCallbacks,
+} from "./common/job-queue";
+
+// Skill 解析器（Codex 兼容 frontmatter）
+export {
+  parseSkillFile,
+  parseSkillContent,
+  skillPolicyToProfile,
+  validateSkillName,
+} from "./common/skill-parser";
+export type {
+  SkillMeta,
+  SkillDependency,
+  SkillInterface,
+  SkillPolicy,
+} from "./common/skill-parser";
