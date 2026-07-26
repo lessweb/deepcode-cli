@@ -73,7 +73,7 @@ export type PromptSubmission = {
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
-  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit";
+  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "exit" | "cost" | "compact";
 };
 
 export type PromptDraft = {
@@ -733,6 +733,16 @@ export const PromptInput = React.memo(function PromptInput({
       onSubmit({ text: "/exit", imageUrls: [], command: "exit" });
       setBuffer(EMPTY_BUFFER);
       clearUndoRedoStacks();
+      return;
+    }
+    if (item.kind === "cost") {
+      onSubmit({ text: "/cost", imageUrls: [], command: "cost" });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "compact") {
+      onSubmit({ text: "/compact", imageUrls: [], command: "compact" });
+      resetPromptInput();
       return;
     }
   }

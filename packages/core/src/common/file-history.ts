@@ -149,6 +149,30 @@ export class GitFileHistory {
     }
   }
 
+  /**
+   * Branch a session's checkpoint history into a new session ID.
+   * Copies the git ref from the parent session to a new branch so the
+   * branched session inherits the parent's full checkpoint history.
+   */
+  branchSession(parentSessionId: string, newSessionId: string): string | undefined {
+    const parentRef = this.getSessionBranchRef(parentSessionId);
+    const newRef = this.getSessionBranchRef(newSessionId);
+    if (!parentRef || !newRef || !fs.existsSync(this.gitDir)) {
+      return undefined;
+    }
+
+    try {
+      const parentHash = this.runGit(["rev-parse", "--verify", `${parentRef}^{commit}`]).trim();
+      if (!isCommitHash(parentHash)) {
+        return undefined;
+      }
+      this.runGit(["update-ref", newRef, parentHash]);
+      return parentHash;
+    } catch {
+      return undefined;
+    }
+  }
+
   canRestore(sessionId: string, checkpointHash: string): boolean {
     if (!isCommitHash(checkpointHash)) {
       return false;

@@ -16,6 +16,7 @@ export {
   getProjectSettingsPath,
   DEFAULT_MODEL,
   DEFAULT_BASE_URL,
+  DEFAULT_PRICING,
 } from "./settings";
 export type {
   DeepcodingSettings,
@@ -29,6 +30,8 @@ export type {
   StatusLineSettings,
   ResolvedStatusLineSettings,
   StatusLineProviderConfig,
+  PricingConfig,
+  ResolvedPricingConfig,
 } from "./settings";
 
 // Session
@@ -136,3 +139,11 @@ export type {
 // State types
 export type { FileState, FileSnippet, FileLineEnding } from "./common/state";
 export type { FileReadMetadata } from "./common/file-utils";
+
+// Usage tracker
+export { UsageTracker, DEFAULT_MAX_CONTEXT_TOKENS } from "./common/usage-tracker";
+export type { UsageSummary, UsagePercentage, UsageSnapshot } from "./common/usage-tracker";
+
+// Cost calculator
+export { CostCalculator, computeCost, computeCostFromUsage } from "./common/cost-calculator";
+export type { CostBreakdown } from "./common/cost-calculator";

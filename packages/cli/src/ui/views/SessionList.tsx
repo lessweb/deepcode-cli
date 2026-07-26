@@ -5,7 +5,7 @@ import { truncate } from "../components/MessageView/utils";
 
 type Props = {
   sessions: SessionEntry[];
-  onSelect: (sessionId: string) => void;
+  onSelect: (sessionId: string, branch: boolean) => void;
   onCancel: () => void;
   onDelete?: (sessionId: string) => void;
   onRename?: (sessionId: string, newName: string) => void;
@@ -43,6 +43,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
   const [index, setIndex] = useState(0);
   const [searchQuery, setSearchQuery] = useState("");
   const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState<string | null>(null);
+  const [confirmBranchSessionId, setConfirmBranchSessionId] = useState<string | null>(null);
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameCursor, setRenameCursor] = useState(0);
@@ -146,6 +147,21 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
       return;
     }
 
+    // If in branch confirmation mode, handle y/n
+    if (confirmBranchSessionId) {
+      if (input === "y" || input === "Y") {
+        onSelect(confirmBranchSessionId, true);
+        setConfirmBranchSessionId(null);
+        return;
+      }
+      if (input === "n" || input === "N" || key.escape) {
+        onSelect(confirmBranchSessionId, false);
+        setConfirmBranchSessionId(null);
+        return;
+      }
+      return;
+    }
+
     // If in delete confirmation mode, handle confirm/cancel
     if (confirmDeleteSessionId) {
       if (key.return) {
@@ -244,7 +260,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
     if (key.return) {
       const session = filteredSessions[safeIndex];
       if (session) {
-        onSelect(session.id);
+        setConfirmBranchSessionId(session.id);
       }
     }
   });
@@ -311,6 +327,7 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
               const actualIndex = scrollOffset + i;
               const isSelected = actualIndex === safeIndex;
               const isConfirming = confirmDeleteSessionId === session.id;
+              const isBranchConfirming = confirmBranchSessionId === session.id;
               const isRenaming = renameSessionId === session.id;
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
@@ -332,6 +349,8 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
                       )}
                       {isConfirming ? (
                         <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
+                      ) : isBranchConfirming ? (
+                        <Text color="yellow"> [是否基于此会话创建新分支？(y/n)]</Text>
                       ) : isRenaming ? null : (
                         <Text dimColor> ({formatSessionStatus(session.status)})</Text>
                       )}
@@ -366,6 +385,18 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
                 Esc
               </Text>
               <Text dimColor> to cancel</Text>
+            </Box>
+          ) : confirmBranchSessionId ? (
+            <Box>
+              <Text color="yellow">是否基于此会话创建新分支？</Text>
+              <Text bold color="green">
+                y
+              </Text>
+              <Text dimColor> = 是（创建分支） · </Text>
+              <Text bold color="red">
+                n / Esc
+              </Text>
+              <Text dimColor> = 否（直接恢复）</Text>
             </Box>
           ) : confirmDeleteSessionId ? (
             <Box>

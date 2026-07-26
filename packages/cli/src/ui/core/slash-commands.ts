@@ -12,7 +12,9 @@ export type SlashCommandKind =
   | "undo"
   | "mcp"
   | "raw"
-  | "exit";
+  | "exit"
+  | "cost"
+  | "compact";
 
 export type SlashCommandItem = {
   kind: SlashCommandKind;
@@ -90,6 +92,18 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "exit",
     label: "/exit",
     description: "Quit Deep Code CLI",
+  },
+  {
+    kind: "cost",
+    name: "cost",
+    label: "/cost",
+    description: "Show token usage and cost for the current session",
+  },
+  {
+    kind: "compact",
+    name: "compact",
+    label: "/compact",
+    description: "Compress conversation history to free context space",
   },
 ];
 

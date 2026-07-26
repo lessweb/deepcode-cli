@@ -12,6 +12,23 @@ export type DeepcodingEnv = Record<string, string | undefined> & {
   REASONING_EFFORT?: string;
   DEBUG_LOG_ENABLED?: string;
   TELEMETRY_ENABLED?: string;
+  MAX_CONTEXT_TOKENS?: string;
+};
+
+/** Token pricing per 1M tokens, in USD. */
+export type PricingConfig = {
+  /** Price per 1M input tokens (cache miss). Default 0.14. */
+  inputPerMillion?: number;
+  /** Price per 1M input tokens (cache hit). Default 0.0028. */
+  inputCacheHitPerMillion?: number;
+  /** Price per 1M output tokens. Default 0.28. */
+  outputPerMillion?: number;
+};
+
+export type ResolvedPricingConfig = {
+  inputPerMillion: number;
+  inputCacheHitPerMillion: number;
+  outputPerMillion: number;
 };
 
 export type ReasoningEffort = "high" | "max";
@@ -94,6 +111,11 @@ export type DeepcodingSettings = {
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
   statusline?: StatusLineSettings;
+  hooks?: { enabled?: boolean };
+  /** Maximum context window size in tokens (default 1,000,000). */
+  maxContextTokens?: number;
+  /** Token pricing for cost calculation (default: DeepSeek V4 rates). */
+  pricing?: PricingConfig;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -112,6 +134,8 @@ export type ResolvedDeepcodingSettings = {
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
   statusline: ResolvedStatusLineSettings;
+  maxContextTokens: number;
+  pricing: ResolvedPricingConfig;
 };
 
 export type ModelConfigSelection = {
@@ -150,6 +174,57 @@ function parseTemperature(value: unknown): number | undefined {
     return undefined;
   }
   return raw;
+}
+
+function parseNumber(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+/** Default maximum context window size in tokens. */
+const DEFAULT_MAX_CONTEXT_TOKENS = 1_000_000;
+
+function parseMaxContextTokens(value: unknown): number {
+  const parsed = parseNumber(value);
+  if (parsed !== undefined && parsed > 0) {
+    return Math.floor(parsed);
+  }
+  return DEFAULT_MAX_CONTEXT_TOKENS;
+}
+
+/** Default DeepSeek V4 pricing per 1M tokens, in USD. */
+export const DEFAULT_PRICING: ResolvedPricingConfig = {
+  inputPerMillion: 0.14,
+  inputCacheHitPerMillion: 0.0028,
+  outputPerMillion: 0.28,
+};
+
+function resolvePricing(config: PricingConfig | null | undefined): ResolvedPricingConfig {
+  const inputPerMillion =
+    typeof config?.inputPerMillion === "number" &&
+    Number.isFinite(config.inputPerMillion) &&
+    config.inputPerMillion >= 0
+      ? config.inputPerMillion
+      : DEFAULT_PRICING.inputPerMillion;
+  const inputCacheHitPerMillion =
+    typeof config?.inputCacheHitPerMillion === "number" &&
+    Number.isFinite(config.inputCacheHitPerMillion) &&
+    config.inputCacheHitPerMillion >= 0
+      ? config.inputCacheHitPerMillion
+      : DEFAULT_PRICING.inputCacheHitPerMillion;
+  const outputPerMillion =
+    typeof config?.outputPerMillion === "number" &&
+    Number.isFinite(config.outputPerMillion) &&
+    config.outputPerMillion >= 0
+      ? config.outputPerMillion
+      : DEFAULT_PRICING.outputPerMillion;
+  return { inputPerMillion, inputCacheHitPerMillion, outputPerMillion };
 }
 
 function trimString(value: unknown): string {
@@ -531,6 +606,16 @@ export function resolveSettingsSources(
     trimString(userSettings?.webSearchTool) ||
     "";
 
+  const maxContextTokens = parseMaxContextTokens(
+    parseNumber(systemEnv.MAX_CONTEXT_TOKENS) ??
+      projectSettings?.maxContextTokens ??
+      projectEnv.MAX_CONTEXT_TOKENS ??
+      userSettings?.maxContextTokens ??
+      userEnv.MAX_CONTEXT_TOKENS
+  );
+
+  const pricing = resolvePricing(projectSettings?.pricing ?? userSettings?.pricing);
+
   return {
     env,
     apiKey: trimString(env.API_KEY) || undefined,
@@ -547,6 +632,8 @@ export function resolveSettingsSources(
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),
+    maxContextTokens,
+    pricing,
   };
 }
 

@@ -101,3 +101,45 @@ export function formatThinkingMode(
 export function formatModelConfig(settings: ModelConfigSelection): string {
   return `${settings.model}, ${formatThinkingMode(settings)}`;
 }
+
+export type CostReportData = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  inputCost: number;
+  outputCost: number;
+  totalCost: number;
+  maxContextTokens: number;
+};
+
+export function formatLargeNumber(n: number): string {
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(1)}M`;
+  }
+  if (n >= 1_000) {
+    return `${Math.round(n / 1000).toLocaleString("en-US")}k`;
+  }
+  return n.toLocaleString("en-US");
+}
+
+/** Build a formatted cost report string for the /cost command. */
+export function buildCostReport(data: CostReportData): string {
+  const usagePercent =
+    data.maxContextTokens > 0 ? `${((data.totalTokens / data.maxContextTokens) * 100).toFixed(2)}%` : "N/A";
+  const usageTokens =
+    data.maxContextTokens > 0
+      ? `${formatLargeNumber(data.totalTokens)}/${formatLargeNumber(data.maxContextTokens)}`
+      : formatLargeNumber(data.totalTokens);
+
+  return [
+    "📊 Session Cost",
+    "────────────────",
+    `Input tokens  : ${formatLargeNumber(data.promptTokens)}`,
+    `Output tokens : ${formatLargeNumber(data.completionTokens)}`,
+    `Total tokens  : ${formatLargeNumber(data.totalTokens)}`,
+    `Input cost    : $${data.inputCost.toFixed(4)}`,
+    `Output cost   : $${data.outputCost.toFixed(4)}`,
+    `Total cost    : $${data.totalCost.toFixed(4)}`,
+    `Context usage : ${usagePercent} (${usageTokens})`,
+  ].join("\n");
+}

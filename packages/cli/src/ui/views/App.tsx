@@ -6,6 +6,8 @@ import type { PermissionScope } from "@vegamo/deepcode-core";
 import { type ModelConfigSelection } from "@vegamo/deepcode-core";
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
+import { ContextBar } from "../components";
+import type { ContextUsage } from "../components";
 import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { buildLoadingText } from "../core/loading-text";
@@ -28,6 +30,7 @@ import {
   buildPromptDraftFromSessionMessage,
   buildStatusLine,
   buildSyntheticUserMessage,
+  buildCostReport,
   formatModelConfig,
   isCurrentSessionEmpty,
   renderRawModeMessages,
@@ -49,6 +52,8 @@ import type {
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
 import { getCompactPromptTokenThreshold } from "@vegamo/deepcode-core";
+import { CostCalculator } from "@vegamo/deepcode-core";
+import type { CostBreakdown } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
@@ -59,6 +64,7 @@ type AppProps = {
   projectRoot: string;
   initialPrompt?: string;
   resumeSessionId?: string | true;
+  branch?: boolean;
   onRestart?: () => void;
 };
 
@@ -95,7 +101,7 @@ const StatusLine = React.memo(function StatusLine({
   );
 });
 
-function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProps): React.ReactElement {
+function App({ projectRoot, initialPrompt, resumeSessionId, branch = false, onRestart }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
@@ -366,6 +372,14 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         navigateToSubView("mcp-status");
         return;
       }
+      if (submission.command === "cost") {
+        void handleCostCommand();
+        return;
+      }
+      if (submission.command === "compact") {
+        void handleCompactCommand();
+        return;
+      }
 
       const prompt: UserPromptContent = {
         text: submission.text,
@@ -428,6 +442,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         );
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       sessionManager,
       pendingPermissionReply,
@@ -502,6 +517,142 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     [projectRoot, sessionManager]
   );
 
+  /** Builds and displays the /cost report as a system message. */
+  const handleCostCommand = useCallback(() => {
+    const activeSessionId = sessionManager.getActiveSessionId();
+    const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+    const usage = session?.usage;
+    const settings = resolveCurrentSettings(projectRoot);
+    const maxContextTokens = settings.maxContextTokens ?? 1_000_000;
+
+    const promptTokens = usage && typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0;
+    const completionTokens = usage && typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0;
+    const totalTokens =
+      usage && typeof usage.total_tokens === "number" ? usage.total_tokens : promptTokens + completionTokens;
+
+    // Calculate cost from per-session usage
+    const calc = new CostCalculator(projectRoot, settings.pricing);
+    let cost: CostBreakdown | null = null;
+    if (activeSessionId) {
+      cost = calc.getSessionCost(activeSessionId);
+    }
+    if (!cost) {
+      // Compute cost directly from the usage object
+      cost = usage ? calc.calculateCostFromUsage(usage) : calc.calculateCost(0, 0, 0);
+    }
+
+    const report = buildCostReport({
+      promptTokens,
+      completionTokens,
+      totalTokens,
+      inputCost: cost.inputCost + cost.inputCacheHitCost,
+      outputCost: cost.outputCost,
+      totalCost: cost.totalCost,
+      maxContextTokens,
+    });
+
+    const meta: MessageMeta = { asThinking: true };
+    if (activeSessionId) {
+      sessionManager.addSessionSystemMessage(activeSessionId, report, true, meta);
+    } else {
+      const now = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sessionId: "local",
+          role: "system" as const,
+          content: report,
+          contentParams: null,
+          messageParams: null,
+          compacted: false,
+          visible: true,
+          createTime: now,
+          updateTime: now,
+          meta,
+        },
+      ]);
+    }
+  }, [projectRoot, sessionManager]);
+
+  /** Triggers conversation compaction via the session manager. */
+  const handleCompactCommand = useCallback(async () => {
+    const activeSessionId = sessionManager.getActiveSessionId();
+    if (!activeSessionId) {
+      setErrorLine("No active session to compact.");
+      return;
+    }
+
+    const session = sessionManager.getSession(activeSessionId);
+    if (!session) {
+      setErrorLine("Session not found.");
+      return;
+    }
+
+    const usageBefore = session.usage;
+    const tokensBefore = usageBefore && typeof usageBefore.total_tokens === "number" ? usageBefore.total_tokens : 0;
+
+    // Show "compacting..." message
+    const compactingMeta: MessageMeta = { asThinking: true };
+    const compactingContent = "Compacting conversation history...";
+
+    if (activeSessionId) {
+      sessionManager.addSessionSystemMessage(activeSessionId, compactingContent, true, compactingMeta);
+    } else {
+      const now = new Date().toISOString();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: crypto.randomUUID(),
+          sessionId: "local",
+          role: "system" as const,
+          content: compactingContent,
+          contentParams: null,
+          messageParams: null,
+          compacted: false,
+          visible: true,
+          createTime: now,
+          updateTime: now,
+          meta: compactingMeta,
+        },
+      ]);
+    }
+
+    try {
+      await sessionManager.compactSession(activeSessionId);
+
+      // Refresh session data
+      refreshSessionsList();
+      const updatedSession = sessionManager.getSession(activeSessionId);
+      const usageAfter = updatedSession?.usage;
+      const tokensAfter = usageAfter && typeof usageAfter.total_tokens === "number" ? usageAfter.total_tokens : 0;
+      const freed = Math.max(0, tokensBefore - tokensAfter);
+
+      const successContent = [
+        "✅ Context compacted.",
+        `Tokens before: ${tokensBefore.toLocaleString("en-US")}`,
+        `Tokens after : ${tokensAfter.toLocaleString("en-US")}`,
+        `Freed       : ${freed.toLocaleString("en-US")} tokens`,
+      ].join("\n");
+
+      const successMeta: MessageMeta = { asThinking: true };
+      if (activeSessionId) {
+        sessionManager.addSessionSystemMessage(activeSessionId, successContent, true, successMeta);
+      }
+      // Reload visible messages for the active session
+      setMessages(loadVisibleMessages(sessionManager, activeSessionId));
+      setShowWelcome(true);
+    } catch (error) {
+      const errMessage = error instanceof Error ? error.message : String(error);
+      setErrorLine(`Compact failed: ${errMessage}`);
+      const failContent = `❌ Compaction failed: ${errMessage}`;
+      const failMeta: MessageMeta = { asThinking: true };
+      if (activeSessionId) {
+        sessionManager.addSessionSystemMessage(activeSessionId, failContent, true, failMeta);
+      }
+    }
+  }, [sessionManager, refreshSessionsList]);
+
   const handleSubmit = useCallback(
     (submission: PromptSubmission) => {
       void handlePrompt(submission);
@@ -540,7 +691,17 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   );
 
   const handleSelectSession = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, branchMode: boolean) => {
+      if (branchMode) {
+        const newSessionId = sessionManager.createBranchSession(sessionId);
+        if (!newSessionId) {
+          setErrorLine("Failed to create branch session.");
+          navigateToSubView("chat");
+          setShowWelcome(true);
+          return;
+        }
+        sessionId = newSessionId;
+      }
       sessionManager.setActiveSessionId(sessionId);
       // Clear first so <Static> resets its index to 0.
       await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
@@ -555,8 +716,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         setPendingPermissionReply(null);
       }
       await refreshSkills(sessionId);
+      refreshSessionsList();
     },
-    [sessionManager, resetStaticView, pendingPermissionReply, refreshSkills]
+    [sessionManager, resetStaticView, pendingPermissionReply, refreshSkills, refreshSessionsList, navigateToSubView]
   );
 
   /**
@@ -579,7 +741,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           navigateToSubView("session-list");
           return;
         }
-        await handleSelectSession(resumeSessionId);
+        await handleSelectSession(resumeSessionId, branch);
       }
 
       // Step 2: Submit prompt if provided
@@ -594,7 +756,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     }
 
     void run();
-  }, [handleSubmit, handleSelectSession, initialPrompt, navigateToSubView, refreshSessionsList, resumeSessionId]);
+  }, [
+    handleSubmit,
+    handleSelectSession,
+    initialPrompt,
+    navigateToSubView,
+    refreshSessionsList,
+    resumeSessionId,
+    branch,
+  ]);
 
   const handleDeleteSession = useCallback(
     async (id: string): Promise<void> => {
@@ -672,7 +842,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           renderRawModeMessages(allMessages, nextMode);
         } else if (activeSessionId) {
           // Switch to chat view to render messages.
-          handleSelectSession(activeSessionId);
+          handleSelectSession(activeSessionId, false);
         } else {
           // No active session: just show the welcome screen once.
           setWelcomeNonce((n) => n + 1);
@@ -781,6 +951,25 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       toolUsage,
     };
   }, [sessionManager, projectRoot]);
+
+  const contextUsage = useMemo((): ContextUsage | null => {
+    const info = getSessionInfo();
+    if (!info || info.activeSessionId === null) {
+      return null;
+    }
+    if (info.maxContextTokens <= 0) {
+      return null;
+    }
+    const percentage = Math.min(100, Math.round((info.totalTokens / info.maxContextTokens) * 100));
+    return {
+      activeTokens: info.activeTokens,
+      totalTokens: info.totalTokens,
+      maxContextTokens: info.maxContextTokens,
+      percentage,
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [getSessionInfo, messages.length, activeStatus, statusLine]);
+
   const statusLineSegments = useStatusLine(resolvedSettings.statusline, projectRoot, getSessionInfo);
   const promptHistory = useMemo(() => {
     return messages
@@ -934,6 +1123,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         }}
       </Static>
       {(busy || statusLine) && !isExiting ? <StatusLine busy={busy} text={statusLine} /> : null}
+      <ContextBar usage={contextUsage} />
       {errorLine ? (
         <Box>
           <Text color="red">Error: {errorLine}</Text>
@@ -951,7 +1141,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       ) : view === "session-list" ? (
         <SessionList
           sessions={sessions}
-          onSelect={(id) => void handleSelectSession(id)}
+          onSelect={(id, branchMode) => void handleSelectSession(id, branchMode)}
           onCancel={() => setView("chat")}
           onDelete={(id) => {
             void handleDeleteSession(id);

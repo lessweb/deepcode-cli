@@ -1,5 +1,7 @@
 import type OpenAI from "openai";
 import type { ReasoningEffort } from "../settings";
+import type { TaskPlanManager } from "./task-plan-manager";
+import type { ContextManager } from "./context-manager";
 
 export type CreateOpenAIClient = () => {
   client: OpenAI | null;
@@ -30,6 +32,8 @@ export type ToolExecutionContext = {
   projectRoot: string;
   toolCall: ToolCall;
   createOpenAIClient?: CreateOpenAIClient;
+  taskPlanManager?: TaskPlanManager;
+  contextManager?: ContextManager;
   onProcessStart?: (processId: string | number, command: string) => void;
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;
