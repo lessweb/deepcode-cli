@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-agent",
+  "version": "1.0.0",
+  "description": "DeepCode Agent — Agent 消息类型系统 (代码 x 的 AgentMessage 类型)",
+  "author": "DeepCode + RE (codex.exe)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "agent.py"
+  ]
+}

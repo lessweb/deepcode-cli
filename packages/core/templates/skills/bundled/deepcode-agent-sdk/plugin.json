@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-agent-sdk",
+  "version": "1.0.0",
+  "description": "DeepCode Agent SDK — 让 DeepCode 作为 Agent 被外部程序调用 (HTTP/MCP/Embedded)",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "agent_sdk_server.py"
+  ]
+}

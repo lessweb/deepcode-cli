@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-auth",
+  "version": "1.0.0",
+  "description": "DeepCode Auth — 企业级 OAuth2/OIDC/API Key 认证模块",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "deepcode_auth.py"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-rust-re",
+  "version": "1.0.0",
+  "description": "DeepCode Rust RE — Rust 二进制逆向分析引擎 (扫描/特征识别/Ghidra集成/LLM重建)",
+  "author": "DeepCode",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "rust_re_analyzer.py"
+  ]
+}

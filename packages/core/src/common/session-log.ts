@@ -145,7 +145,7 @@ async function getDb(sessionId: string): Promise<DatabaseHandle> {
 /** 定期持久化 + 清理旧数据 */
 let saveInterval: ReturnType<typeof setInterval> | null = null;
 
-function startAutoSave(intervalMs = 30000): void {
+export function startAutoSave(intervalMs = 30000): void {
   if (saveInterval) return;
   saveInterval = setInterval(() => {
     for (const [sessionId, handle] of dbCache.entries()) {
@@ -390,5 +390,5 @@ process.on("exit", () => {
   }
 });
 
-// 启动自动保存
-startAutoSave();
+// 由顶层 consumer 按需启动（session.ts 或 cli 入口处调用 startAutoSave()）
+// 模块加载时不自动启动，避免阻止测试进程退出

@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-chrome",
+  "version": "1.0.0",
+  "description": "DeepCode Chrome Bridge — Chrome 浏览器集成 (导航/内容/Tab管理)",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": ["playwright"],
+  "modules": [
+    "chrome_bridge.py"
+  ]
+}

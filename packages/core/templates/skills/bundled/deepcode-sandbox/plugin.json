@@ -1,0 +1,11 @@
+{
+  "name": "deepcode-sandbox",
+  "version": "1.0.0",
+  "description": "DeepCode Sandbox Runtime — 安全执行代码/命令，隔离进程，限制文件系统和网络访问",
+  "author": "DeepCode + Ghidra RE (Claude Code v2.1.216)",
+  "entry": "SKILL.md",
+  "dependencies": [],
+  "modules": [
+    "sandbox_runtime.py"
+  ]
+}
