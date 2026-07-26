@@ -73,7 +73,7 @@ const MAX_PROJECT_CODE_LENGTH = 64;
 const PROJECT_CODE_HASH_LENGTH = 16;
 const BACKGROUND_FAILURE_LOG_TAIL_CHARS = 4000;
 const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
-const DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD = 512 * 1024;
+const DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD = 768 * 1024;
 const PLAN_MODE_ON_STATUS_MESSAGE = "  └ Set Plan Mode on. Awaiting <proposed_plan>.";
 const PLAN_MODE_OFF_STATUS_MESSAGE = "  └ Set Plan Mode off.";
 const PLAN_MODE_FORCE_ASK_SCOPES = [
@@ -268,6 +268,8 @@ export type SessionEntry = {
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
   taskPlan?: TaskPlan;
+  /** When this session was branched from another, the parent session ID. */
+  parentSessionId?: string | null;
 };
 
 export type SessionsIndex = {
@@ -1829,6 +1831,81 @@ ${agentInstructions}
   }
 
   /**
+   * Create a new session branched from an existing parent session.
+   * Copies the parent's message history and checkpoint (git branch) into a
+   * new session with a fresh ID, preserving the parent reference.
+   * Returns the new session ID, or null if the parent does not exist.
+   */
+  createBranchSession(parentSessionId: string): string | null {
+    const parentEntry = this.getSession(parentSessionId);
+    if (!parentEntry) {
+      return null;
+    }
+
+    const newSessionId = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    // 1. Copy the git branch (checkpoint history)
+    const fileHistory = this.getFileHistory();
+    const parentInitialized = fileHistory.ensureSession(parentSessionId);
+    if (parentInitialized) {
+      fileHistory.branchSession(parentSessionId, newSessionId);
+    }
+
+    // 2. Copy the message file
+    const parentMessagePath = this.getSessionMessagesPath(parentSessionId);
+    const newMessagePath = this.getSessionMessagesPath(newSessionId);
+    if (fs.existsSync(parentMessagePath)) {
+      this.ensureProjectDir();
+      fs.copyFileSync(parentMessagePath, newMessagePath);
+    }
+
+    // 3. Create a new session entry with parent reference
+    const branchSummary = `${parentEntry.summary ?? "Untitled"} (branched)`;
+    const index = this.loadSessionsIndex();
+    const entry: SessionEntry = {
+      id: newSessionId,
+      summary: branchSummary,
+      assistantReply: parentEntry.assistantReply,
+      assistantThinking: parentEntry.assistantThinking,
+      assistantRefusal: null,
+      toolCalls: null,
+      status: "completed",
+      failReason: null,
+      usage: parentEntry.usage,
+      usagePerModel: parentEntry.usagePerModel,
+      activeTokens: parentEntry.activeTokens,
+      createTime: now,
+      updateTime: now,
+      processes: null,
+      planMode: parentEntry.planMode,
+      parentSessionId,
+    };
+    index.entries.push(entry);
+    const sortedEntries = index.entries.slice().sort((a, b) => {
+      const aTime = Date.parse(a.updateTime);
+      const bTime = Date.parse(b.updateTime);
+      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
+        return b.updateTime.localeCompare(a.updateTime);
+      }
+      return bTime - aTime;
+    });
+    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
+    const keptIds = new Set(keptEntries.map((item) => item.id));
+    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
+    index.entries = keptEntries;
+    this.saveSessionsIndex(index);
+    for (const dropped of droppedEntries) {
+      this.cleanupSessionResources(dropped.id, {
+        removeMessages: true,
+        processIds: this.getProcessIds(dropped.processes ?? null),
+      });
+    }
+
+    return newSessionId;
+  }
+
+  /**
    * Rename a session by updating its summary (display title).
    * Returns true if the session was found and renamed, false otherwise.
    */
@@ -2883,6 +2960,7 @@ ${agentInstructions}
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
       planMode: value.planMode === true,
+      parentSessionId: typeof value.parentSessionId === "string" ? value.parentSessionId : null,
     };
   }
 

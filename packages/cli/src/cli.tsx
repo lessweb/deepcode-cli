@@ -30,6 +30,7 @@ async function main(): Promise<void> {
 
   let initialPrompt = parsed.prompt;
   let resumeSessionId = parsed.resume;
+  let branchMode = parsed.branch;
   const projectRoot = process.cwd();
 
   if (!process.stdin.isTTY) {
@@ -68,12 +69,15 @@ async function main(): Promise<void> {
     initialPrompt = undefined;
     const appResumeSessionId = resumeSessionId;
     resumeSessionId = undefined;
+    const appBranchMode = branchMode;
+    branchMode = false;
     const inkInstance = render(
       <AppContainer
         projectRoot={projectRoot}
         version={packageInfo?.version ?? CLI_VERSION}
         initialPrompt={appInitialPrompt}
         resumeSessionId={appResumeSessionId}
+        branch={appBranchMode}
         onRestart={() => restartRef.current?.()}
       />,
       { exitOnCtrlC: false }

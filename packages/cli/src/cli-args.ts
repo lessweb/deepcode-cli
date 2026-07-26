@@ -29,6 +29,8 @@ export interface ParsedCliArgs {
    *   - `string`     — --resume <sessionId> was used
    */
   resume: string | true | undefined;
+  /** When true, create a branch from the resumed session instead of resuming directly. */
+  branch: boolean;
   /** True when --version / -v was passed */
   version: boolean;
   /** True when --help / -h was passed */
@@ -88,6 +90,11 @@ async function configureYargs(argv?: string[]) {
           alias: "r",
           type: "string",
           describe: "Resume a specific session by its ID. Use without an ID to show session picker.",
+        })
+        .option("branch", {
+          alias: "b",
+          type: "boolean",
+          describe: "Create a new branch from the resumed session (used with --resume).",
         })
         .check((argv: { [x: string]: unknown }) => {
           const query = argv["query"] as string | string[] | undefined;
@@ -156,6 +163,7 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
   return {
     prompt: parsed.prompt as string | undefined,
     resume,
+    branch: parsed.branch === true,
     version: parsed.version === true,
     help: parsed.help === true,
   };

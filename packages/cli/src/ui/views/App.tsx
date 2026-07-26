@@ -64,6 +64,7 @@ type AppProps = {
   projectRoot: string;
   initialPrompt?: string;
   resumeSessionId?: string | true;
+  branch?: boolean;
   onRestart?: () => void;
 };
 
@@ -100,7 +101,7 @@ const StatusLine = React.memo(function StatusLine({
   );
 });
 
-function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProps): React.ReactElement {
+function App({ projectRoot, initialPrompt, resumeSessionId, branch = false, onRestart }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
@@ -690,7 +691,17 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
   );
 
   const handleSelectSession = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, branchMode: boolean) => {
+      if (branchMode) {
+        const newSessionId = sessionManager.createBranchSession(sessionId);
+        if (!newSessionId) {
+          setErrorLine("Failed to create branch session.");
+          navigateToSubView("chat");
+          setShowWelcome(true);
+          return;
+        }
+        sessionId = newSessionId;
+      }
       sessionManager.setActiveSessionId(sessionId);
       // Clear first so <Static> resets its index to 0.
       await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
@@ -705,8 +716,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         setPendingPermissionReply(null);
       }
       await refreshSkills(sessionId);
+      refreshSessionsList();
     },
-    [sessionManager, resetStaticView, pendingPermissionReply, refreshSkills]
+    [sessionManager, resetStaticView, pendingPermissionReply, refreshSkills, refreshSessionsList, navigateToSubView]
   );
 
   /**
@@ -729,7 +741,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           navigateToSubView("session-list");
           return;
         }
-        await handleSelectSession(resumeSessionId);
+        await handleSelectSession(resumeSessionId, branch);
       }
 
       // Step 2: Submit prompt if provided
@@ -744,7 +756,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     }
 
     void run();
-  }, [handleSubmit, handleSelectSession, initialPrompt, navigateToSubView, refreshSessionsList, resumeSessionId]);
+  }, [
+    handleSubmit,
+    handleSelectSession,
+    initialPrompt,
+    navigateToSubView,
+    refreshSessionsList,
+    resumeSessionId,
+    branch,
+  ]);
 
   const handleDeleteSession = useCallback(
     async (id: string): Promise<void> => {
@@ -822,7 +842,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           renderRawModeMessages(allMessages, nextMode);
         } else if (activeSessionId) {
           // Switch to chat view to render messages.
-          handleSelectSession(activeSessionId);
+          handleSelectSession(activeSessionId, false);
         } else {
           // No active session: just show the welcome screen once.
           setWelcomeNonce((n) => n + 1);
@@ -1121,7 +1141,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       ) : view === "session-list" ? (
         <SessionList
           sessions={sessions}
-          onSelect={(id) => void handleSelectSession(id)}
+          onSelect={(id, branchMode) => void handleSelectSession(id, branchMode)}
           onCancel={() => setView("chat")}
           onDelete={(id) => {
             void handleDeleteSession(id);

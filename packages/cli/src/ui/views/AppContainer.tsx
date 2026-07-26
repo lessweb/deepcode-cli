@@ -8,14 +8,16 @@ const AppContainer: React.FC<{
   version: string;
   initialPrompt: string | undefined;
   resumeSessionId: string | true | undefined;
+  branch?: boolean;
   onRestart: () => void;
-}> = ({ version, projectRoot, initialPrompt, resumeSessionId, onRestart }) => {
+}> = ({ version, projectRoot, initialPrompt, resumeSessionId, branch = false, onRestart }) => {
   return (
     <AppContext.Provider value={{ version: version }}>
       <RawModeProvider>
         <App
           initialPrompt={initialPrompt}
           resumeSessionId={resumeSessionId}
+          branch={branch}
           projectRoot={projectRoot}
           onRestart={onRestart}
         />
