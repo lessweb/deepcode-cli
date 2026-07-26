@@ -1,0 +1,125 @@
+{
+  "binary": "codex.exe",
+  "size_mb": 342.6,
+  "rust_check": {
+    "is_rust": true,
+    "details": {
+      "rust_begin_unwind": false,
+      "core::panic": true,
+      "std::rt": true,
+      "cargo": false
+    }
+  },
+  "crates": {
+    "tokio": 1,
+    "reqwest": 26,
+    "hyper": 15,
+    "serde": 3,
+    "axum": 4,
+    "tower": 3,
+    "tracing": 147
+  },
+  "features": {
+    "MCP": {
+      "count": 387,
+      "present": true
+    },
+    "Tools": {
+      "count": 719,
+      "present": true
+    },
+    "Hooks": {
+      "count": 151,
+      "present": true
+    },
+    "Agent": {
+      "count": 656,
+      "present": true
+    },
+    "Session": {
+      "count": 101,
+      "present": true
+    },
+    "Sandbox": {
+      "count": 1190,
+      "present": true
+    },
+    "Auth": {
+      "count": 1248,
+      "present": true
+    },
+    "Stream": {
+      "count": 95,
+      "present": true
+    },
+    "Plugin": {
+      "count": 27,
+      "present": true
+    },
+    "Storage": {
+      "count": 2054,
+      "present": true
+    },
+    "Network": {
+      "count": 328,
+      "present": true
+    },
+    "Shell": {
+      "count": 679911,
+      "present": true
+    }
+  },
+  "cargo_deps": [],
+  "segments": [
+    {
+      "name": ".text",
+      "vsize": 263956598,
+      "va": 4096
+    },
+    {
+      "name": ".rdata",
+      "vsize": 83187724,
+      "va": 263962624
+    },
+    {
+      "name": ".data",
+      "vsize": 609340,
+      "va": 347152384
+    },
+    {
+      "name": ".pdata",
+      "vsize": 11041908,
+      "va": 347762688
+    },
+    {
+      "name": ".eh_fram",
+      "vsize": 120,
+      "va": 358805504
+    },
+    {
+      "name": ".fptable",
+      "vsize": 256,
+      "va": 358809600
+    },
+    {
+      "name": ".tls",
+      "vsize": 2041,
+      "va": 358813696
+    },
+    {
+      "name": "_RDATA",
+      "vsize": 1092,
+      "va": 358817792
+    },
+    {
+      "name": "malloc_h",
+      "vsize": 416,
+      "va": 358821888
+    },
+    {
+      "name": ".reloc",
+      "vsize": 605920,
+      "va": 358825984
+    }
+  ]
+}

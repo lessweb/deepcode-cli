@@ -35,6 +35,7 @@ import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debu
 import { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
 import { killProcessTree } from "./common/process-tree";
 import { fireHook } from "./common/hooks";
+import { startAutoSave } from "./common/session-log";
 import { GitFileHistory, type FileHistoryCheckpointResult } from "./common/file-history";
 import { clearSessionState, getSnippet, rebuildSessionStateFromHistory } from "./common/state";
 import {
@@ -376,6 +377,8 @@ export class SessionManager {
     this.messageConverter = new OpenAIMessageConverter({
       renderInitPrompt: () => this.renderInitCommandPrompt(),
     });
+    // 启动 SQLite 自动保存（不会阻止进程退出）
+    startAutoSave();
   }
 
   /**
