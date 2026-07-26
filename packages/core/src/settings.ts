@@ -106,6 +106,7 @@ export type DeepcodingSettings = {
   rulesDir?: string;
   compressThreshold?: number;
   mcpServers?: Record<string, McpServerConfig>;
+  strictMcpConfig?: boolean;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
   statusline?: StatusLineSettings;
@@ -127,6 +128,7 @@ export type ResolvedDeepcodingSettings = {
   webSearchTool?: string;
   compressThreshold: number;
   mcpServers?: Record<string, McpServerConfig>;
+  strictMcpConfig: boolean;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
   statusline: ResolvedStatusLineSettings;
@@ -628,6 +630,7 @@ export function resolveSettingsSources(
     webSearchTool: webSearchTool || undefined,
     compressThreshold,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
+    strictMcpConfig: projectSettings?.strictMcpConfig ?? userSettings?.strictMcpConfig ?? false,
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),

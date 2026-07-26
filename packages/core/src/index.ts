@@ -104,7 +104,16 @@ export { normalizeFilePath, getSnippet, clearSessionState, recordFileState, getF
 export { GitFileHistory } from "./common/file-history";
 export { killProcessTree } from "./common/process-tree";
 export { launchNotifyScript } from "./common/notify";
-export { reportNewPrompt } from "./common/telemetry";
+export {
+  reportNewPrompt,
+  recordPermissionDecision,
+  recordToolUsage,
+  getSessionPermissionDecisions,
+  getSessionToolUsage,
+  resetSessionMetrics,
+  type PermissionDecisionMetrics,
+  type ToolUsageMetrics,
+} from "./common/telemetry";
 export { DEEPSEEK_V4_MODELS, supportsMultimodal, defaultsToThinkingMode } from "./common/model-capabilities";
 export { findGitBashPath, resolveShellPath, setShellIfWindows } from "./common/shell-utils";
 export { logApiError } from "./common/error-logger";

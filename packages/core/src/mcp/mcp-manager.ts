@@ -9,6 +9,13 @@ const MCP_CALL_TOOL_TIMEOUT_MS = 60_000;
 const API_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const API_TOOL_NAME_MAX_LENGTH = 64;
 
+// Upstream reference: --strict-mcp-config
+// When strict mode is enabled, only these commands are allowed for MCP servers.
+const MCP_STRICT_ALLOWLIST_COMMANDS = new Set([
+  "npx", "node", "python3", "python", "uvx", "uv",
+  "bun", "deno", "go", "java",
+]);
+
 type McpToolEntry = {
   serverName: string;
   originalName: string;
@@ -78,6 +85,12 @@ export class McpManager {
   private onToolsListChanged: (() => void) | null = null;
   private onStatusChanged: (() => void) | null = null;
   private serverConfigs: Record<string, McpServerConfig> = {};
+  /** Upstream reference: --strict-mcp-config flag */
+  private strictMode: boolean = false;
+
+  setStrictMode(enabled: boolean): void {
+    this.strictMode = enabled;
+  }
 
   prepare(servers?: Record<string, McpServerConfig>): void {
     if (!servers || Object.keys(servers).length === 0) return;
@@ -145,6 +158,22 @@ export class McpManager {
 
   private async connectServer(name: string, config: McpServerConfig): Promise<void> {
     if (this.disposed) return;
+
+    // Strict mode: validate command against allowlist
+    if (this.strictMode) {
+      const commandName = config.command.split(/[\\/]/).pop() ?? config.command;
+      if (!MCP_STRICT_ALLOWLIST_COMMANDS.has(commandName)) {
+        const msg = `Strict MCP config: command "${config.command}" is not in the allowlist. ` +
+          `Allowed commands: ${[...MCP_STRICT_ALLOWLIST_COMMANDS].join(", ")}. ` +
+          `Disable strictMcpConfig in settings.json to bypass.`;
+        this.setStatus({
+          name, status: "failed", connected: false, error: msg,
+          toolCount: 0, tools: [], promptCount: 0, prompts: [],
+          resourceCount: 0, resources: [],
+        });
+        return;
+      }
+    }
 
     // Clean up stale entries from previous connection attempts
     this.clients = this.clients.filter((c) => c.isConnected());

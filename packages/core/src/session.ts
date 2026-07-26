@@ -314,6 +314,7 @@ export type SessionManagerOptions = {
     compressThreshold?: number;
     hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
+    strictMcpConfig: boolean;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
   };
@@ -346,6 +347,7 @@ export class SessionManager {
     compressThreshold?: number;
     hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
+    strictMcpConfig: boolean;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
   };
@@ -410,6 +412,7 @@ export class SessionManager {
     this.nonInteractive = options.nonInteractive === true;
     this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
     this.mcpManager.prepare(this.getResolvedSettings().mcpServers);
+    this.mcpManager.setStrictMode(this.getResolvedSettings().strictMcpConfig);
     this.messageConverter = new OpenAIMessageConverter({
       renderInitPrompt: () => this.renderInitCommandPrompt(),
     });
