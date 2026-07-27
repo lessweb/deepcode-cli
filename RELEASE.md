@@ -197,6 +197,7 @@ VSCE_PAT=<token> npm run prepare:vscode -- <version> [options]
 | `<version>` | **必填**，要发布的 semver 版本号 |
 | `--dry-run` | 预演模式，不实际执行任何写操作 |
 | `--force` | 跳过 main 分支检查，允许从其他分支发布 |
+| `--pre-release` | 发布为预发布版本（如含 `-beta`/`-alpha` 会自动检测） |
 
 ### 执行流程（7 步）
 
@@ -204,7 +205,7 @@ VSCE_PAT=<token> npm run prepare:vscode -- <version> [options]
 |------|------|------|
 | 1 | Git 检查 | 工作区必须 clean，必须在 main 分支 |
 | 2 | VSCE_PAT 检查 | 环境变量必须已设置 |
-| 3 | 更新版本号 | 同时更新 `packages/core`、`packages/cli`、`packages/vscode-ide-companion` 的 version |
+| 3 | 更新版本号 | 更新 `packages/vscode-ide-companion` 的 version |
 | 4 | 质量检查 | `npm run check`（typecheck + eslint + prettier） |
 | 5 | 测试 | `npm run test --workspaces` |
 | 6 | 构建 | `npm run build:vscode`（core tsc + esbuild 打包扩展 + 拷贝模板 + vsce package） |

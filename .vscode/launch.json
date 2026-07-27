@@ -1,0 +1,16 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug VS Code Companion",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": ["--extensionDevelopmentPath=${workspaceFolder}/packages/vscode-ide-companion"],
+      "outFiles": ["${workspaceFolder}/packages/vscode-ide-companion/dist/**/*.js"],
+      "preLaunchTask": "Dev: Webview Server",
+      "env": {
+        "NODE_OPTIONS": "--no-warnings"
+      }
+    }
+  ]
+}

@@ -19,7 +19,7 @@ packages/
 │   ├── common/             # Update checker
 │   ├── utils/              # stdio helpers, version, package info
 │   ├── generated/          # Build-time git commit info
-│   ├── ui/views/           # Top-level screens (App, PromptInput, SessionList, PermissionPrompt, WelcomeScreen, UpdatePrompt, McpStatusList, etc.)
+│   ├── ui/views/           # Top-level screens (App, PromptInput, Conversations, PermissionPrompt, WelcomeScreen, UpdatePrompt, McpStatusList, etc.)
 │   ├── ui/components/      # Reusable Ink components (MessageView, DropdownMenu, ModelsDropdown, etc.)
 │   ├── ui/core/            # Prompt buffer, slash commands, file mentions, clipboard, undo/redo
 │   ├── ui/hooks/           # Custom hooks (cursor, history navigation, paste handling, terminal input, statusline)

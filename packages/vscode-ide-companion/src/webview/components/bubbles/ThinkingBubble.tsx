@@ -1,0 +1,35 @@
+import { useState } from "react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/webview/components/ui/collapsible";
+import BubbleDot from "@/webview/components/bubbles/BubbleDot";
+import { ChevronDown } from "lucide-react";
+import { Button } from "@/webview/components/ui/button";
+import Markdown from "@/webview/components/markdown";
+
+interface ThinkingBubbleProps {
+  content: string;
+  shouldConnect?: boolean;
+}
+
+export default function ThinkingBubble({ content, shouldConnect = false }: ThinkingBubbleProps) {
+  const [open, setOpen] = useState(true);
+
+  return (
+    <Collapsible open={open} onOpenChange={setOpen} className="relative flex w-full gap-2 rounded-md mb-3">
+      <BubbleDot className="mt-3.5" />
+      {shouldConnect && <div className="absolute left-0.75 h-full w-px bg-muted-foreground top-6"></div>}
+      <div className="flex-1 min-w-0 data-[state=open]:bg-muted">
+        <CollapsibleTrigger asChild>
+          <Button variant="ghost" className="group w-full">
+            <span className="font-medium">Thinking</span>
+            <ChevronDown className="ml-auto group-data-[state=open]:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+        <CollapsibleContent className="py-2 px-3 w-auto">
+          <div className="mt-2 peer-[data-state=open]:bg-muted">
+            <Markdown>{content}</Markdown>
+          </div>
+        </CollapsibleContent>
+      </div>
+    </Collapsible>
+  );
+}

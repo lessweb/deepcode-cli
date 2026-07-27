@@ -73,7 +73,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     apiKey: settings.apiKey,
     baseURL: settings.baseURL || undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: keepAliveAgent }),
+    fetch: ((url: any, init: any) =>
+      undiciFetch(url, { ...init, dispatcher: keepAliveAgent })) as unknown as typeof fetch,
   });
   cachedOpenAIKey = cacheKey;
 

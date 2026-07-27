@@ -243,6 +243,7 @@ export type SessionEntry = {
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
+  askUserQuestionSummary?: boolean;
 };
 
 export type SessionsIndex = {
@@ -294,6 +295,7 @@ export type UserPromptContent = {
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
+  askUserQuestionSummary?: boolean;
 };
 
 export type SkillInfo = {
@@ -1120,6 +1122,7 @@ ${agentInstructions}
       updateTime: now,
       processes: null,
       planMode: Boolean(userPrompt.planMode),
+      askUserQuestionSummary: Boolean(userPrompt.askUserQuestionSummary),
     };
     index.entries.push(entry);
     const sortedEntries = index.entries.slice().sort((a, b) => {
@@ -1204,6 +1207,7 @@ ${agentInstructions}
     const nextPlanMode = Boolean(userPrompt.planMode);
     const updated = this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
+      ...userPrompt,
       status: "pending",
       failReason: null,
       askPermissions: undefined,
@@ -2374,6 +2378,7 @@ ${agentInstructions}
       permissions: prompt.permissions ? prompt.permissions.map((permission) => ({ ...permission })) : undefined,
       alwaysAllows: prompt.alwaysAllows ? [...prompt.alwaysAllows] : undefined,
       planMode: prompt.planMode,
+      askUserQuestionSummary: prompt.askUserQuestionSummary,
     };
   }
 
@@ -2781,6 +2786,7 @@ ${agentInstructions}
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
       planMode: value.planMode === true,
+      askUserQuestionSummary: value.askUserQuestionSummary === true,
     };
   }
 
