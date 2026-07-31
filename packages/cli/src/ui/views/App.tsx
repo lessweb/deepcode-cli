@@ -133,6 +133,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
+  const [pendingPlanImplementation, setPendingPlanImplementation] = useState<string | null>(null);
 
   rawModeRef.current = mode;
   messagesRef.current = messages;
