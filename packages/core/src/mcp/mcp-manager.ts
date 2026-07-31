@@ -113,9 +113,16 @@ export class McpManager {
     this.serverConfigs = servers;
     this.prepare(servers);
 
-    for (const [name, config] of Object.entries(servers)) {
+    // ── 热启动优化: 并行连接所有 MCP 服务器 ──
+    // 分批并发 (每批 CONCURRENCY 个), 总耗时≈串行的 1/CONCURRENCY,
+    // 同时避免 21 个进程同时 spawn 造成内存峰值。
+    // Promise.allSettled 保证单批内个别服务器失败不阻塞其他。
+    const entries = Object.entries(servers);
+    const CONCURRENCY = 5;
+    for (let i = 0; i < entries.length; i += CONCURRENCY) {
       if (this.disposed) break;
-      await this.connectServer(name, config);
+      const batch = entries.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(([name, config]) => this.connectServer(name, config)));
     }
   }
 

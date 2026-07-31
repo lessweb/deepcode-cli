@@ -80,6 +80,14 @@ export type ResolvedStatusLineSettings = {
   providers: StatusLineProviderConfig[];
 };
 
+export type HooksConfig = {
+  beforeWrite?: string;
+  afterWrite?: string;
+  beforeCommand?: string;
+  afterCommand?: string;
+  onError?: string;
+};
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   contextWindow?: number | string;
@@ -92,6 +100,7 @@ export type DeepcodingSettings = {
   telemetryEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  hooks?: HooksConfig;
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
@@ -112,6 +121,7 @@ export type ResolvedDeepcodingSettings = {
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  hooks?: HooksConfig;
   mcpServers?: Record<string, McpServerConfig>;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
@@ -599,6 +609,7 @@ export function resolveSettingsSources(
     telemetryEnabled,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
+    hooks: projectSettings?.hooks ?? userSettings?.hooks,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
