@@ -120,6 +120,7 @@ Type `/` in the input box to open the command menu.
 | ------- | ------ |
 | `/new` | Start a new conversation |
 | `/resume` | Choose a previous conversation to continue |
+| `/fork` | Fork the current conversation |
 | `/continue` | Continue the current conversation or resume the latest one |
 | `/model` | Switch model, thinking mode, and reasoning effort |
 | `/init` | Create an `AGENTS.md` instruction file for the current project |

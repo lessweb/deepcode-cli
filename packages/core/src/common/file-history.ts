@@ -69,6 +69,24 @@ export class GitFileHistory {
     }
   }
 
+  forkSession(sourceSessionId: string, targetSessionId: string): string | undefined {
+    const targetRef = this.getSessionBranchRef(targetSessionId);
+    if (!targetRef) {
+      return undefined;
+    }
+
+    try {
+      const sourceHash = this.getCurrentCheckpointHash(sourceSessionId);
+      if (!sourceHash) {
+        return this.ensureSession(targetSessionId);
+      }
+      this.runGit(["update-ref", targetRef, sourceHash]);
+      return sourceHash;
+    } catch {
+      return undefined;
+    }
+  }
+
   recordCheckpoint(sessionId: string, filePaths: string[], message: string): string | undefined {
     const branchRef = this.getSessionBranchRef(sessionId);
     if (!branchRef) {

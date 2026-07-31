@@ -31,6 +31,8 @@ export interface ParsedCliArgs {
    *   - `string`     — --resume <sessionId> was used
    */
   resume: string | true | undefined;
+  /** Fork source session. Bare --fork selects the most recent project session. */
+  fork: string | true | undefined;
   /** True when --version / -v was passed */
   version: boolean;
   /** True when --help / -h was passed */
@@ -65,6 +67,7 @@ const EPILOG = [
   "  /new             Start a fresh conversation",
   "  /init            Initialize an AGENTS.md file with instructions for LLM",
   "  /resume          Pick a previous conversation to continue",
+  "  /fork            Fork the current conversation",
   "  /continue        Continue the active conversation, or resume one if empty",
   "  /undo            Restore code and/or conversation to a previous point",
   "  /mcp             Show MCP server status and available tools",
@@ -97,6 +100,11 @@ async function configureYargs(argv?: string[]) {
           type: "string",
           describe: "Resume a specific session by its ID. Use without an ID to show session picker.",
         })
+        .option("fork", {
+          alias: "f",
+          type: "string",
+          describe: "Fork a specific session by its ID. Use without an ID to fork the most recent session.",
+        })
         .option("last", {
           alias: "l",
           type: "boolean",
@@ -120,9 +128,18 @@ async function configureYargs(argv?: string[]) {
           if (argv["last"] === true && argv["resume"] !== undefined) {
             return "Cannot use --last together with --resume. Use --last to resume the most recent session, or --resume <sessionId> for a specific session.";
           }
+          if (argv["fork"] !== undefined && argv["resume"] !== undefined) {
+            return "Cannot use --fork together with --resume.";
+          }
+          if (argv["last"] === true && argv["fork"] !== undefined) {
+            return "Cannot use --last together with --fork.";
+          }
           // validate --resume <sessionId> format if provided
           if (argv["resume"] && argv["resume"] !== "" && !isValidSessionId(argv["resume"] as string)) {
             return `Invalid session ID: "${argv["resume"]}". Must be a valid UUID (e.g., "123e4567-e89b-12d3-a456-426614174000").`;
+          }
+          if (argv["fork"] && argv["fork"] !== "" && !isValidSessionId(argv["fork"] as string)) {
+            return `Invalid session ID: "${argv["fork"]}". Must be a valid UUID (e.g., "123e4567-e89b-12d3-a456-426614174000").`;
           }
           // empty prompt is meaningless
           if (prompt !== undefined && prompt.trim() === "") {
@@ -141,6 +158,7 @@ async function configureYargs(argv?: string[]) {
     .example("deepcode -p <prompt>", "Launch the TUI and submit a prompt")
     .example("deepcode -x -p <prompt>", "Run one prompt without launching the TUI")
     .example("deepcode -r, --resume [sessionId]", "Resume a session or show session picker")
+    .example("deepcode -f, --fork [sessionId]", "Fork a session or the most recent session")
     .example('cat error.log | deepcode -x -p "Explain this error"', "Use piped stdin as additional context")
     .epilog(EPILOG)
     .strict()
@@ -181,10 +199,21 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
     resume = resumeRaw;
   }
 
+  const forkRaw = parsed.fork as string | undefined;
+  let fork: ParsedCliArgs["fork"];
+  if (forkRaw === undefined) {
+    fork = undefined;
+  } else if (forkRaw === "") {
+    fork = true;
+  } else {
+    fork = forkRaw;
+  }
+
   return {
     prompt: parsed.prompt as string | undefined,
     exec: parsed.exec === true,
     resume,
+    fork,
     version: parsed.version === true,
     help: parsed.help === true,
     last: parsed.last === true,

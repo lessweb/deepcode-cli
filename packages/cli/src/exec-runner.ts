@@ -15,6 +15,7 @@ type ExecSessionManager = Pick<
   | "dispose"
   | "getActiveSessionId"
   | "getSession"
+  | "forkSession"
   | "handleUserPrompt"
   | "initMcpServers"
   | "interruptActiveSession"
@@ -30,6 +31,7 @@ export interface ExecRunnerOptions {
   prompt: string;
   projectRoot: string;
   resumeSessionId?: string;
+  forkSessionId?: string;
   input?: ExecInputStream;
 }
 
@@ -88,13 +90,21 @@ export async function runExecMode(
         return 1;
       }
     }
+    if (options.forkSessionId) {
+      if (!manager.getSession(options.forkSessionId)) {
+        deps.writeStderrLine(`No saved session found with ID "${options.forkSessionId}".`);
+        return 1;
+      }
+    }
 
     const prompt = await deps.buildPrompt(options.prompt, options.input ?? process.stdin);
     if (interrupted) {
       return 130;
     }
 
-    if (options.resumeSessionId) {
+    if (options.forkSessionId) {
+      manager.setActiveSessionId(manager.forkSession(options.forkSessionId));
+    } else if (options.resumeSessionId) {
       manager.setActiveSessionId(options.resumeSessionId);
     }
 
