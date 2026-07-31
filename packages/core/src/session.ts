@@ -365,9 +365,7 @@ export class SessionManager {
   private isPlanMode = false;
 
   /** Mutating tool names that are denied in Plan mode. */
-  private static readonly MUTATING_TOOLS = new Set([
-    'Write', 'write', 'Edit', 'edit',
-  ]);
+  private static readonly MUTATING_TOOLS = new Set(["Write", "write", "Edit", "edit"]);
 
   /**
    * Toggle Plan mode on/off.
@@ -381,9 +379,9 @@ export class SessionManager {
    * Check if a tool call is mutating (write/edit).
    */
   private isMutatingToolCall(tc: unknown): boolean {
-    if (!tc || typeof tc !== 'object') return false;
-    const func = (tc as any).function;
-    if (!func || typeof func.name !== 'string') return false;
+    if (!tc || typeof tc !== "object") return false;
+    const func = (tc as { function?: { name?: unknown } }).function;
+    if (!func || typeof func.name !== "string") return false;
     return SessionManager.MUTATING_TOOLS.has(func.name);
   }
 
@@ -391,7 +389,7 @@ export class SessionManager {
    * Filter tool calls to return only the mutating ones (for the deny message).
    */
   private filterPlanModeToolCalls(toolCalls: unknown[]): unknown[] {
-    return toolCalls.filter(tc => this.isMutatingToolCall(tc));
+    return toolCalls.filter((tc) => this.isMutatingToolCall(tc));
   }
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
@@ -462,11 +460,7 @@ export class SessionManager {
     if (!fileHistory) return undefined;
     const changedPaths = this.getSessionTrackedPaths(sessionId);
     if (changedPaths.length === 0) return undefined;
-    return fileHistory.recordCheckpoint(
-      sessionId,
-      changedPaths,
-      message ?? `Snapshot at ${new Date().toISOString()}`
-    );
+    return fileHistory.recordCheckpoint(sessionId, changedPaths, message ?? `Snapshot at ${new Date().toISOString()}`);
   }
 
   /**
@@ -498,7 +492,7 @@ export class SessionManager {
 
   private getSessionTrackedPaths(sessionId: string): string[] {
     const index = this.loadSessionsIndex();
-    const entry = index.entries.find(e => e.id === sessionId);
+    const entry = index.entries.find((e) => e.id === sessionId);
     if (!entry) return [];
     // Track paths from tool calls that modified files
     return [];
@@ -1549,7 +1543,7 @@ ${agentInstructions}
             permissions: permissionPlan.permissions,
           };
           // 异步写入 SQLite 审计日志
-          const parsedToolCalls = (toolCalls!)
+          const parsedToolCalls = toolCalls!
             .map((tc: unknown) => parseToolCallForPermissions(tc))
             .filter(Boolean) as PermissionToolCall[];
           auditPermissionPlan(sessionId, permissionPlan, parsedToolCalls);
@@ -1595,18 +1589,24 @@ ${agentInstructions}
             const planModeToolCalls = this.filterPlanModeToolCalls(toolCalls);
             if (planModeToolCalls.length > 0) {
               const blockedNames = planModeToolCalls
-                .map(t => typeof t === 'object' && t && typeof (t as any).function?.name === 'string'
-                  ? (t as any).function.name : 'unknown')
-                .join(', ');
-              const denyMsg = this.buildSystemMessage(sessionId,
+                .map((t) =>
+                  typeof t === "object" &&
+                  t &&
+                  typeof (t as { function?: { name?: unknown } }).function?.name === "string"
+                    ? (t as { function?: { name?: unknown } }).function!.name
+                    : "unknown"
+                )
+                .join(", ");
+              const denyMsg = this.buildSystemMessage(
+                sessionId,
                 `[Plan Mode] Tool(s) \`${blockedNames}\` are not allowed in Plan mode. ` +
-                'Plan mode is read-only: you can use read, glob, grep, list, bash (non-mutating), ' +
-                'WebSearch, AskUserQuestion. Switch to Build mode to make changes.'
+                  "Plan mode is read-only: you can use read, glob, grep, list, bash (non-mutating), " +
+                  "WebSearch, AskUserQuestion. Switch to Build mode to make changes."
               );
               this.appendSessionMessage(sessionId, denyMsg);
             }
             // Keep only non-mutating tool calls
-            toolCalls = toolCalls.filter(tc => !this.isMutatingToolCall(tc));
+            toolCalls = toolCalls.filter((tc) => !this.isMutatingToolCall(tc));
             if (toolCalls.length === 0) {
               continue; // Re-prompt LLM without mutating tools
             }
@@ -1614,11 +1614,7 @@ ${agentInstructions}
 
           // Doom loop detection (OpenCode-inspired): detect repeated identical tool calls
           if (!lastToolExecutionHadFailures && toolCalls) {
-            const doomLoopError = this.toolExecutor.checkDoomLoop(
-              sessionId,
-              toolCalls,
-              iteration
-            );
+            const doomLoopError = this.toolExecutor.checkDoomLoop(sessionId, toolCalls, iteration);
             if (doomLoopError) {
               const doomMsg = this.buildSystemMessage(sessionId, doomLoopError);
               this.appendSessionMessage(sessionId, doomMsg);
@@ -2267,9 +2263,7 @@ ${agentInstructions}
   private saveSessionMessages(sessionId: string, messages: SessionMessage[]): void {
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
-    const payload = messages
-      .map((message) => JSON.stringify(this.compressMessageContent(message)))
-      .join("\n");
+    const payload = messages.map((message) => JSON.stringify(this.compressMessageContent(message))).join("\n");
     fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
   }
 
@@ -2289,10 +2283,7 @@ ${agentInstructions}
     const suffix = `\n\n... (truncated, original ${content.length} chars)`;
     const maxLength = threshold;
     const available = maxLength - suffix.length;
-    const truncated =
-      available <= 0
-        ? content.slice(0, maxLength)
-        : content.slice(0, available) + suffix;
+    const truncated = available <= 0 ? content.slice(0, maxLength) : content.slice(0, available) + suffix;
     return { ...message, content: truncated };
   }
 

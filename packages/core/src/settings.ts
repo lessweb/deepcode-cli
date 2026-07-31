@@ -610,9 +610,7 @@ export function resolveSettingsSources(
     "";
 
   const compressThreshold =
-    parseNumber(projectSettings?.compressThreshold) ??
-    parseNumber(userSettings?.compressThreshold) ??
-    10_000;
+    parseNumber(projectSettings?.compressThreshold) ?? parseNumber(userSettings?.compressThreshold) ?? 10_000;
 
   return {
     env,

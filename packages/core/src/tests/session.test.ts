@@ -70,7 +70,7 @@ test("SessionManager preserves structured system content when building OpenAI me
       model: "test-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -119,7 +119,7 @@ test("non-interactive SessionManager removes AskUserQuestion docs from restored 
       model: "test-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
     nonInteractive: true,
@@ -165,7 +165,7 @@ test("SessionManager appends failed background log tail as XML", () => {
       model: "test-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: (message) => {
       systemMessage = message;
@@ -202,7 +202,7 @@ test("SessionManager filters image content for non-multimodal models", () => {
       model: "deepseek-chat",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "deepseek-chat" }),
+    getResolvedSettings: () => ({ model: "deepseek-chat", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -244,7 +244,7 @@ test("SessionManager preserves empty reasoning content on assistant tool calls",
       model: "test-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -288,7 +288,7 @@ test("SessionManager repairs legacy thinking tool calls missing reasoning conten
       model: "test-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -335,7 +335,7 @@ test("SessionManager replays normal assistant messages with reasoning content in
       model: "test-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -667,6 +667,7 @@ test("SessionManager excludes disabled skills by resolved skill name", async () 
     }),
     getResolvedSettings: () => ({
       model: "test-model",
+      strictMcpConfig: false,
       enabledSkills: {
         "skill-writer": false,
         "renamed-disabled": false,
@@ -1030,6 +1031,7 @@ test("SessionManager reports configured MCP servers as starting before initializ
     }),
     getResolvedSettings: () => ({
       model: "test-model",
+      strictMcpConfig: false,
       mcpServers: {
         playwright: { command: "npx", args: ["@playwright/mcp@latest"] },
       },
@@ -1197,6 +1199,7 @@ test("createSession skips disabled default skills", async () => {
     }),
     getResolvedSettings: () => ({
       model: "test-model",
+      strictMcpConfig: false,
       enabledSkills: { "karpathy-guidelines": false },
     }),
     renderMarkdown: (text) => text,
@@ -3149,7 +3152,7 @@ test("SessionManager stores usage per model across model changes", async () => {
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: currentModel }),
+    getResolvedSettings: () => ({ model: currentModel, strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -3276,7 +3279,7 @@ test("SessionManager streams chat completions and counts reasoning progress", as
       temperature: 0.25,
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
     onLlmStreamProgress: (progress) => {
@@ -3369,7 +3372,7 @@ test("SessionManager treats OpenAI APIUserAbortError as interrupted", async () =
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
     onSessionEntryUpdated: (entry) => {
@@ -3676,7 +3679,7 @@ function createSessionManager(projectRoot: string, machineId: string): SessionMa
       thinkingEnabled: false,
       machineId,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -3726,7 +3729,7 @@ function createNotifyingSessionManager(
         TITLE: "stale-title",
       },
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -3760,7 +3763,7 @@ function createMockedClientSessionManager(
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model", autoCompactWindow }),
+    getResolvedSettings: () => ({ model: "test-model", autoCompactWindow, strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -3799,7 +3802,7 @@ function createPermissionSessionManager(
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model", permissions }),
+    getResolvedSettings: () => ({ model: "test-model", permissions, strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -3814,7 +3817,7 @@ function createMockedClientSessionManagerWithClient(projectRoot: string, client:
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", strictMcpConfig: false }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });

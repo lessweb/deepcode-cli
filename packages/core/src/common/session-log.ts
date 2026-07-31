@@ -1,7 +1,7 @@
 /**
  * SQLite 会话日志模块
  * 借鉴 OpenAI Codex CLI 的 SQLite 结构化持久化设计
- * 
+ *
  * 用 SQLite 替代文件系统散乱存储，支持：
  * - 结构化 JSON 日志查询（json_extract）
  * - Token 预算审计
@@ -14,7 +14,7 @@ import * as fs from "fs";
 import * as os from "os";
 
 // sql.js 是纯 WASM 实现，无需本地编译
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+
 type SqlJsModule = { Database: new (data?: ArrayLike<number> | Buffer | null) => import("sql.js").Database };
 let SQL: SqlJsModule | null = null;
 
@@ -94,7 +94,6 @@ function getDbPath(sessionId: string): string {
 
 async function ensureSqlJs(): Promise<void> {
   if (!SQL) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const sqlJsModule = await import("sql.js");
     const initSqlJs = sqlJsModule.default;
     SQL = (await initSqlJs()) as unknown as SqlJsModule;
@@ -152,9 +151,7 @@ export function startAutoSave(intervalMs = 30000): void {
       try {
         handle.save();
         // 清理 7 天前的日志
-        handle.db.run(
-          "DELETE FROM session_logs WHERE created_at < datetime('now', '-7 days')"
-        );
+        handle.db.run("DELETE FROM session_logs WHERE created_at < datetime('now', '-7 days')");
       } catch (err) {
         console.error(`[session-log] Auto-save failed for ${sessionId}:`, err);
       }
@@ -165,27 +162,21 @@ export function startAutoSave(intervalMs = 30000): void {
 // ─── 日志写入 ─────────────────────────────────────────────
 
 /** 写入一条 agent 消息日志 */
-export async function logAgentMessage(
-  sessionId: string,
-  message: Record<string, unknown>
-): Promise<void> {
+export async function logAgentMessage(sessionId: string, message: Record<string, unknown>): Promise<void> {
   const handle = await getDb(sessionId);
-  handle.db.run(
-    "INSERT INTO session_logs (session_id, type, item_json) VALUES (?, 'agentMessage', ?)",
-    [sessionId, JSON.stringify(message)]
-  );
+  handle.db.run("INSERT INTO session_logs (session_id, type, item_json) VALUES (?, 'agentMessage', ?)", [
+    sessionId,
+    JSON.stringify(message),
+  ]);
 }
 
 /** 写入一条 tool call 日志 */
-export async function logToolCall(
-  sessionId: string,
-  toolCall: Record<string, unknown>
-): Promise<void> {
+export async function logToolCall(sessionId: string, toolCall: Record<string, unknown>): Promise<void> {
   const handle = await getDb(sessionId);
-  handle.db.run(
-    "INSERT INTO session_logs (session_id, type, item_json) VALUES (?, 'toolCall', ?)",
-    [sessionId, JSON.stringify(toolCall)]
-  );
+  handle.db.run("INSERT INTO session_logs (session_id, type, item_json) VALUES (?, 'toolCall', ?)", [
+    sessionId,
+    JSON.stringify(toolCall),
+  ]);
 }
 
 /** 写入权限审批记录 */
@@ -227,10 +218,11 @@ export async function saveCheckpoint(
   label?: string
 ): Promise<number> {
   const handle = await getDb(sessionId);
-  handle.db.run(
-    "INSERT INTO checkpoints (session_id, label, snapshot_json) VALUES (?, ?, ?)",
-    [sessionId, label ?? null, JSON.stringify(snapshot)]
-  );
+  handle.db.run("INSERT INTO checkpoints (session_id, label, snapshot_json) VALUES (?, ?, ?)", [
+    sessionId,
+    label ?? null,
+    JSON.stringify(snapshot),
+  ]);
   return (handle.db.exec("SELECT last_insert_rowid()")[0]?.values[0]?.[0] as number) ?? 0;
 }
 
@@ -316,13 +308,15 @@ export async function queryTokenStats(
 export async function queryPermissionHistory(
   sessionId: string,
   limit = 100
-): Promise<Array<{
-  id: number;
-  created_at: string;
-  tool_name: string;
-  scopes: string[];
-  decision: string;
-}>> {
+): Promise<
+  Array<{
+    id: number;
+    created_at: string;
+    tool_name: string;
+    scopes: string[];
+    decision: string;
+  }>
+> {
   const handle = await getDb(sessionId);
   const results = handle.db.exec(
     `SELECT id, created_at, tool_name, scopes, decision
@@ -360,8 +354,16 @@ export async function deleteSession(sessionId: string): Promise<void> {
   try {
     fs.unlinkSync(dbPath);
     // 删除 WAL/SHM 文件
-    try { fs.unlinkSync(dbPath + "-wal"); } catch { /* ok */ }
-    try { fs.unlinkSync(dbPath + "-shm"); } catch { /* ok */ }
+    try {
+      fs.unlinkSync(dbPath + "-wal");
+    } catch {
+      /* ok */
+    }
+    try {
+      fs.unlinkSync(dbPath + "-shm");
+    } catch {
+      /* ok */
+    }
   } catch {
     // 文件不存在就忽略
   }

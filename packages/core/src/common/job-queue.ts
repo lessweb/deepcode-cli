@@ -1,7 +1,7 @@
 /**
  * Job 队列模块
  * 借鉴 OpenAI Codex CLI 的 SpawnRequest→SpawnReady→ExitPayload 三阶段协议
- * 
+ *
  * 核心功能：
  * - Job 生命周期管理（pending → running → completed | failed | timed_out）
  * - 指数退避重试
@@ -128,7 +128,11 @@ export class JobQueue {
 
     const child = this.activeJobs.get(jobId);
     if (child && !child.killed) {
-      try { child.kill("SIGKILL"); } catch { /* ok */ }
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        /* ok */
+      }
     }
     this.activeJobs.delete(jobId);
     this.pendingQueue = this.pendingQueue.filter((id) => id !== jobId);
@@ -164,7 +168,7 @@ export class JobQueue {
             stdout: "",
             stderr: "",
             timedOut: false,
-            durationMs: Date.now() - (current.createdAt),
+            durationMs: Date.now() - current.createdAt,
             attempts: current.attempt,
           });
         }
@@ -187,7 +191,8 @@ export class JobQueue {
     for (const [id, state] of this.jobs) {
       if (state.status === "completed" || state.status === "cancelled") {
         const age = Date.now() - (state.completedAt ?? state.createdAt);
-        if (age > 5 * 60 * 1000) { // 5 分钟
+        if (age > 5 * 60 * 1000) {
+          // 5 分钟
           this.jobs.delete(id);
         }
       }
@@ -247,7 +252,11 @@ export class JobQueue {
     const timeoutTimer = setTimeout(() => {
       timedOut = true;
       if (!child.killed) {
-        try { child.kill("SIGKILL"); } catch { /* ok */ }
+        try {
+          child.kill("SIGKILL");
+        } catch {
+          /* ok */
+        }
       }
     }, req.timeoutMs);
 
@@ -269,9 +278,7 @@ export class JobQueue {
 
       // 判断是否需要重试
       const shouldRetry =
-        (exitCode !== 0 || timedOut || signal) &&
-        state.attempt < state.maxAttempts &&
-        state.status !== "cancelled";
+        (exitCode !== 0 || timedOut || signal) && state.attempt < state.maxAttempts && state.status !== "cancelled";
 
       if (shouldRetry) {
         // 计算指数退避延迟
@@ -279,9 +286,7 @@ export class JobQueue {
           req.retryDelayMs * Math.pow(2, state.attempt - 1),
           30000 // 最大 30s
         );
-        const errorMsg = timedOut
-          ? `Timed out after ${req.timeoutMs}ms`
-          : `Exit code ${exitCode}, signal ${signal}`;
+        const errorMsg = timedOut ? `Timed out after ${req.timeoutMs}ms` : `Exit code ${exitCode}, signal ${signal}`;
         state.error = errorMsg;
         callbacks?.onRetry?.(jobId, state.attempt, errorMsg, delayMs);
 
@@ -343,10 +348,7 @@ export function getGlobalJobQueue(maxConcurrency = 5): JobQueue {
 }
 
 /** 创建默认 SpawnRequest */
-export function createSpawnRequest(
-  command: string,
-  options?: Partial<SpawnRequest>
-): SpawnRequest {
+export function createSpawnRequest(command: string, options?: Partial<SpawnRequest>): SpawnRequest {
   return {
     command,
     args: options?.args ?? [],

@@ -1,7 +1,7 @@
 /**
  * 增强版 SKILL.md 解析器
  * 借鉴 OpenAI Codex CLI 的 Skill frontmatter 格式
- * 
+ *
  * 支持完整的 Codex 兼容 frontmatter：
  * - name, description 基础字段
  * - agent.dependencies 依赖声明
@@ -74,20 +74,18 @@ export interface SkillMeta {
 // ─── 解析器 ───────────────────────────────────────────────
 
 const MAX_SKILL_NAME_LENGTH = 64;
-const ALLOWED_FRONTMATTER_KEYS = new Set([
-  "name", "description", "agent", "disable-model-invocation",
-  "metadata",
-]);
+const ALLOWED_FRONTMATTER_KEYS = new Set(["name", "description", "agent", "disable-model-invocation", "metadata"]);
 
 // 这些常量保留供后续验证扩展用
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-const ALLOWED_AGENT_KEYS = new Set([
-  "dependencies", "interface", "policy",
-]);
+const ALLOWED_AGENT_KEYS = new Set(["dependencies", "interface", "policy"]);
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const ALLOWED_INTERFACE_KEYS = new Set([
-  "default-prompt", "default_prompt", "brand-color", "brand_color",
+  "default-prompt",
+  "default_prompt",
+  "brand-color",
+  "brand_color",
   "screenshots",
 ]);
 
@@ -102,30 +100,21 @@ export function parseSkillFile(filePath: string): SkillMeta {
 /**
  * 解析 SKILL.md 文本内容
  */
-export function parseSkillContent(
-  raw: string,
-  fallbackName: string
-): SkillMeta {
+export function parseSkillContent(raw: string, fallbackName: string): SkillMeta {
   const parsed = matter(raw);
   const frontmatter = parsed.data ?? {};
 
   // 校验无效字段
-  const unexpectedKeys = Object.keys(frontmatter).filter(
-    (k) => !ALLOWED_FRONTMATTER_KEYS.has(k) && k !== "metadata"
-  );
+  const unexpectedKeys = Object.keys(frontmatter).filter((k) => !ALLOWED_FRONTMATTER_KEYS.has(k) && k !== "metadata");
   if (unexpectedKeys.length > 0 && !("metadata" in frontmatter)) {
     // 静默忽略，保持向前兼容
   }
 
   // name（必需）
-  const name = typeof frontmatter.name === "string" && frontmatter.name.trim()
-    ? frontmatter.name.trim()
-    : fallbackName;
+  const name = typeof frontmatter.name === "string" && frontmatter.name.trim() ? frontmatter.name.trim() : fallbackName;
 
   // description（推荐）
-  const description = typeof frontmatter.description === "string"
-    ? frontmatter.description.trim()
-    : "";
+  const description = typeof frontmatter.description === "string" ? frontmatter.description.trim() : "";
 
   // agent 配置
   const agentRaw = frontmatter.agent;
@@ -204,9 +193,7 @@ function parseInterface(iface: unknown): SkillInterface | undefined {
   const result: SkillInterface = {};
 
   // default_prompt (支持两种命名)
-  result.defaultPrompt = String(
-    raw["default_prompt"] ?? raw["default-prompt"] ?? ""
-  ) || undefined;
+  result.defaultPrompt = String(raw["default_prompt"] ?? raw["default-prompt"] ?? "") || undefined;
 
   // brand_color
   const brandColor = String(raw["brand_color"] ?? raw["brand-color"] ?? "");
@@ -252,16 +239,9 @@ function parsePolicy(policy: unknown): SkillPolicy | undefined {
 /**
  * 从 Skill policy 生成 PermissionProfile
  */
-import {
-  type PermissionProfile,
-  type FileSystemSandboxEntry,
-  DEFAULT_DEV_PROFILE,
-} from "./permission-profile";
+import { type PermissionProfile, type FileSystemSandboxEntry, DEFAULT_DEV_PROFILE } from "./permission-profile";
 
-export function skillPolicyToProfile(
-  policy: SkillPolicy | undefined,
-  _projectRoot: string
-): PermissionProfile {
+export function skillPolicyToProfile(policy: SkillPolicy | undefined, _projectRoot: string): PermissionProfile {
   if (!policy) return DEFAULT_DEV_PROFILE;
 
   const entries: FileSystemSandboxEntry[] = [

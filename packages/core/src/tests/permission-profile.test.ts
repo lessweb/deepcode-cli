@@ -75,11 +75,7 @@ describe("PermissionProfile - checkFileSystemAccess", () => {
         globScanMaxDepth: 50,
       },
     };
-    const result = checkFileSystemAccess(
-      context.projectRoot + "/secrets/key.txt",
-      profile,
-      context
-    );
+    const result = checkFileSystemAccess(context.projectRoot + "/secrets/key.txt", profile, context);
     assert.equal(result.allowed, false);
   });
 
@@ -88,9 +84,7 @@ describe("PermissionProfile - checkFileSystemAccess", () => {
     const profile: PermissionProfile = {
       mode: "managed",
       config: {
-        fileSystem: [
-          { path: { type: "exact", path: tmpDir + "/allowed" }, access: "write" },
-        ],
+        fileSystem: [{ path: { type: "exact", path: tmpDir + "/allowed" }, access: "write" }],
         network: { external: false },
         git: { read: true, write: false },
         globScanMaxDepth: 10,

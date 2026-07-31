@@ -1,7 +1,7 @@
 /**
  * Permission Profile 系统
  * 借鉴 OpenAI Codex CLI 的 PermissionProfile 结构化权限模型
- * 
+ *
  * 核心设计：
  * - Managed 模式：路径级别的细粒度 filesystem 权限 + network 控制
  * - Unrestricted 模式：完全放行（谨慎使用）
@@ -39,8 +39,8 @@ export interface NetworkPermissions {
 
 /** Git 操作权限 */
 export interface GitPermissions {
-  read: boolean;    // query-git-log
-  write: boolean;   // mutate-git-log
+  read: boolean; // query-git-log
+  write: boolean; // mutate-git-log
 }
 
 /** Managed 模式下的详细权限配置 */
@@ -173,10 +173,7 @@ function matchGlob(target: string, pattern: string): boolean {
 /**
  * 将 FileSystemPathKind 解析为实际的文件系统路径列表
  */
-function resolvePathKind(
-  kind: FileSystemPathKind,
-  context: { projectRoot: string; dataDir: string }
-): string[] {
+function resolvePathKind(kind: FileSystemPathKind, context: { projectRoot: string; dataDir: string }): string[] {
   switch (kind.type) {
     case "exact":
       return [kind.path];
@@ -198,7 +195,7 @@ function resolvePathKind(
 
 /**
  * 检查目标路径是否被允许访问
- * 
+ *
  * 匹配规则（类似 ACL）：
  * 1. 如果有 deny 匹配 → 拒绝
  * 2. 如果有 write 匹配 → 允许写入
@@ -231,17 +228,13 @@ export function checkFileSystemAccess(
     const resolvedPaths = resolvePathKind(entry.path, context);
     for (const rp of resolvedPaths) {
       // Don't call path.resolve() on glob patterns - it prepends CWD on Windows!
-      const normalizedEntry = entry.path.type === "glob"
-        ? rp.toLowerCase()
-        : path.resolve(rp).toLowerCase();
+      const normalizedEntry = entry.path.type === "glob" ? rp.toLowerCase() : path.resolve(rp).toLowerCase();
 
       let matches = false;
       if (entry.path.type === "glob") {
         matches = matchGlob(normalizedTarget, normalizedEntry);
       } else if (entry.path.type === "exact") {
-        matches =
-          normalizedTarget === normalizedEntry ||
-          normalizedTarget.startsWith(normalizedEntry + path.sep);
+        matches = normalizedTarget === normalizedEntry || normalizedTarget.startsWith(normalizedEntry + path.sep);
       } else {
         matches = normalizedTarget.startsWith(normalizedEntry);
       }
@@ -270,10 +263,7 @@ export function checkFileSystemAccess(
 /**
  * 检查网络访问是否被允许
  */
-export function checkNetworkAccess(
-  host: string | undefined,
-  profile: PermissionProfile
-): boolean {
+export function checkNetworkAccess(host: string | undefined, profile: PermissionProfile): boolean {
   if (profile.mode === "unrestricted") return true;
   if (profile.mode === "legacy") return true;
 
@@ -286,10 +276,7 @@ export function checkNetworkAccess(
 /**
  * 检查 Git 操作是否被允许
  */
-export function checkGitAccess(
-  operation: "read" | "write",
-  profile: PermissionProfile
-): boolean {
+export function checkGitAccess(operation: "read" | "write", profile: PermissionProfile): boolean {
   if (profile.mode === "unrestricted") return true;
   if (profile.mode === "legacy") return true;
   return operation === "read" ? profile.config.git.read : profile.config.git.write;
@@ -299,9 +286,12 @@ export function checkGitAccess(
 
 function formatPathKind(kind: FileSystemPathKind): string {
   switch (kind.type) {
-    case "exact": return `path:${kind.path}`;
-    case "glob": return `glob:${kind.pattern}`;
-    case "special": return `special:${kind.kind}`;
+    case "exact":
+      return `path:${kind.path}`;
+    case "glob":
+      return `glob:${kind.pattern}`;
+    case "special":
+      return `special:${kind.kind}`;
   }
 }
 

@@ -31,6 +31,8 @@ function createSettings(
     reasoningEffort: "high",
     debugLogEnabled: false,
     telemetryEnabled: false,
+    compressThreshold: 0.8,
+    strictMcpConfig: false,
     permissions,
     enabledSkills: {},
     statusline: { enabled: false, refreshMs: 1000, separator: " | ", providers: [] },

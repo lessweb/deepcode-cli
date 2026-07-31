@@ -51,10 +51,7 @@ const DEFAULT_MAX_SUMMARY_LENGTH = 2_000;
  *
  * Returns the original string unchanged when it is already short enough.
  */
-export function compressContent(
-  content: string,
-  options: CompressOptions = {}
-): string {
+export function compressContent(content: string, options: CompressOptions = {}): string {
   const maxLength = options.maxLength ?? DEFAULT_MAX_LENGTH;
   const smartParse = options.smartParse ?? true;
 
@@ -84,10 +81,7 @@ export function compressContent(
  * `output` field. Returns `null` when parsing fails or content is not a
  * tool-result shape.
  */
-function tryCompressJsonToolResult(
-  content: string,
-  maxLength: number
-): string | null {
+function tryCompressJsonToolResult(content: string, maxLength: number): string | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);

@@ -12,8 +12,16 @@ const API_TOOL_NAME_MAX_LENGTH = 64;
 // Upstream reference: --strict-mcp-config
 // When strict mode is enabled, only these commands are allowed for MCP servers.
 const MCP_STRICT_ALLOWLIST_COMMANDS = new Set([
-  "npx", "node", "python3", "python", "uvx", "uv",
-  "bun", "deno", "go", "java",
+  "npx",
+  "node",
+  "python3",
+  "python",
+  "uvx",
+  "uv",
+  "bun",
+  "deno",
+  "go",
+  "java",
 ]);
 
 type McpToolEntry = {
@@ -163,13 +171,21 @@ export class McpManager {
     if (this.strictMode) {
       const commandName = config.command.split(/[\\/]/).pop() ?? config.command;
       if (!MCP_STRICT_ALLOWLIST_COMMANDS.has(commandName)) {
-        const msg = `Strict MCP config: command "${config.command}" is not in the allowlist. ` +
+        const msg =
+          `Strict MCP config: command "${config.command}" is not in the allowlist. ` +
           `Allowed commands: ${[...MCP_STRICT_ALLOWLIST_COMMANDS].join(", ")}. ` +
           `Disable strictMcpConfig in settings.json to bypass.`;
         this.setStatus({
-          name, status: "failed", connected: false, error: msg,
-          toolCount: 0, tools: [], promptCount: 0, prompts: [],
-          resourceCount: 0, resources: [],
+          name,
+          status: "failed",
+          connected: false,
+          error: msg,
+          toolCount: 0,
+          tools: [],
+          promptCount: 0,
+          prompts: [],
+          resourceCount: 0,
+          resources: [],
         });
         return;
       }

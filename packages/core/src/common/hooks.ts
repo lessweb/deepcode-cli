@@ -55,11 +55,7 @@ export type HookEvent =
  *   {sessionId} - current session ID
  *   {model}     - current model name
  */
-export function fireHook(
-  hooks: HooksConfig | undefined,
-  event: HookEvent,
-  context: Record<string, string> = {}
-): void {
+export function fireHook(hooks: HooksConfig | undefined, event: HookEvent, context: Record<string, string> = {}): void {
   const command = hooks?.[event as keyof HooksConfig] as string | undefined;
   if (!command) {
     return;
