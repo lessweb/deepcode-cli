@@ -14,6 +14,8 @@ export {
   modelConfigKey,
   getUserSettingsPath,
   getProjectSettingsPath,
+  getDefaultContextWindow,
+  getDefaultAutoCompactWindow,
   DEFAULT_MODEL,
   DEFAULT_BASE_URL,
 } from "./settings";

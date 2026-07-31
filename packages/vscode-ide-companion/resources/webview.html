@@ -198,11 +198,11 @@
 
       function getTokenUsagePercent(telemetry) {
         const activeTokens = Number(telemetry?.activeTokens || 0);
-        const threshold = Number(telemetry?.compactPromptTokenThreshold || 0);
-        if (!Number.isFinite(activeTokens) || !Number.isFinite(threshold) || threshold <= 0) {
+        const contextWindow = Number(telemetry?.contextWindow || 0);
+        if (!Number.isFinite(activeTokens) || !Number.isFinite(contextWindow) || contextWindow <= 0) {
           return 0;
         }
-        return Math.trunc(0.5 * activeTokens / threshold * 100);
+        return Math.round(activeTokens / contextWindow * 100);
       }
 
       function formatTokenCount(value) {
@@ -278,6 +278,12 @@
         addTooltipRow(contextMeterTooltip, "thinking enabled", telemetry?.thinkingEnabled ? "true" : "false");
         addTooltipRow(contextMeterTooltip, "reasoning effort", telemetry?.reasoningEffort || "max");
         addTooltipRow(contextMeterTooltip, "activeTokens", formatTokenCount(telemetry?.activeTokens));
+        addTooltipRow(contextMeterTooltip, "contextWindow", formatTokenCount(telemetry?.contextWindow));
+        addTooltipRow(
+          contextMeterTooltip,
+          "autoCompactWindow",
+          formatTokenCount(telemetry?.compactPromptTokenThreshold)
+        );
 
         const usageRows = flattenUsageFields(telemetry?.usage);
         if (usageRows.length > 0) {

@@ -77,11 +77,36 @@ export function isCurrentSessionEmpty(sessionManager: SessionManager): boolean {
   return !activeSessionId || !sessionManager.getSession(activeSessionId);
 }
 
-export function buildStatusLine(entry: SessionEntry): string {
+const CONTEXT_BAR_WIDTH = 10;
+
+export function formatTokenCount(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) {
+    return "0";
+  }
+  if (tokens < 1024) {
+    return String(Math.round(tokens));
+  }
+
+  const unit = tokens >= 1024 * 1024 ? "M" : "K";
+  const divisor = unit === "M" ? 1024 * 1024 : 1024;
+  return `${Number((tokens / divisor).toFixed(1))}${unit}`;
+}
+
+export function formatContextUsage(activeTokens: number, contextWindow: number): string {
+  const safeActiveTokens = Number.isFinite(activeTokens) ? Math.max(0, activeTokens) : 0;
+  const ratio = Number.isFinite(contextWindow) && contextWindow > 0 ? safeActiveTokens / contextWindow : 0;
+  const cappedRatio = Math.min(1, ratio);
+  const filledBlocks = Math.round(cappedRatio * CONTEXT_BAR_WIDTH);
+  const bar = `${"▓".repeat(filledBlocks)}${"░".repeat(CONTEXT_BAR_WIDTH - filledBlocks)}`;
+  const percent = Math.min(100, Math.round(ratio * 100));
+  return `${formatTokenCount(safeActiveTokens)}/${formatTokenCount(contextWindow)} [${bar}] ${percent}%`;
+}
+
+export function buildStatusLine(entry: SessionEntry, contextWindow: number): string {
   const parts: string[] = [];
   parts.push(`status: ${entry.status}`);
   if (typeof entry.activeTokens === "number" && entry.activeTokens > 0) {
-    parts.push(`tokens: ${entry.activeTokens}`);
+    parts.push(formatContextUsage(entry.activeTokens, contextWindow));
   }
   if (entry.failReason) {
     parts.push(`fail: ${entry.failReason}`);

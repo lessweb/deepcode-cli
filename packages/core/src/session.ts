@@ -7,7 +7,6 @@ import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
-import { DEEPSEEK_V4_MODELS } from "./common/model-capabilities";
 import { readTextFileWithMetadata } from "./common/file-utils";
 import {
   buildSkillDocumentsPrompt,
@@ -28,7 +27,13 @@ import {
   type ToolExecutionHooks,
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
-import type { HooksConfig, McpServerConfig, PermissionScope, PermissionSettings } from "./settings";
+import {
+  getDefaultAutoCompactWindow,
+  type HooksConfig,
+  type McpServerConfig,
+  type PermissionScope,
+  type PermissionSettings,
+} from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { killProcessTree } from "./common/process-tree";
@@ -66,6 +71,15 @@ const MAX_SESSION_ENTRIES = 50;
 const MAX_PROJECT_CODE_LENGTH = 64;
 const PROJECT_CODE_HASH_LENGTH = 16;
 const BACKGROUND_FAILURE_LOG_TAIL_CHARS = 4000;
+const PLAN_MODE_ON_STATUS_MESSAGE = "  └ Set Plan Mode on. Awaiting <proposed_plan>.";
+const PLAN_MODE_OFF_STATUS_MESSAGE = "  └ Set Plan Mode off.";
+const PLAN_MODE_FORCE_ASK_SCOPES = [
+  "write-in-cwd",
+  "write-out-cwd",
+  "delete-in-cwd",
+  "delete-out-cwd",
+  "mutate-git-log",
+] as const satisfies readonly PermissionScope[];
 const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
 const DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD = 512 * 1024;
 const PLAN_MODE_STATUS_MESSAGE = "/plan\n  └ Set Plan Mode on. Awaiting <proposed_plan>.";
@@ -78,9 +92,7 @@ type ChatCompletionDebugOptions = {
 };
 
 export function getCompactPromptTokenThreshold(model: string): number {
-  return DEEPSEEK_V4_MODELS.has(model)
-    ? DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD
-    : DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD;
+  return getDefaultAutoCompactWindow(model);
 }
 
 // Keep project storage paths short enough for Git's internal files on Windows.
@@ -299,6 +311,8 @@ export type SessionManagerOptions = {
   createOpenAIClient: CreateOpenAIClient;
   getResolvedSettings: () => {
     model: string;
+    contextWindow?: number;
+    autoCompactWindow?: number;
     webSearchTool?: string;
     compressThreshold?: number;
     hooks?: HooksConfig;
@@ -329,6 +343,8 @@ export class SessionManager {
   private readonly createOpenAIClient: CreateOpenAIClient;
   private readonly getResolvedSettings: () => {
     model: string;
+    contextWindow?: number;
+    autoCompactWindow?: number;
     webSearchTool?: string;
     compressThreshold?: number;
     hooks?: HooksConfig;
@@ -1465,7 +1481,8 @@ ${agentInstructions}
           }
         }
 
-        const compactPromptTokenThreshold = getCompactPromptTokenThreshold(model);
+        const compactPromptTokenThreshold =
+          this.getResolvedSettings().autoCompactWindow ?? getCompactPromptTokenThreshold(model);
         if (session.activeTokens > compactPromptTokenThreshold) {
           const message = this.buildAssistantMessage(
             sessionId,

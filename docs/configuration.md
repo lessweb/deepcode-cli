@@ -27,6 +27,8 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | 字段                 | 类型      | 说明                                                                |
 | -------------------- | --------- | ------------------------------------------------------------------- |
 | `env`                | object    | 环境变量分组（见下方子字段表）                                       |
+| `contextWindow`     | number/string | 上下文窗口上限，可使用精确 token 数或 `128K`、`1M` 等格式          |
+| `autoCompactWindow` | number/string | 自动压缩阈值，默认取最终上下文窗口的 50%                           |
 | `model`              | string    | 模型名称。优先级高于 `env.MODEL`                                    |
 | `thinkingEnabled`    | boolean   | 是否启用思考模式（DeepSeek V4 系列默认启用）                         |
 | `reasoningEffort`    | string    | 推理强度，可选 `"high"` 或 `"max"`（默认 `"max"`）                  |
@@ -52,6 +54,19 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `DEBUG_LOG_ENABLED`  | string | 是否启用调试日志输出                                     |
 | `TELEMETRY_ENABLED`  | string | 是否启用匿名使用数据上报                                   |
 | `<其他任意KEY>` | string | 自定义环境变量 |
+
+#### 上下文窗口
+
+`contextWindow` 和 `autoCompactWindow` 是 `settings.json` 的顶层字段。number 必须是正整数，表示精确 token 数；string 使用大小写不敏感的 `K` 或 `M` 后缀，按 `1K = 1024`、`1M = 1024²` 换算：
+
+```json
+{
+  "contextWindow": "1M",
+  "autoCompactWindow": "512K"
+}
+```
+
+普通模型的默认上下文窗口为 `256K`，DeepSeek V4 系列为 `1M`。未设置自动压缩阈值时取最终上下文窗口的 50%；无效值会被忽略，自动压缩阈值超过上下文窗口时会限制为上下文窗口。
 
 #### `thinkingEnabled` — 思考模式
 

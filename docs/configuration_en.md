@@ -27,6 +27,8 @@ The following are all the top-level fields supported in `settings.json`, along w
 | Field              | Type    | Description                                                                 |
 | ------------------ | ------- | --------------------------------------------------------------------------- |
 | `env`              | object  | Group of environment variables (see sub-field table below)                 |
+| `contextWindow`   | number/string | Context-window limit as an exact token count or `128K`/`1M` value   |
+| `autoCompactWindow` | number/string | Auto-compaction threshold; defaults to 50% of the final context window |
 | `model`            | string  | Model name. Takes precedence over `env.MODEL`                              |
 | `thinkingEnabled`  | boolean | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)|
 | `reasoningEffort`  | string  | Reasoning intensity, either `"high"` or `"max"` (default `"max"`)          |
@@ -52,6 +54,19 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `DEBUG_LOG_ENABLED`| string| Enable debug log output                                         |
 | `TELEMETRY_ENABLED`| string| Enable anonymous usage reporting                                |
 | `<any other KEY>` | string | Custom environment variable                                     |
+
+#### Context Windows
+
+`contextWindow` and `autoCompactWindow` are top-level `settings.json` fields. A number must be a positive integer and represents an exact token count. A string uses a case-insensitive `K` or `M` suffix, with `1K = 1024` and `1M = 1024²`:
+
+```json
+{
+  "contextWindow": "1M",
+  "autoCompactWindow": "512K"
+}
+```
+
+The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 50% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
 
 #### `thinkingEnabled` — Thinking Mode
 

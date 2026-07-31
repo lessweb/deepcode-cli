@@ -25,6 +25,8 @@ function createSettings(
     env: {},
     baseURL: "https://example.invalid",
     model: "test-model",
+    contextWindow: 256 * 1024,
+    autoCompactWindow: 128 * 1024,
     thinkingEnabled: false,
     reasoningEffort: "high",
     debugLogEnabled: false,

@@ -62,6 +62,94 @@ test("resolveSettings gives top-level model priority over env MODEL", () => {
   assert.equal(resolved.model, "deepseek-v4-flash");
 });
 
+test("resolveSettings derives model-specific context window defaults", () => {
+  const regular = resolveSettings(
+    {},
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  const deepseekV4 = resolveSettings(
+    { model: "deepseek-v4-pro" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(regular.contextWindow, 256 * 1024);
+  assert.equal(regular.autoCompactWindow, 128 * 1024);
+  assert.equal(deepseekV4.contextWindow, 1024 * 1024);
+  assert.equal(deepseekV4.autoCompactWindow, 512 * 1024);
+});
+
+test("resolveSettings parses numeric and K/M context window settings", () => {
+  const resolved = resolveSettings(
+    {
+      contextWindow: " 2m ",
+      autoCompactWindow: 300_000,
+    },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.contextWindow, 2 * 1024 * 1024);
+  assert.equal(resolved.autoCompactWindow, 300_000);
+});
+
+test("resolveSettings derives auto compact window from the configured context window", () => {
+  const resolved = resolveSettings(
+    { contextWindow: "512K" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.contextWindow, 512 * 1024);
+  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+});
+
+test("resolveSettings ignores invalid windows and caps auto compact window at context window", () => {
+  const invalid = resolveSettings(
+    { contextWindow: "1G", autoCompactWindow: 1.5 },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  const capped = resolveSettings(
+    { contextWindow: "128k", autoCompactWindow: "1M" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(invalid.contextWindow, 256 * 1024);
+  assert.equal(invalid.autoCompactWindow, 128 * 1024);
+  assert.equal(capped.contextWindow, 128 * 1024);
+  assert.equal(capped.autoCompactWindow, 128 * 1024);
+});
+
+test("resolveSettingsSources applies context window source precedence", () => {
+  const resolved = resolveSettingsSources(
+    { contextWindow: "256K", autoCompactWindow: "64K" },
+    { contextWindow: "512K", autoCompactWindow: "128K" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    {
+      DEEPCODE_CONTEXT_WINDOW: "1M",
+      DEEPCODE_AUTO_COMPACT_WINDOW: "256k",
+    }
+  );
+
+  assert.equal(resolved.contextWindow, 1024 * 1024);
+  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+});
+
+test("resolveSettingsSources skips invalid higher-priority context window values", () => {
+  const resolved = resolveSettingsSources(
+    { contextWindow: "256K" },
+    { contextWindow: "512K" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    { DEEPCODE_CONTEXT_WINDOW: "invalid" }
+  );
+
+  assert.equal(resolved.contextWindow, 512 * 1024);
+  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+});
+
 test("resolveSettings reads TEMPERATURE, THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_ENABLED from env", () => {
   const resolved = resolveSettings(
     {

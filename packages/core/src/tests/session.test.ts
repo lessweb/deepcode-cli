@@ -3214,6 +3214,25 @@ test("SessionManager resets active tokens to latest post-compaction response usa
   assert.equal(usagePerModel.total_reqs, 3);
 });
 
+test("SessionManager uses the configured auto compact window", async () => {
+  const workspace = createTempDir("deepcode-custom-compact-window-workspace-");
+  const home = createTempDir("deepcode-custom-compact-window-home-");
+  setHomeDir(home);
+
+  const responses = [
+    createChatResponse("large", { prompt_tokens: 990, completion_tokens: 10, total_tokens: 1000 }),
+    createChatResponse("summary", { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 }),
+    createChatResponse("after compact", { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }),
+  ];
+  const manager = createMockedClientSessionManager(workspace, responses, 500);
+
+  const sessionId = await manager.createSession({ text: "" });
+  await manager.replySession(sessionId, { text: "" });
+
+  assert.equal(manager.getSession(sessionId)?.activeTokens, 7);
+  assert.equal(manager.getSession(sessionId)?.usagePerModel?.["test-model"]?.total_reqs, 3);
+});
+
 test("SessionManager streams chat completions and counts reasoning progress", async () => {
   const workspace = createTempDir("deepcode-stream-workspace-");
   const home = createTempDir("deepcode-stream-home-");
@@ -3713,7 +3732,11 @@ function createNotifyingSessionManager(
   });
 }
 
-function createMockedClientSessionManager(projectRoot: string, responses: unknown[]): SessionManager {
+function createMockedClientSessionManager(
+  projectRoot: string,
+  responses: unknown[],
+  autoCompactWindow?: number
+): SessionManager {
   const client = {
     chat: {
       completions: {
@@ -3737,7 +3760,7 @@ function createMockedClientSessionManager(projectRoot: string, responses: unknow
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", autoCompactWindow }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });

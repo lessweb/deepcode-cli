@@ -1,4 +1,4 @@
-import { defaultsToThinkingMode } from "./common/model-capabilities";
+import { DEEPSEEK_V4_MODELS, defaultsToThinkingMode } from "./common/model-capabilities";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -92,6 +92,8 @@ export type ResolvedStatusLineSettings = {
 
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
+  contextWindow?: number | string;
+  autoCompactWindow?: number | string;
   model?: string;
   temperature?: number;
   thinkingEnabled?: boolean;
@@ -114,6 +116,8 @@ export type ResolvedDeepcodingSettings = {
   apiKey?: string;
   baseURL: string;
   model: string;
+  contextWindow: number;
+  autoCompactWindow: number;
   temperature?: number;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
@@ -135,6 +139,45 @@ export type ModelConfigSelection = {
 };
 
 export type SettingsProcessEnv = Record<string, string | undefined>;
+
+const DEFAULT_CONTEXT_WINDOW = 256 * 1024;
+const DEEPSEEK_V4_CONTEXT_WINDOW = 1024 * 1024;
+
+export function getDefaultContextWindow(model: string): number {
+  return DEEPSEEK_V4_MODELS.has(model) ? DEEPSEEK_V4_CONTEXT_WINDOW : DEFAULT_CONTEXT_WINDOW;
+}
+
+export function getDefaultAutoCompactWindow(model: string): number {
+  return getDefaultContextWindow(model) / 2;
+}
+
+function parseTokenWindow(value: unknown): number | undefined {
+  if (typeof value === "number") {
+    return Number.isSafeInteger(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const match = /^(\d+)([km])$/i.exec(value.trim());
+  if (!match) {
+    return undefined;
+  }
+  const amount = Number(match[1]);
+  const multiplier = match[2]?.toLowerCase() === "m" ? 1024 * 1024 : 1024;
+  const tokens = amount * multiplier;
+  return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : undefined;
+}
+
+function firstTokenWindow(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parseTokenWindow(value);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
 
 function resolveReasoningEffort(value: unknown): ReasoningEffort | undefined {
   return value === "high" || value === "max" ? value : undefined;
@@ -506,6 +549,17 @@ export function resolveSettingsSources(
     trimString(userEnv.MODEL) ||
     defaults.model;
 
+  const contextWindow =
+    firstTokenWindow(systemEnv.CONTEXT_WINDOW, projectSettings?.contextWindow, userSettings?.contextWindow) ??
+    getDefaultContextWindow(model);
+  const configuredAutoCompactWindow = firstTokenWindow(
+    systemEnv.AUTO_COMPACT_WINDOW,
+    projectSettings?.autoCompactWindow,
+    userSettings?.autoCompactWindow
+  );
+  const defaultAutoCompactWindow = Math.max(1, Math.floor(contextWindow / 2));
+  const autoCompactWindow = Math.min(configuredAutoCompactWindow ?? defaultAutoCompactWindow, contextWindow);
+
   const thinkingEnabled =
     parseBoolean(systemEnv.THINKING_ENABLED) ??
     parseBoolean(projectSettings?.thinkingEnabled) ??
@@ -563,6 +617,8 @@ export function resolveSettingsSources(
     apiKey: trimString(env.API_KEY) || undefined,
     baseURL: trimString(env.BASE_URL) || defaults.baseURL,
     model,
+    contextWindow,
+    autoCompactWindow,
     temperature,
     thinkingEnabled,
     reasoningEffort,
