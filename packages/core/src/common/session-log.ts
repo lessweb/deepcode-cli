@@ -12,17 +12,15 @@
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+import type { Database as SqlJsDatabase, SqlValue } from "sql.js";
 
 // sql.js 是纯 WASM 实现，无需本地编译
 
-type SqlJsModule = { Database: new (data?: ArrayLike<number> | Buffer | null) => import("sql.js").Database };
+type SqlJsModule = { Database: new (data?: ArrayLike<number> | Buffer | null) => SqlJsDatabase };
 let SQL: SqlJsModule | null = null;
 
 // 数据库实例缓存（按会话 ID）
 const dbCache = new Map<string, DatabaseHandle>();
-
-// eslint-disable-next-line @typescript-eslint/consistent-type-imports
-type SqlJsDatabase = import("sql.js").Database;
 
 interface DatabaseHandle {
   db: SqlJsDatabase;
@@ -110,8 +108,7 @@ async function getDb(sessionId: string): Promise<DatabaseHandle> {
   }
 
   const dbPath = getDbPath(sessionId);
-  // eslint-disable-next-line @typescript-eslint/consistent-type-imports
-  let db: import("sql.js").Database;
+  let db: SqlJsDatabase;
 
   if (fs.existsSync(dbPath)) {
     const buffer = fs.readFileSync(dbPath);
@@ -245,7 +242,7 @@ export async function queryRecentLogs(
   sql += " ORDER BY created_at DESC LIMIT ?";
   params.push(limit);
 
-  const results = handle.db.exec(sql, params);
+  const results = handle.db.exec(sql, params as SqlValue[]);
   if (results.length === 0) return [];
 
   return results[0].values.map((row: unknown[]) => ({
