@@ -1,9 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import {
-  JobQueue,
-  createSpawnRequest,
-} from "../common/job-queue";
+import { JobQueue, createSpawnRequest } from "../common/job-queue";
 
 describe("JobQueue - basic operations", { timeout: 15000 }, () => {
   test("submit and complete a simple echo job", async () => {

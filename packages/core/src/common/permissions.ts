@@ -62,6 +62,7 @@ export type ComputeToolCallPermissionsOptions = {
   settings?: Required<PermissionSettings>;
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
+  forceAskScopes?: readonly PermissionScope[];
 };
 
 export function parseToolCallForPermissions(toolCall: unknown): PermissionToolCall | null {
@@ -171,10 +172,18 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
       readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
     });
-    const permission = evaluatePermissionScopes(request.scopes, options.settings);
+    const evaluatedPermission = evaluatePermissionScopes(request.scopes, options.settings);
+    const forcedAskScopes =
+      evaluatedPermission === "deny"
+        ? []
+        : getAllowedForcedAskScopes(request.scopes, options.settings, options.forceAskScopes);
+    const permission = forcedAskScopes.length > 0 ? "ask" : evaluatedPermission;
     permissions.push({ toolCallId: toolCall.id, permission });
     if (permission === "ask") {
-      const askScopes = getPermissionScopesRequiringAsk(request.scopes, options.settings);
+      const askScopes = mergeAskScopes(
+        getPermissionScopesRequiringAsk(request.scopes, options.settings),
+        forcedAskScopes
+      );
       askPermissions.push({
         toolCallId: toolCall.id,
         scopes: askScopes.length > 0 ? askScopes : request.scopes,
@@ -192,33 +201,52 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
  * 异步审计 PermissionPlan（fire-and-forget，不阻塞主流程）
  * 将每次权限检查结果写入 SQLite
  */
-export function auditPermissionPlan(
-  sessionId: string,
-  plan: PermissionPlan,
-  toolCalls: PermissionToolCall[]
-): void {
+export function auditPermissionPlan(sessionId: string, plan: PermissionPlan, toolCalls: PermissionToolCall[]): void {
   // Fire-and-forget: 异步写入 SQLite，不 await
-  import("../common/session-log").then((log) => {
-    for (const perm of plan.permissions) {
-      const toolCall = toolCalls.find((tc) => tc.id === perm.toolCallId);
-      const scopes: string[] = [];
-      const askReq = plan.askPermissions.find((ap) => ap.toolCallId === perm.toolCallId);
-      if (askReq) {
-        scopes.push(...askReq.scopes.map(String));
+  import("../common/session-log")
+    .then((log) => {
+      for (const perm of plan.permissions) {
+        const toolCall = toolCalls.find((tc) => tc.id === perm.toolCallId);
+        const scopes: string[] = [];
+        const askReq = plan.askPermissions.find((ap) => ap.toolCallId === perm.toolCallId);
+        if (askReq) {
+          scopes.push(...askReq.scopes.map(String));
+        }
+        log
+          .logPermissionDecision(
+            sessionId,
+            perm.toolCallId,
+            toolCall?.function?.name ?? "unknown",
+            scopes.length > 0 ? scopes : [perm.permission],
+            perm.permission
+          )
+          .catch(() => {
+            // 静默处理失败
+          });
       }
-      log.logPermissionDecision(
-        sessionId,
-        perm.toolCallId,
-        toolCall?.function?.name ?? "unknown",
-        scopes.length > 0 ? scopes : [perm.permission],
-        perm.permission
-      ).catch(() => {
-        // 静默处理失败
-      });
-    }
-  }).catch(() => {
-    // 静默处理
-  });
+    })
+    .catch(() => {
+      // 静默处理
+    });
+}
+
+function getAllowedForcedAskScopes(
+  scopes: AskPermissionScope[],
+  settings: Required<PermissionSettings> | undefined,
+  forceAskScopes: readonly PermissionScope[] | undefined
+): PermissionScope[] {
+  if (!forceAskScopes?.length) {
+    return [];
+  }
+
+  return scopes.filter(
+    (scope): scope is PermissionScope =>
+      scope !== "unknown" && forceAskScopes.includes(scope) && evaluatePermissionScopes([scope], settings) === "allow"
+  );
+}
+
+function mergeAskScopes(existing: AskPermissionScope[], forced: PermissionScope[]): AskPermissionScope[] {
+  return [...existing, ...forced.filter((scope) => !existing.includes(scope))];
 }
 
 export function describeToolPermissionRequest(options: {

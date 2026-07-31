@@ -199,6 +199,8 @@ function describePermissionScope(scope: AskPermissionScope): string {
       return "MCP tool access";
     case "unknown":
       return "unclassified side effects";
+    default:
+      return `scope: ${scope}`;
   }
 }
 

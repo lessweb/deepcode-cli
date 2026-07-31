@@ -13,6 +13,7 @@ import {
   getCompactPrompt,
   getDefaultSkillPrompt,
   getExtensionRoot,
+  getPlanModePrompt,
   getRuntimeContext,
   getSystemPrompt,
   getTools,
@@ -29,20 +30,18 @@ import {
 import { McpManager } from "./mcp/mcp-manager";
 import {
   getDefaultAutoCompactWindow,
-  type HooksConfig,
   type McpServerConfig,
   type PermissionScope,
   type PermissionSettings,
 } from "./settings";
 import { logApiError } from "./common/error-logger";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
+import { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
 import { killProcessTree } from "./common/process-tree";
-import { fireHook } from "./common/hooks";
 import { GitFileHistory, type FileHistoryCheckpointResult } from "./common/file-history";
 import { clearSessionState, getSnippet, rebuildSessionStateFromHistory } from "./common/state";
 import {
   appendProjectPermissionAllows,
-  auditPermissionPlan,
   buildPermissionToolExecution,
   computeToolCallPermissions,
   hasUserPermissionReplies,
@@ -80,9 +79,6 @@ const PLAN_MODE_FORCE_ASK_SCOPES = [
   "delete-out-cwd",
   "mutate-git-log",
 ] as const satisfies readonly PermissionScope[];
-const DEFAULT_COMPACT_PROMPT_TOKEN_THRESHOLD = 128 * 1024;
-const DEEPSEEK_V4_COMPACT_PROMPT_TOKEN_THRESHOLD = 512 * 1024;
-const PLAN_MODE_STATUS_MESSAGE = "/plan\n  └ Set Plan Mode on. Awaiting <proposed_plan>.";
 
 type ChatCompletionDebugOptions = {
   enabled?: boolean;
@@ -246,6 +242,7 @@ export type SessionEntry = {
   updateTime: string;
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
   askPermissions?: AskPermissionRequest[];
+  planMode?: boolean;
 };
 
 export type SessionsIndex = {
@@ -296,6 +293,7 @@ export type UserPromptContent = {
   skills?: SkillInfo[];
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
+  planMode?: boolean;
 };
 
 export type SkillInfo = {
@@ -314,8 +312,6 @@ export type SessionManagerOptions = {
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
-    compressThreshold?: number;
-    hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
@@ -346,8 +342,6 @@ export class SessionManager {
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
-    compressThreshold?: number;
-    hooks?: HooksConfig;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
@@ -361,39 +355,6 @@ export class SessionManager {
   private activeSessionId: string | null = null;
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
-
-  /** Plan mode flag: when true, mutating tools are denied. */
-  private isPlanMode = false;
-
-  /** Mutating tool names that are denied in Plan mode. */
-  private static readonly MUTATING_TOOLS = new Set([
-    'Write', 'write', 'Edit', 'edit',
-  ]);
-
-  /**
-   * Toggle Plan mode on/off.
-   * Plan mode only allows read-only tools (read, glob, grep, list, bash (read-only)).
-   */
-  setPlanMode(enabled: boolean): void {
-    this.isPlanMode = enabled;
-  }
-
-  /**
-   * Check if a tool call is mutating (write/edit).
-   */
-  private isMutatingToolCall(tc: unknown): boolean {
-    if (!tc || typeof tc !== 'object') return false;
-    const func = (tc as any).function;
-    if (!func || typeof func.name !== 'string') return false;
-    return SessionManager.MUTATING_TOOLS.has(func.name);
-  }
-
-  /**
-   * Filter tool calls to return only the mutating ones (for the deny message).
-   */
-  private filterPlanModeToolCalls(toolCalls: unknown[]): unknown[] {
-    return toolCalls.filter(tc => this.isMutatingToolCall(tc));
-  }
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
@@ -449,67 +410,6 @@ export class SessionManager {
   async reconnectMcpServer(name: string, config?: McpServerConfig): Promise<void> {
     await this.mcpManager.reconnect(name, config);
     this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
-  }
-
-  /**
-   * Create an explicit snapshot checkpoint.
-   * Returns the checkpoint hash or undefined on failure.
-   */
-  async snapshotSession(sessionId: string, message?: string): Promise<string | undefined> {
-    const fileHistory = this.getFileHistory();
-    if (!fileHistory) return undefined;
-    const changedPaths = this.getSessionTrackedPaths(sessionId);
-    if (changedPaths.length === 0) return undefined;
-    return fileHistory.recordCheckpoint(
-      sessionId,
-      changedPaths,
-      message ?? `Snapshot at ${new Date().toISOString()}`
-    );
-  }
-
-  /**
-   * Rollback to a previous snapshot.
-   * If no hash is provided, rolls back one step (undo).
-   */
-  async rollbackSession(sessionId: string, checkpointHash?: string): Promise<boolean> {
-    const fileHistory = this.getFileHistory();
-    if (!fileHistory) return false;
-
-    const hash = checkpointHash ?? this.getPreviousCheckpointHash(sessionId);
-    if (!hash) return false;
-
-    try {
-      fileHistory.restore(sessionId, hash);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * List available snapshots for a session.
-   */
-  listSessionSnapshots(sessionId: string): Array<{ hash: string; message: string }> {
-    // Returns empty for now — can be enhanced with git log parsing
-    return [];
-  }
-
-  private getSessionTrackedPaths(sessionId: string): string[] {
-    const index = this.loadSessionsIndex();
-    const entry = index.entries.find(e => e.id === sessionId);
-    if (!entry) return [];
-    // Track paths from tool calls that modified files
-    return [];
-  }
-
-  private getPreviousCheckpointHash(sessionId: string): string | undefined {
-    const fileHistory = this.getFileHistory();
-    if (!fileHistory) return undefined;
-    try {
-      return fileHistory.getCurrentCheckpointHash(sessionId);
-    } catch {
-      return undefined;
-    }
   }
 
   dispose(): void {
@@ -645,11 +545,7 @@ export class SessionManager {
         requestId,
         sessionId,
         model: typeof request.model === "string" ? request.model : undefined,
-        error: {
-          name: error instanceof Error ? error.name : "UnknownError",
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+        error: getLlmErrorDetails(error),
         request: streamRequest,
       });
       this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
@@ -779,11 +675,7 @@ export class SessionManager {
         requestId,
         sessionId,
         model: typeof request.model === "string" ? request.model : undefined,
-        error: {
-          name: error instanceof Error ? error.name : "UnknownError",
-          message: error instanceof Error ? error.message : String(error),
-          stack: error instanceof Error ? error.stack : undefined,
-        },
+        error: getLlmErrorDetails(error),
         request: streamRequest,
       });
       throw error;
@@ -1165,9 +1057,6 @@ ${agentInstructions}
     }
 
     for (const skill of skills) {
-      if (skill.name === "plan") {
-        this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, PLAN_MODE_STATUS_MESSAGE));
-      }
       if (skill.isLoaded) {
         continue;
       }
@@ -1237,6 +1126,7 @@ ${agentInstructions}
       createTime: now,
       updateTime: now,
       processes: null,
+      planMode: Boolean(userPrompt.planMode),
     };
     index.entries.push(entry);
     const sortedEntries = index.entries.slice().sort((a, b) => {
@@ -1282,12 +1172,7 @@ ${agentInstructions}
       this.appendSessionMessage(sessionId, instructionsMessage);
     }
 
-    // Inject hierarchical project rules (.deepcode/rules/)
-    const projectRules = this.loadProjectRules();
-    if (projectRules) {
-      const rulesMessage = this.buildSystemMessage(sessionId, projectRules);
-      this.appendSessionMessage(sessionId, rulesMessage);
-    }
+    this.appendPlanModeTransitionMessages(sessionId, false, Boolean(userPrompt.planMode));
 
     this.recordUserPromptCheckpoint(sessionId);
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
@@ -1322,11 +1207,14 @@ ${agentInstructions}
       inheritedPermissions: this.getResolvedSettings().permissions,
     });
     const now = new Date().toISOString();
+    const previousPlanMode = Boolean(this.getSession(sessionId)?.planMode);
+    const nextPlanMode = Boolean(userPrompt.planMode);
     const updated = this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
       status: "pending",
       failReason: null,
       askPermissions: undefined,
+      planMode: nextPlanMode,
       updateTime: now,
     }));
 
@@ -1334,6 +1222,8 @@ ${agentInstructions}
       await this.createSession(userPrompt, controller);
       return;
     }
+
+    this.appendPlanModeTransitionMessages(sessionId, previousPlanMode, nextPlanMode);
 
     if (hasUserPermissionReplies(userPrompt) && this.hasTrailingPendingToolCalls(sessionId)) {
       this.activeSessionId = sessionId;
@@ -1440,11 +1330,6 @@ ${agentInstructions}
     try {
       const maxIterations = 80000; // about 1K RMB cost
       let toolCalls: unknown[] | null = null;
-      // Track error fix state across iterations
-      const errorFixCounts = new Map<string, number>();
-      let lastToolExecutionHadFailures = false;
-      // Reset doom loop tracking at session start (OpenCode-inspired protection)
-      this.toolExecutor.resetDoomLoopTracking(sessionId);
 
       for (let iteration = 0; iteration < maxIterations; iteration++) {
         if (this.isInterrupted(sessionId)) {
@@ -1539,6 +1424,7 @@ ${agentInstructions}
               projectRoot: this.projectRoot,
               toolCalls,
               settings: this.getResolvedSettings().permissions,
+              forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
               readPermissionExemptPaths: this.getSkillScanRoots().map((entry) => entry.root),
               resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
             })
@@ -1548,11 +1434,6 @@ ${agentInstructions}
             ...(assistantMessage.meta ?? {}),
             permissions: permissionPlan.permissions,
           };
-          // 异步写入 SQLite 审计日志
-          const parsedToolCalls = (toolCalls!)
-            .map((tc: unknown) => parseToolCallForPermissions(tc))
-            .filter(Boolean) as PermissionToolCall[];
-          auditPermissionPlan(sessionId, permissionPlan, parsedToolCalls);
         }
         this.appendSessionMessage(sessionId, assistantMessage);
         this.onAssistantMessage(assistantMessage, true);
@@ -1581,69 +1462,10 @@ ${agentInstructions}
             messagePermissions: permissionPlan?.permissions,
           });
           waitingForUser = toolAppendResult.waitingForUser;
-
-          // Auto error fix: check if any tool executions failed
-          lastToolExecutionHadFailures = this.hasRecentToolExecutionFailure(this.listSessionMessages(sessionId));
-          if (lastToolExecutionHadFailures) {
-            // Track retry count across iterations
-            const errorKey = `error_at_iter_${iteration}`;
-            errorFixCounts.set(errorKey, (errorFixCounts.get(errorKey) ?? 0) + 1);
-          }
-
-          // Plan mode: deny write/edit/bash tools when plan mode is active
-          if (this.isPlanMode && toolCalls) {
-            const planModeToolCalls = this.filterPlanModeToolCalls(toolCalls);
-            if (planModeToolCalls.length > 0) {
-              const blockedNames = planModeToolCalls
-                .map(t => typeof t === 'object' && t && typeof (t as any).function?.name === 'string'
-                  ? (t as any).function.name : 'unknown')
-                .join(', ');
-              const denyMsg = this.buildSystemMessage(sessionId,
-                `[Plan Mode] Tool(s) \`${blockedNames}\` are not allowed in Plan mode. ` +
-                'Plan mode is read-only: you can use read, glob, grep, list, bash (non-mutating), ' +
-                'WebSearch, AskUserQuestion. Switch to Build mode to make changes.'
-              );
-              this.appendSessionMessage(sessionId, denyMsg);
-            }
-            // Keep only non-mutating tool calls
-            toolCalls = toolCalls.filter(tc => !this.isMutatingToolCall(tc));
-            if (toolCalls.length === 0) {
-              continue; // Re-prompt LLM without mutating tools
-            }
-          }
-
-          // Doom loop detection (OpenCode-inspired): detect repeated identical tool calls
-          if (!lastToolExecutionHadFailures && toolCalls) {
-            const doomLoopError = this.toolExecutor.checkDoomLoop(
-              sessionId,
-              toolCalls,
-              iteration
-            );
-            if (doomLoopError) {
-              const doomMsg = this.buildSystemMessage(sessionId, doomLoopError);
-              this.appendSessionMessage(sessionId, doomMsg);
-              // Break out - the LLM will see the doom message and should change approach
-            }
-          }
         }
 
         if (this.isInterrupted(sessionId)) {
           return;
-        }
-
-        // After LLM response and tool execution: if there were failures and the LLM
-        // responds WITHOUT tool calls (giving up), inject a fix reminder
-        if (lastToolExecutionHadFailures && !toolCalls) {
-          const failedToolMessages = this.getFailedToolMessages(sessionId);
-          if (failedToolMessages.length > 0 && errorFixCounts.size <= 3) {
-            const fixReminder = this.buildSystemMessage(
-              sessionId,
-              `[Auto Error Fix] The previous command failed. Do NOT move on. Analyze the error above, fix the code, then re-run the command to verify. If you've already tried multiple approaches, explain the issue to the user.`
-            );
-            this.appendSessionMessage(sessionId, fixReminder);
-            lastToolExecutionHadFailures = false;
-            continue; // Retry: let the LLM see the fix reminder and generate a fix
-          }
         }
 
         this.updateSessionEntry(sessionId, (entry) => ({
@@ -1688,11 +1510,8 @@ ${agentInstructions}
         false
       );
     } catch (error) {
-      const errMessage = error instanceof Error ? error.message : String(error);
+      const errMessage = describeLlmError(error);
       const aborted = this.isAbortLikeError(error) || sessionController.signal.aborted;
-      if (!aborted) {
-        fireHook(this.getResolvedSettings().hooks, "onError", { error: errMessage });
-      }
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
         status: aborted ? "interrupted" : "failed",
@@ -2260,40 +2079,14 @@ ${agentInstructions}
   private appendSessionMessage(sessionId: string, message: SessionMessage): void {
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
-    const compressed = this.compressMessageContent(message);
-    fs.appendFileSync(messagePath, `${JSON.stringify(compressed)}\n`, "utf8");
+    fs.appendFileSync(messagePath, `${JSON.stringify(message)}\n`, "utf8");
   }
 
   private saveSessionMessages(sessionId: string, messages: SessionMessage[]): void {
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
-    const payload = messages
-      .map((message) => JSON.stringify(this.compressMessageContent(message)))
-      .join("\n");
+    const payload = messages.map((message) => JSON.stringify(message)).join("\n");
     fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
-  }
-
-  /**
-   * Compress the `content` field of a SessionMessage before persisting.
-   *
-   * Tool-message content is already compressed by the executor's
-   * `formatToolResult`, so this is primarily a safety net for other
-   * message roles (assistant, system) that may carry large payloads.
-   */
-  private compressMessageContent(message: SessionMessage): SessionMessage {
-    const content = message.content;
-    const threshold = this.getResolvedSettings()?.compressThreshold ?? 10_000;
-    if (!content || content.length <= threshold) {
-      return message;
-    }
-    const suffix = `\n\n... (truncated, original ${content.length} chars)`;
-    const maxLength = threshold;
-    const available = maxLength - suffix.length;
-    const truncated =
-      available <= 0
-        ? content.slice(0, maxLength)
-        : content.slice(0, available) + suffix;
-    return { ...message, content: truncated };
   }
 
   private updateSessionEntry(sessionId: string, updater: (entry: SessionEntry) => SessionEntry): SessionEntry | null {
@@ -2334,6 +2127,23 @@ ${agentInstructions}
       meta: { userPrompt: this.cloneUserPromptForMeta(prompt) },
       checkpointHash: this.getCurrentCheckpointHash(sessionId),
     };
+  }
+
+  private appendPlanModeTransitionMessages(sessionId: string, wasEnabled: boolean, isEnabled: boolean): void {
+    if (wasEnabled === isEnabled) {
+      return;
+    }
+
+    if (isEnabled) {
+      const prompt = getPlanModePrompt();
+      if (prompt) {
+        this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, prompt));
+      }
+      this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, PLAN_MODE_ON_STATUS_MESSAGE));
+      return;
+    }
+
+    this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, PLAN_MODE_OFF_STATUS_MESSAGE));
   }
 
   private renderInitCommandPrompt(): string {
@@ -2392,65 +2202,6 @@ ${agentInstructions}
     }
 
     return this.readNonEmptyFile(path.join(os.homedir(), ".deepcode", "AGENTS.md"));
-  }
-
-  /**
-   * Load hierarchical rules from .deepcode/rules/ directory.
-   * Each .md file becomes a named rule section injected into system context.
-   * Supports subdirectory-based scoping (e.g., rules/api/*.md, rules/db/*.md).
-   */
-  private loadProjectRules(): string | null {
-    const rulesDir = path.join(this.projectRoot, ".deepcode", "rules");
-    if (!fs.existsSync(rulesDir)) {
-      return null;
-    }
-
-    const sections: string[] = [];
-
-    const collectRules = (dir: string, scope: string): void => {
-      let entries: fs.Dirent[];
-      try {
-        entries = fs.readdirSync(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-
-      // Sort: files first, then directories, alphabetical
-      entries.sort((a, b) => {
-        if (a.isDirectory() !== b.isDirectory()) {
-          return a.isDirectory() ? 1 : -1;
-        }
-        return a.name.localeCompare(b.name);
-      });
-
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          collectRules(fullPath, path.join(scope, entry.name));
-          continue;
-        }
-        if (!entry.name.endsWith(".md")) {
-          continue;
-        }
-
-        const content = this.readNonEmptyFile(fullPath);
-        if (!content) {
-          continue;
-        }
-
-        const ruleName = entry.name.replace(/\.md$/, "");
-        const ruleHeader = scope ? `${scope}/${ruleName}` : ruleName;
-        sections.push(`### Rule: ${ruleHeader}\n\n${content}`);
-      }
-    };
-
-    collectRules(rulesDir, "");
-
-    if (sections.length === 0) {
-      return null;
-    }
-
-    return `# Project Rules\n\n${sections.join("\n\n")}`;
   }
 
   private buildSystemMessage(
@@ -2588,31 +2339,14 @@ ${agentInstructions}
       messagePermissions?: MessageToolPermission[];
     } = {}
   ): Promise<{ waitingForUser: boolean }> {
-    const settings = this.getResolvedSettings();
     const hooks: ToolExecutionHooks = {
-      onProcessStart: (pid, command) => {
-        this.addSessionProcess(sessionId, pid, command);
-        fireHook(settings.hooks, "beforeCommand", { command });
-      },
-      onProcessExit: (pid) => {
-        const entry = this.loadSessionsIndex().entries.find((e) => e.id === sessionId);
-        const procCommand = entry?.processes?.get?.(String(pid))?.command;
-        this.removeSessionProcess(sessionId, pid);
-        if (procCommand) {
-          fireHook(settings.hooks, "afterCommand", { command: procCommand });
-        }
-      },
+      onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
+      onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
       onBackgroundProcessComplete: (completion) => this.addBackgroundProcessCompletionMessage(sessionId, completion),
-      onBeforeFileMutation: (filePath) => {
-        this.prepareFileMutationCheckpoint(sessionId, filePath);
-        fireHook(settings.hooks, "beforeWrite", { filePath });
-      },
-      onAfterFileMutation: (filePath) => {
-        this.recordFileMutationCheckpoint(sessionId, filePath);
-        fireHook(settings.hooks, "afterWrite", { filePath });
-      },
+      onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
+      onAfterFileMutation: (filePath) => this.recordFileMutationCheckpoint(sessionId, filePath),
       shouldStop: () => this.isInterrupted(sessionId),
     };
     const parsedToolCalls = toolCalls
@@ -2668,6 +2402,7 @@ ${agentInstructions}
       skills: prompt.skills ? prompt.skills.map((skill) => ({ ...skill })) : undefined,
       permissions: prompt.permissions ? prompt.permissions.map((permission) => ({ ...permission })) : undefined,
       alwaysAllows: prompt.alwaysAllows ? [...prompt.alwaysAllows] : undefined,
+      planMode: prompt.planMode,
     };
   }
 
@@ -2712,60 +2447,6 @@ ${agentInstructions}
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
     this.appendSkillMessages(sessionId, userPrompt.skills);
-  }
-
-  /**
-   * Check if the most recent tool execution messages contain failures.
-   * Looks at the last batch of tool-call result messages for any with ok:false.
-   */
-  private hasRecentToolExecutionFailure(messages: SessionMessage[]): boolean {
-    // Only check the most recent tool messages (after the last non-tool message)
-    let foundToolMessages = false;
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role !== "tool") {
-        break; // Stop at the first non-tool message from the end
-      }
-      foundToolMessages = true;
-      if (msg.content) {
-        try {
-          const parsed = JSON.parse(msg.content);
-          if (parsed && typeof parsed === "object" && parsed.ok === false) {
-            return true;
-          }
-        } catch {
-          // Not JSON, skip
-        }
-      }
-    }
-    return foundToolMessages; // false if no tool messages at all
-  }
-
-  /**
-   * Get the list of failed tool messages for error reporting.
-   */
-  private getFailedToolMessages(sessionId: string): string[] {
-    const messages = this.listSessionMessages(sessionId);
-    const failed: string[] = [];
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg.role !== "tool") {
-        break;
-      }
-      if (msg.content) {
-        try {
-          const parsed = JSON.parse(msg.content);
-          if (parsed && typeof parsed === "object" && parsed.ok === false) {
-            const errorMsg = parsed.error ?? parsed.output ?? "Unknown error";
-            const name = parsed.name ?? "unknown";
-            failed.push(`${name}: ${String(errorMsg).slice(0, 200)}`);
-          }
-        } catch {
-          // skip
-        }
-      }
-    }
-    return failed;
   }
 
   private buildToolParamsSnippet(toolFunction: unknown | null): string {
@@ -3128,6 +2809,7 @@ ${agentInstructions}
       updateTime: typeof value.updateTime === "string" ? value.updateTime : new Date().toISOString(),
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
+      planMode: value.planMode === true,
     };
   }
 

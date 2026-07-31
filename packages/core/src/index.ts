@@ -181,30 +181,9 @@ export {
 } from "./common/session-log";
 
 // Job 队列
-export {
-  JobQueue,
-  getGlobalJobQueue,
-  createSpawnRequest,
-} from "./common/job-queue";
-export type {
-  JobStatus,
-  SpawnRequest,
-  SpawnReady,
-  ExitPayload,
-  JobState,
-  JobEventCallbacks,
-} from "./common/job-queue";
+export { JobQueue, getGlobalJobQueue, createSpawnRequest } from "./common/job-queue";
+export type { JobStatus, SpawnRequest, SpawnReady, ExitPayload, JobState, JobEventCallbacks } from "./common/job-queue";
 
 // Skill 解析器（Codex 兼容 frontmatter）
-export {
-  parseSkillFile,
-  parseSkillContent,
-  skillPolicyToProfile,
-  validateSkillName,
-} from "./common/skill-parser";
-export type {
-  SkillMeta,
-  SkillDependency,
-  SkillInterface,
-  SkillPolicy,
-} from "./common/skill-parser";
+export { parseSkillFile, parseSkillContent, skillPolicyToProfile, validateSkillName } from "./common/skill-parser";
+export type { SkillMeta, SkillDependency, SkillInterface, SkillPolicy } from "./common/skill-parser";

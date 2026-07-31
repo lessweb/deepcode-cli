@@ -373,13 +373,16 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           true,
           { asThinking: true }
         );
-        sessionManager.compactSession(activeSessionId).then(() => {
-          setBusy(false);
-          refreshSessionsList();
-        }).catch((err) => {
-          setBusy(false);
-          setErrorLine(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
-        });
+        sessionManager
+          .compactSession(activeSessionId)
+          .then(() => {
+            setBusy(false);
+            refreshSessionsList();
+          })
+          .catch((err) => {
+            setBusy(false);
+            setErrorLine(`Compact failed: ${err instanceof Error ? err.message : String(err)}`);
+          });
         return;
       }
       if (submission.command === "context") {
@@ -388,9 +391,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
           setErrorLine("No active session.");
           return;
         }
-        const pct = sessionInfo.maxContextTokens > 0
-          ? Math.round((sessionInfo.activeTokens / sessionInfo.maxContextTokens) * 100)
-          : 0;
+        const pct =
+          sessionInfo.maxContextTokens > 0
+            ? Math.round((sessionInfo.activeTokens / sessionInfo.maxContextTokens) * 100)
+            : 0;
         const summary = [
           `Model: ${sessionInfo.model}`,
           `Messages: ${sessionInfo.messageCount}`,
@@ -406,7 +410,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
             .join("\n");
           summary.push(`\nTop tools:\n${tools}`);
         }
-        sessionManager.addSessionSystemMessage(sessionInfo.activeSessionId, summary.join("\n"), true, { asThinking: true });
+        sessionManager.addSessionSystemMessage(sessionInfo.activeSessionId, summary.join("\n"), true, {
+          asThinking: true,
+        });
         return;
       }
 

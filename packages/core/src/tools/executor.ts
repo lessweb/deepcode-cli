@@ -70,19 +70,13 @@ export class ToolExecutor {
    * Check if a tool call set constitutes a doom loop.
    * Returns an error message when a loop is detected, or null if everything is fine.
    */
-  checkDoomLoop(
-    sessionId: string,
-    toolCalls: unknown[],
-    iteration: number
-  ): string | null {
+  checkDoomLoop(sessionId: string, toolCalls: unknown[], iteration: number): string | null {
     // Total cap check
     if (iteration >= ToolExecutor.DOOM_LOOP_TOTAL_CAP) {
       return `Doom loop detected: exceeded ${ToolExecutor.DOOM_LOOP_TOTAL_CAP} total tool call iterations without completion. The agent appears stuck in a loop.`;
     }
 
-    const parsed = toolCalls
-      .map((tc) => this.parseToolCall(tc))
-      .filter((tc): tc is ToolCall => Boolean(tc));
+    const parsed = toolCalls.map((tc) => this.parseToolCall(tc)).filter((tc): tc is ToolCall => Boolean(tc));
 
     if (parsed.length === 0) return null;
 
@@ -101,9 +95,7 @@ export class ToolExecutor {
 
     // Check: if the last N entries are all the same tool call shape
     if (buffer.length >= ToolExecutor.DOOM_LOOP_THRESHOLD) {
-      const allSame = buffer.every(
-        (e) => e.name === buffer[0].name && e.args === buffer[0].args
-      );
+      const allSame = buffer.every((e) => e.name === buffer[0].name && e.args === buffer[0].args);
       if (allSame) {
         const { name } = buffer[0];
         return (

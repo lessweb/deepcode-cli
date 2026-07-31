@@ -53,11 +53,7 @@ describe("SessionLog - SQLite operations", { timeout: 10000 }, () => {
       content: "special-marker-xyz",
     });
 
-    const logs = await queryLogsByJsonPath(
-      TEST_SESSION,
-      "$.content",
-      "special-marker-xyz"
-    );
+    const logs = await queryLogsByJsonPath(TEST_SESSION, "$.content", "special-marker-xyz");
     assert.ok(logs.length >= 1);
     assert.equal((logs[0].data as Record<string, unknown>).content, "special-marker-xyz");
   });
