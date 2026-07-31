@@ -58,6 +58,7 @@ type AppProps = {
   projectRoot: string;
   initialPrompt?: string;
   resumeSessionId?: string | true;
+  forkSessionId?: string;
   onRestart?: () => void;
 };
 
@@ -94,7 +95,7 @@ const StatusLine = React.memo(function StatusLine({
   );
 });
 
-function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProps): React.ReactElement {
+function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRestart }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
   const { columns, rows } = useWindowSize();
@@ -345,6 +346,32 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
         navigateToSubView("session-list");
         return;
       }
+      if (submission.command === "fork") {
+        const sourceSessionId = sessionManager.getActiveSessionId();
+        if (!sourceSessionId) {
+          setErrorLine("No active session to fork.");
+          return;
+        }
+        try {
+          const sessionId = sessionManager.forkSession(sourceSessionId);
+          sessionManager.setActiveSessionId(sessionId);
+          await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+          const session = sessionManager.getSession(sessionId);
+          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot).contextWindow) : "");
+          setRunningProcesses(null);
+          setActiveStatus(session?.status ?? null);
+          setActiveAskPermissions(undefined);
+          setPlanMode(session?.planMode === true);
+          setPendingPlanImplementation(null);
+          setPendingPermissionReply(null);
+          setErrorLine(null);
+          refreshSessionsList();
+          await refreshSkills(sessionId);
+        } catch (error) {
+          setErrorLine(error instanceof Error ? error.message : String(error));
+        }
+        return;
+      }
       if (submission.command === "continue" && isCurrentSessionEmpty(sessionManager)) {
         refreshSessionsList();
         navigateToSubView("session-list");
@@ -491,7 +518,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
       refreshSessionsList,
       navigateToSubView,
       resetToWelcome,
+      resetStaticView,
       planMode,
+      projectRoot,
     ]
   );
 
@@ -624,31 +653,47 @@ function App({ projectRoot, initialPrompt, resumeSessionId, onRestart }: AppProp
     startupDoneRef.current = true;
 
     async function run() {
-      // Step 1: Resume session if requested
-      if (resumeSessionId) {
-        resumeSessionIdRef.current = true;
-        if (resumeSessionId === true) {
-          // Bare --resume — show session picker; prompt makes no sense here
-          refreshSessionsList();
-          navigateToSubView("session-list");
-          return;
+      try {
+        // Step 1: Resume or fork a session if requested
+        if (forkSessionId) {
+          const sessionId = sessionManager.forkSession(forkSessionId);
+          await handleSelectSession(sessionId);
+        } else if (resumeSessionId) {
+          resumeSessionIdRef.current = true;
+          if (resumeSessionId === true) {
+            // Bare --resume — show session picker; prompt makes no sense here
+            refreshSessionsList();
+            navigateToSubView("session-list");
+            return;
+          }
+          await handleSelectSession(resumeSessionId);
         }
-        await handleSelectSession(resumeSessionId);
-      }
 
-      // Step 2: Submit prompt if provided
-      if (initialPrompt && initialPrompt.trim()) {
-        initialPromptSubmittedRef.current = true;
-        handleSubmit({
-          text: initialPrompt,
-          imageUrls: [],
-          selectedSkills: undefined,
-        });
+        // Step 2: Submit prompt if provided
+        if (initialPrompt && initialPrompt.trim()) {
+          initialPromptSubmittedRef.current = true;
+          handleSubmit({
+            text: initialPrompt,
+            imageUrls: [],
+            selectedSkills: undefined,
+          });
+        }
+      } catch (error) {
+        setErrorLine(error instanceof Error ? error.message : String(error));
       }
     }
 
     void run();
-  }, [handleSubmit, handleSelectSession, initialPrompt, navigateToSubView, refreshSessionsList, resumeSessionId]);
+  }, [
+    forkSessionId,
+    handleSubmit,
+    handleSelectSession,
+    initialPrompt,
+    navigateToSubView,
+    refreshSessionsList,
+    resumeSessionId,
+    sessionManager,
+  ]);
 
   const handleDeleteSession = useCallback(
     async (id: string): Promise<void> => {

@@ -242,6 +242,10 @@ export type SessionEntry = {
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
+  forkedFrom?: {
+    sessionId: string;
+    messageId: string;
+  };
 };
 
 export type SessionsIndex = {
@@ -1939,6 +1943,73 @@ ${agentInstructions}
     return index.entries.find((entry) => entry.id === sessionId) ?? null;
   }
 
+  forkSession(sourceSessionId: string): string {
+    const source = this.getSession(sourceSessionId);
+    if (!source) {
+      throw new Error(`No saved session found with ID "${sourceSessionId}".`);
+    }
+
+    const sourceMessages = this.listSessionMessages(sourceSessionId);
+    const sourceMessage = sourceMessages.at(-1);
+    if (!sourceMessage || typeof sourceMessage.id !== "string" || !sourceMessage.id) {
+      throw new Error(`Session "${sourceSessionId}" has no messages to fork.`);
+    }
+
+    const sessionId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const entry: SessionEntry = {
+      id: sessionId,
+      summary: source.summary,
+      assistantReply: source.assistantReply,
+      assistantThinking: source.assistantThinking,
+      assistantRefusal: null,
+      toolCalls: null,
+      status: "completed",
+      failReason: null,
+      usage: null,
+      usagePerModel: null,
+      activeTokens: source.activeTokens,
+      createTime: now,
+      updateTime: now,
+      processes: null,
+      planMode: source.planMode,
+      forkedFrom: {
+        sessionId: sourceSessionId,
+        messageId: sourceMessage.id,
+      },
+    };
+
+    this.saveSessionMessages(
+      sessionId,
+      sourceMessages.map((message) => ({ ...message, sessionId }))
+    );
+    this.getFileHistory().forkSession(sourceSessionId, sessionId);
+
+    const index = this.loadSessionsIndex();
+    index.entries.push(entry);
+    const sortedEntries = index.entries.slice().sort((a, b) => {
+      const aTime = Date.parse(a.updateTime);
+      const bTime = Date.parse(b.updateTime);
+      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
+        return b.updateTime.localeCompare(a.updateTime);
+      }
+      return bTime - aTime;
+    });
+    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
+    const keptIds = new Set(keptEntries.map((item) => item.id));
+    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
+    index.entries = keptEntries;
+    this.saveSessionsIndex(index);
+    for (const dropped of droppedEntries) {
+      this.cleanupSessionResources(dropped.id, {
+        removeMessages: true,
+        processIds: this.getProcessIds(dropped.processes ?? null),
+      });
+    }
+
+    return sessionId;
+  }
+
   /**
    * Delete a session by its ID.
    * Removes the session entry from the index and cleans up associated resources
@@ -3138,6 +3209,26 @@ ${agentInstructions}
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
       planMode: value.planMode === true,
+      forkedFrom: this.normalizeForkedFrom(value.forkedFrom),
+    };
+  }
+
+  private normalizeForkedFrom(value: unknown): SessionEntry["forkedFrom"] {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const forkedFrom = value as Record<string, unknown>;
+    if (
+      typeof forkedFrom.sessionId !== "string" ||
+      !forkedFrom.sessionId ||
+      typeof forkedFrom.messageId !== "string" ||
+      !forkedFrom.messageId
+    ) {
+      return undefined;
+    }
+    return {
+      sessionId: forkedFrom.sessionId,
+      messageId: forkedFrom.messageId,
     };
   }
 

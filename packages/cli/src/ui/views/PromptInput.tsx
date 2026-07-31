@@ -73,7 +73,7 @@ export type PromptSubmission = {
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
-  command?: "new" | "resume" | "continue" | "undo" | "mcp" | "compact" | "context" | "exit";
+  command?: "new" | "resume" | "fork" | "continue" | "undo" | "mcp" | "compact" | "context" | "exit";
 };
 
 export type PromptDraft = {
@@ -711,6 +711,11 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "resume") {
       onSubmit({ text: "", imageUrls: [], command: "resume" });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "fork") {
+      onSubmit({ text: "", imageUrls: [], command: "fork" });
       resetPromptInput();
       return;
     }

@@ -65,6 +65,23 @@ test("parseArguments returns undefined resume when not present", async () => {
   assert.equal(r.resume, undefined);
 });
 
+test("parseArguments returns true when --fork has no value", async () => {
+  const r = await parseArguments(["--fork"]);
+  assert.equal(r.fork, true);
+});
+
+test("parseArguments returns a session ID after -f", async () => {
+  const r = await parseArguments(["-f", "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"]);
+  assert.equal(r.fork, "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6");
+});
+
+test("parseArguments allows bare --fork with exec and prompt", async () => {
+  const r = await parseArguments(["--fork", "--exec", "--prompt", "continue"]);
+  assert.equal(r.fork, true);
+  assert.equal(r.exec, true);
+  assert.equal(r.prompt, "continue");
+});
+
 test("parseArguments returns defaults for empty args", async () => {
   const r = await parseArguments([]);
   assert.ok(!("message" in r));
@@ -293,6 +310,44 @@ test("parseArguments exits on invalid --resume session ID", async () => {
   await withMockedExit(async (exitSpy) => {
     try {
       await parseArguments(["--resume", "not-a-uuid"]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.length >= 1);
+  });
+});
+
+test("parseArguments exits on invalid --fork session ID", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["--fork", "not-a-uuid"]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.length >= 1);
+  });
+});
+
+test("parseArguments exits when --fork is combined with --resume", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments([
+        "--fork",
+        "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6",
+        "--resume",
+        "1a5cb7a5-c39d-4c39-a11b-05f8b22b8df6",
+      ]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.length >= 1);
+  });
+});
+
+test("parseArguments exits when --fork is combined with --last", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["--fork", "--last"]);
     } catch {
       /* expected */
     }

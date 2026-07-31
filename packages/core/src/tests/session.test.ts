@@ -3564,6 +3564,119 @@ test("SessionManager.deleteSession does not affect other sessions", () => {
   assert.ok(messages.length > 0);
 });
 
+test("SessionManager.forkSession copies conversation state with fresh usage and independent file history", () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-fork-workspace-");
+  const home = createTempDir("deepcode-fork-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-fork");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Fork source");
+  const now = "2026-01-01T00:00:00.000Z";
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = {
+    ...index.entries[0],
+    assistantReply: "Source reply",
+    assistantThinking: "Source thinking",
+    assistantRefusal: "old refusal",
+    toolCalls: [{ id: "old-call" }],
+    status: "failed",
+    failReason: "old failure",
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, total_reqs: 1 },
+    usagePerModel: {
+      "test-model": { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, total_reqs: 1 },
+    },
+    activeTokens: 15,
+    processes: new Map([["123", { startTime: now, command: "sleep 10" }]]),
+    askPermissions: [{ toolCallId: "old-call", name: "bash", command: "sleep 10", scopes: ["unknown"] }],
+    planMode: true,
+  };
+  (manager as any).saveSessionsIndex(index);
+
+  const sourceMessages: SessionMessage[] = [
+    {
+      id: "source-user-message",
+      sessionId: sourceSessionId,
+      role: "user",
+      content: "Fork source",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+    {
+      id: "source-head-message",
+      sessionId: sourceSessionId,
+      role: "assistant",
+      content: "Source reply",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+  ];
+  (manager as any).saveSessionMessages(sourceSessionId, sourceMessages);
+
+  const trackedPath = path.join(workspace, "tracked.txt");
+  fs.writeFileSync(trackedPath, "source", "utf8");
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  const sourceCheckpoint = fileHistory.recordCheckpoint(sourceSessionId, [trackedPath], "source checkpoint");
+  assert.ok(sourceCheckpoint);
+
+  const forkedSessionId = manager.forkSession(sourceSessionId);
+  const forked = manager.getSession(forkedSessionId);
+  assert.ok(forked);
+  assert.deepEqual(forked.forkedFrom, {
+    sessionId: sourceSessionId,
+    messageId: "source-head-message",
+  });
+  assert.equal(forked.usage, null);
+  assert.equal(forked.usagePerModel, null);
+  assert.equal(forked.activeTokens, 15);
+  assert.equal(forked.status, "completed");
+  assert.equal(forked.failReason, null);
+  assert.equal(forked.assistantRefusal, null);
+  assert.equal(forked.toolCalls, null);
+  assert.equal(forked.processes, null);
+  assert.equal(forked.askPermissions, undefined);
+  assert.equal(forked.planMode, true);
+
+  const forkedMessages = manager.listSessionMessages(forkedSessionId);
+  assert.deepEqual(
+    forkedMessages.map((message) => ({ id: message.id, sessionId: message.sessionId, content: message.content })),
+    sourceMessages.map((message) => ({ id: message.id, sessionId: forkedSessionId, content: message.content }))
+  );
+  assert.deepEqual(manager.listSessionMessages(sourceSessionId), sourceMessages);
+  assert.equal(fileHistory.getCurrentCheckpointHash(forkedSessionId), sourceCheckpoint);
+
+  fs.writeFileSync(trackedPath, "forked", "utf8");
+  const forkedCheckpoint = fileHistory.recordCheckpoint(forkedSessionId, [trackedPath], "fork checkpoint");
+  assert.ok(forkedCheckpoint);
+  assert.notEqual(forkedCheckpoint, sourceCheckpoint);
+  assert.equal(fileHistory.getCurrentCheckpointHash(sourceSessionId), sourceCheckpoint);
+});
+
+test("SessionManager ignores malformed fork lineage in persisted entries", () => {
+  const workspace = createTempDir("deepcode-fork-lineage-workspace-");
+  const home = createTempDir("deepcode-fork-lineage-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-fork-lineage");
+  const sessionId = createSessionAndMessages(manager, "lineage-session", "Lineage");
+  const projectDir = (manager as any).getProjectStorage().projectDir;
+  const indexPath = path.join(projectDir, "sessions-index.json");
+  const persisted = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  persisted.entries[0].forkedFrom = { sessionId: sessionId };
+  fs.writeFileSync(indexPath, JSON.stringify(persisted), "utf8");
+
+  assert.equal(manager.getSession(sessionId)?.forkedFrom, undefined);
+});
+
 /**
  * Helper: creates a session and writes a few messages to it so we can test
  * that deleteSession removes both the index entry and the messages file.

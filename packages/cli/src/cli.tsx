@@ -30,6 +30,7 @@ async function main(): Promise<void> {
 
   let initialPrompt = parsed.prompt;
   let resumeSessionId = parsed.resume;
+  let forkSessionId = parsed.fork;
   const projectRoot = process.cwd();
 
   // Resolve --last to the most recent session ID for the current project
@@ -51,11 +52,30 @@ async function main(): Promise<void> {
     }
   }
 
+  if (forkSessionId === true) {
+    const projectCode = getProjectCode(projectRoot);
+    const indexPath = join(homedir(), ".deepcode", "projects", projectCode, "sessions-index.json");
+    try {
+      const index = JSON.parse(readFileSync(indexPath, "utf-8"));
+      const entries: { id: string; updateTime: string }[] = Array.isArray(index?.entries) ? index.entries : [];
+      if (entries.length === 0) {
+        writeStderrLine("No previous sessions found for the current project.\n");
+        process.exit(1);
+      }
+      const mostRecent = entries.reduce((a, b) => (a.updateTime > b.updateTime ? a : b));
+      forkSessionId = mostRecent.id;
+    } catch {
+      writeStderrLine("No previous sessions found for the current project.\n");
+      process.exit(1);
+    }
+  }
+
   if (parsed.exec) {
     process.exitCode = await runExecMode({
       prompt: parsed.prompt!,
       projectRoot,
-      resumeSessionId: typeof parsed.resume === "string" ? parsed.resume : undefined,
+      resumeSessionId: typeof resumeSessionId === "string" ? resumeSessionId : undefined,
+      forkSessionId: typeof forkSessionId === "string" ? forkSessionId : undefined,
     });
     return;
   }
@@ -83,6 +103,22 @@ async function main(): Promise<void> {
     }
   }
 
+  if (typeof forkSessionId === "string") {
+    const projectCode = getProjectCode(projectRoot);
+    const indexPath = join(homedir(), ".deepcode", "projects", projectCode, "sessions-index.json");
+    try {
+      const index = JSON.parse(readFileSync(indexPath, "utf-8"));
+      const found = Array.isArray(index?.entries) && index.entries.some((e: { id: string }) => e.id === forkSessionId);
+      if (!found) {
+        writeStderrLine(`No saved session found with ID "${forkSessionId}".\n`);
+        process.exit(1);
+      }
+    } catch {
+      writeStderrLine(`No saved session found with ID "${forkSessionId}".\n`);
+      process.exit(1);
+    }
+  }
+
   const updatePromptResult = await promptForPendingUpdate(packageInfo);
   if (updatePromptResult.installed) {
     process.exit(0);
@@ -96,12 +132,15 @@ async function main(): Promise<void> {
     initialPrompt = undefined;
     const appResumeSessionId = resumeSessionId;
     resumeSessionId = undefined;
+    const appForkSessionId = forkSessionId;
+    forkSessionId = undefined;
     const inkInstance = render(
       <AppContainer
         projectRoot={projectRoot}
         version={packageInfo?.version ?? CLI_VERSION}
         initialPrompt={appInitialPrompt}
         resumeSessionId={appResumeSessionId}
+        forkSessionId={typeof appForkSessionId === "string" ? appForkSessionId : undefined}
         onRestart={() => restartRef.current?.()}
       />,
       { exitOnCtrlC: false }
