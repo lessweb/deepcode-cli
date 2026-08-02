@@ -1723,7 +1723,7 @@ ${agentInstructions}
               toolCalls,
               usage: accumulateUsage(entry.usage, responseUsage),
               usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-              activeTokens: getTotalTokens(responseUsage),
+              activeTokens: (entry.activeTokens ?? 0) + getTotalTokens(responseUsage),
               status: "ask_permission",
               failReason: null,
               askPermissions: permissionPlan.askPermissions,
@@ -1749,7 +1749,7 @@ ${agentInstructions}
           toolCalls,
           usage: accumulateUsage(entry.usage, responseUsage),
           usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-          activeTokens: getTotalTokens(responseUsage),
+          activeTokens: (entry.activeTokens ?? 0) + getTotalTokens(responseUsage),
           status: refusal ? "failed" : waitingForUser ? "waiting_for_user" : toolCalls ? "processing" : "completed",
           failReason: refusal ? refusal : entry.failReason,
           askPermissions: undefined,
@@ -1862,7 +1862,8 @@ ${agentInstructions}
       ...entry,
       usage: accumulateUsage(entry.usage, responseUsage),
       usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-      activeTokens: getTotalTokens(responseUsage),
+      // 压缩后上下文已精简, 重置 activeTokens 避免立即再次触发压缩
+      activeTokens: 0,
       updateTime: now,
     }));
 
