@@ -44,6 +44,7 @@ import {
   type PermissionSettings,
 } from "./settings";
 import { logApiError } from "./common/error-logger";
+import { writeFileAtomic } from "./common/private-storage";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
 import { killProcessTree } from "./common/process-tree";
@@ -2378,7 +2379,7 @@ ${agentInstructions}
       })),
       originalPath: this.projectRoot,
     };
-    fs.writeFileSync(sessionsIndexPath, JSON.stringify(normalized, null, 2), "utf8");
+    writeFileAtomic(sessionsIndexPath, JSON.stringify(normalized, null, 2));
   }
 
   private getSessionMessagesPath(sessionId: string): string {
@@ -2449,7 +2450,7 @@ ${agentInstructions}
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
     const payload = messages.map((message) => JSON.stringify(message)).join("\n");
-    fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
+    writeFileAtomic(messagePath, payload ? `${payload}\n` : "");
   }
 
   private updateSessionEntry(sessionId: string, updater: (entry: SessionEntry) => SessionEntry): SessionEntry | null {
