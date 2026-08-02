@@ -6,8 +6,36 @@ const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
   ? parseInt(process.env.DEEPCODE_MCP_TIMEOUT, 10)
   : 30_000;
 const MCP_CALL_TOOL_TIMEOUT_MS = 60_000;
+/** Connection-establishment budget for MCP servers (startup + handshake). */
+const MCP_CONNECT_TIMEOUT_MS = 15_000;
 const API_TOOL_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
 const API_TOOL_NAME_MAX_LENGTH = 64;
+
+/**
+ * Classify an MCP error message so the agent can respond appropriately:
+ * a timed-out server should be retried / restarted, a config error should
+ * not be retried. Mirrors the failure taxonomy used by the MCP reference
+ * implementations (connection / protocol / timeout / auth / busy).
+ */
+export function classifyMcpError(message: string): "timeout" | "connection" | "protocol" | "auth" | "busy" | "unknown" {
+  const m = message.toLowerCase();
+  if (/timed out|timeout|deadline/.test(m)) {
+    return "timeout";
+  }
+  if (/connection refused|connect (call )?failed|failed to start|no such file|spawn .* enoent|not found/.test(m)) {
+    return "connection";
+  }
+  if (/unauthorized|forbidden|401|403|authentication|invalid api|api ?key/.test(m)) {
+    return "auth";
+  }
+  if (/parse error|invalid json|protocol|schema|unsupported/.test(m)) {
+    return "protocol";
+  }
+  if (/busy|locked|in progress/.test(m)) {
+    return "busy";
+  }
+  return "unknown";
+}
 
 type McpToolEntry = {
   serverName: string;
@@ -359,10 +387,16 @@ export class McpManager {
         output: text || JSON.stringify(result.content),
       };
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const kind = classifyMcpError(message);
       return {
         ok: false,
         name,
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
+        // Structured classification lets the agent distinguish a wedged
+        // server (timeout) from a config error (auth/protocol) instead of
+        // retrying blindly.
+        ...(kind !== "unknown" ? { mcpErrorKind: kind } : {}),
       };
     }
   }

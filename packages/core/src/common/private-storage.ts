@@ -108,3 +108,30 @@ export function ensurePrivateDirectory(dirPath: string): void {
 export function deepcodeHome(): string {
   return path.join(os.homedir(), ".deepcode");
 }
+
+/**
+ * Atomically write ``contents`` to ``targetPath`` with user-only permissions.
+ *
+ * Writes to a sibling ``.tmp`` file first, then ``fs.rename`` over the target.
+ * A crash mid-write leaves the previous content intact instead of a truncated
+ * file. On Windows, the private ACL is applied to the temp file *before* the
+ * rename so the final path never exists with a permissive ACL.
+ */
+export function writeFileAtomic(targetPath: string, contents: string): void {
+  const tmpPath = `${targetPath}.tmp`;
+  writePrivateFile(tmpPath, contents);
+  try {
+    fs.renameSync(tmpPath, targetPath);
+  } catch (err) {
+    try {
+      fs.unlinkSync(tmpPath);
+    } catch {
+      /* ignore cleanup failure */
+    }
+    throw err;
+  }
+  if (process.platform === "win32") {
+    // After rename the final path may carry a new (inherited) ACL; re-restrict.
+    restrictWindowsAcl(targetPath);
+  }
+}
