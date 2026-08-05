@@ -307,6 +307,52 @@ test("computeToolCallPermissions allows read tool calls under skill scan paths",
   );
 });
 
+test("UnderstandImage requires network and exempts only configured image directories from read scope", () => {
+  const projectRoot = createTempDir("deepcode-permissions-image-workspace-");
+  const home = createTempDir("deepcode-permissions-image-home-");
+  const sessionImages = path.join(home, ".deepcode", "projects", "project", "images", "session-1");
+  const currentImage = path.join(sessionImages, "current.png");
+  const projectImage = path.join(projectRoot, "project.png");
+  const outsideImage = path.join(home, "outside.png");
+  const plan = computeToolCallPermissions({
+    sessionId: "session-1",
+    projectRoot,
+    readPermissionExemptPaths: [sessionImages],
+    settings: {
+      allow: [] as PermissionScope[],
+      deny: [] as PermissionScope[],
+      ask: [] as PermissionScope[],
+      defaultMode: "askAll" as const,
+    },
+    toolCalls: [
+      {
+        id: "call-current",
+        type: "function",
+        function: { name: "UnderstandImage", arguments: JSON.stringify({ image_path: currentImage }) },
+      },
+      {
+        id: "call-project",
+        type: "function",
+        function: { name: "UnderstandImage", arguments: JSON.stringify({ image_path: projectImage }) },
+      },
+      {
+        id: "call-outside",
+        type: "function",
+        function: { name: "UnderstandImage", arguments: JSON.stringify({ image_path: outsideImage }) },
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    plan.askPermissions.map((item) => ({ id: item.toolCallId, scopes: item.scopes })),
+    [
+      { id: "call-current", scopes: ["network"] },
+      { id: "call-project", scopes: ["read-in-cwd", "network"] },
+      { id: "call-outside", scopes: ["read-out-cwd", "network"] },
+    ]
+  );
+});
+
 test("isPathInAnyDirectory matches absolute and project-relative directories without sibling leaks", () => {
   const projectRoot = createTempDir("deepcode-permissions-directory-match-workspace-");
   const home = createTempDir("deepcode-permissions-directory-match-home-");

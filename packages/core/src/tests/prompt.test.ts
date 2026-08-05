@@ -33,6 +33,16 @@ test("getTools always includes WebSearch", () => {
   assert.equal(names.includes("WebSearch"), true);
 });
 
+test("UnderstandImage is available only to non-multimodal models", () => {
+  const nonMultimodalTools = getTools({ model: "deepseek-chat" }).map((tool) => tool.function.name);
+  const multimodalTools = getTools({ model: "gpt-4o" }).map((tool) => tool.function.name);
+
+  assert.equal(nonMultimodalTools.includes("UnderstandImage"), true);
+  assert.equal(multimodalTools.includes("UnderstandImage"), false);
+  assert.equal(getSystemPrompt("/tmp/project", { model: "deepseek-chat" }).includes("## UnderstandImage"), true);
+  assert.equal(getSystemPrompt("/tmp/project", { model: "gpt-4o" }).includes("## UnderstandImage"), false);
+});
+
 test("interactive prompt and tools include AskUserQuestion", () => {
   assert.equal(getSystemPrompt("/tmp/project").includes("## AskUserQuestion"), true);
   assert.equal(

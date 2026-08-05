@@ -275,6 +275,20 @@ export function describeToolPermissionRequest(options: {
     };
   }
 
+  if (name === "UnderstandImage") {
+    const imagePath = typeof args.image_path === "string" ? args.image_path : "";
+    const scopes: AskPermissionScope[] = ["network"];
+    if (imagePath && !isPathInAnyDirectory(options.projectRoot, imagePath, options.readPermissionExemptPaths)) {
+      scopes.unshift(isPathInProject(options.projectRoot, imagePath) ? "read-in-cwd" : "read-out-cwd");
+    }
+    return {
+      toolCallId: options.toolCall.id,
+      name,
+      command: imagePath ? `understand-image ${imagePath}` : "understand-image",
+      scopes,
+    };
+  }
+
   if (name.startsWith("mcp__")) {
     return {
       toolCallId: options.toolCall.id,

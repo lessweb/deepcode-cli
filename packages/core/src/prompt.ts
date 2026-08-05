@@ -703,6 +703,31 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
     },
   });
 
+  if (!supportsMultimodal(_options.model ?? "")) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "UnderstandImage",
+        description: "Analyze or extract information from a local JPEG, PNG, or WebP image.",
+        parameters: {
+          type: "object",
+          properties: {
+            prompt: {
+              type: "string",
+              description: "A clear instruction describing what to analyze or extract from the image.",
+            },
+            image_path: {
+              type: "string",
+              description: "The absolute path of the JPEG, PNG, or WebP image to analyze.",
+            },
+          },
+          required: ["prompt", "image_path"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
+
   for (const tool of externalTools) {
     tools.push(tool);
   }

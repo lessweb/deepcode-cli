@@ -2891,6 +2891,23 @@ test("Write tool params prefer file_path even when content appears first", () =>
   assert.equal(toolMessage.meta?.paramsMd, filePath);
 });
 
+test("UnderstandImage tool params show image_path instead of prompt", () => {
+  const manager = createSessionManager(process.cwd(), "machine-id-understand-image-params");
+  const imagePath = path.join(process.cwd(), "screenshot.png");
+
+  const toolMessage = (manager as any).buildToolMessage(
+    "session-1",
+    "call-understand-image-1",
+    JSON.stringify({ ok: true, name: "UnderstandImage", output: "A screenshot." }),
+    {
+      name: "UnderstandImage",
+      arguments: JSON.stringify({ prompt: "Describe this image", image_path: imagePath }),
+    }
+  ) as SessionMessage;
+
+  assert.equal(toolMessage.meta?.paramsMd, imagePath);
+});
+
 test("LLM tool calls without ids receive generated 32 character ids", async () => {
   const workspace = createTempDir("deepcode-tool-call-id-workspace-");
   const home = createTempDir("deepcode-tool-call-id-home-");
@@ -3214,6 +3231,25 @@ test("SessionManager resets active tokens to latest post-compaction response usa
   assert.equal(usagePerModel.total_reqs, 3);
 });
 
+test("SessionManager uses the configured auto compact window", async () => {
+  const workspace = createTempDir("deepcode-custom-compact-window-workspace-");
+  const home = createTempDir("deepcode-custom-compact-window-home-");
+  setHomeDir(home);
+
+  const responses = [
+    createChatResponse("large", { prompt_tokens: 990, completion_tokens: 10, total_tokens: 1000 }),
+    createChatResponse("summary", { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 }),
+    createChatResponse("after compact", { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }),
+  ];
+  const manager = createMockedClientSessionManager(workspace, responses, 500);
+
+  const sessionId = await manager.createSession({ text: "" });
+  await manager.replySession(sessionId, { text: "" });
+
+  assert.equal(manager.getSession(sessionId)?.activeTokens, 7);
+  assert.equal(manager.getSession(sessionId)?.usagePerModel?.["test-model"]?.total_reqs, 3);
+});
+
 test("SessionManager streams chat completions and counts reasoning progress", async () => {
   const workspace = createTempDir("deepcode-stream-workspace-");
   const home = createTempDir("deepcode-stream-home-");
@@ -3504,6 +3540,86 @@ test("SessionManager.deleteSession removes the messages file", () => {
   assert.equal(fs.existsSync(messagePath), false);
 });
 
+test("non-multimodal sessions persist pasted images, append paths, and clean them on delete", async () => {
+  const workspace = createTempDir("deepcode-session-image-workspace-");
+  const home = createTempDir("deepcode-session-image-home-");
+  setHomeDir(home);
+  const manager = createSessionManagerForModel(workspace, "deepseek-chat");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({
+    imageUrls: ["data:image/png;base64,aGVsbG8=", "data:image/webp;base64,d29ybGQ="],
+  });
+  const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
+  const imageFiles = fs.readdirSync(imagesDir).sort();
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+
+  assert.equal(imageFiles.length, 2);
+  assert.deepEqual(imageFiles.map((file) => path.extname(file)).sort(), [".png", ".webp"]);
+  assert.match(userMessage?.content ?? "", /<images>/);
+  assert.match(userMessage?.content ?? "", /name="\[Image #1\]"/);
+  assert.match(userMessage?.content ?? "", new RegExp(escapeRegExp(imagesDir)));
+  assert.equal(Array.isArray(userMessage?.contentParams), true);
+
+  manager.deleteSession(sessionId);
+  assert.equal(fs.existsSync(imagesDir), false);
+});
+
+test("native multimodal sessions keep pasted images inline without persisting them", async () => {
+  const workspace = createTempDir("deepcode-native-image-workspace-");
+  const home = createTempDir("deepcode-native-image-home-");
+  setHomeDir(home);
+  const manager = createSessionManagerForModel(workspace, "gpt-4o");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
+  const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+
+  assert.equal(fs.existsSync(imagesDir), false);
+  assert.equal(userMessage?.content, "");
+  assert.equal(Array.isArray(userMessage?.contentParams), true);
+});
+
+test("non-multimodal sessions reject unsupported pasted images before creating a session", async () => {
+  const workspace = createTempDir("deepcode-invalid-image-workspace-");
+  const home = createTempDir("deepcode-invalid-image-home-");
+  setHomeDir(home);
+  const manager = createSessionManagerForModel(workspace, "deepseek-chat");
+  (manager as any).activateSession = async () => {};
+
+  await assert.rejects(
+    manager.createSession({ imageUrls: ["data:image/gif;base64,aGVsbG8="] }),
+    /Only JPEG, PNG, and WebP/
+  );
+  assert.equal(manager.listSessions().length, 0);
+});
+
+test("forkSession copies image resources and rewrites stored paths", async () => {
+  if (!hasGit()) {
+    return;
+  }
+  const workspace = createTempDir("deepcode-fork-image-workspace-");
+  const home = createTempDir("deepcode-fork-image-home-");
+  setHomeDir(home);
+  const manager = createSessionManagerForModel(workspace, "deepseek-chat");
+  (manager as any).activateSession = async () => {};
+  const sourceSessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
+  const forkedSessionId = manager.forkSession(sourceSessionId);
+  const projectImagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images");
+  const sourceDir = path.join(projectImagesDir, sourceSessionId);
+  const forkedDir = path.join(projectImagesDir, forkedSessionId);
+  const forkedUserMessage = manager.listSessionMessages(forkedSessionId).find((message) => message.role === "user");
+
+  assert.equal(fs.readdirSync(forkedDir).length, 1);
+  assert.equal(forkedUserMessage?.content?.includes(forkedDir), true);
+  assert.equal(forkedUserMessage?.content?.includes(sourceDir), false);
+
+  manager.deleteSession(sourceSessionId);
+  assert.equal(fs.existsSync(sourceDir), false);
+  assert.equal(fs.existsSync(forkedDir), true);
+});
+
 test("SessionManager.deleteSession returns false when session does not exist", () => {
   const workspace = createTempDir("deepcode-delete-nonexist-workspace-");
   const home = createTempDir("deepcode-delete-nonexist-home-");
@@ -3540,6 +3656,119 @@ test("SessionManager.deleteSession does not affect other sessions", () => {
   // The remaining session should still have its messages accessible
   const messages = manager.listSessionMessages(session2);
   assert.ok(messages.length > 0);
+});
+
+test("SessionManager.forkSession copies conversation state with fresh usage and independent file history", () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-fork-workspace-");
+  const home = createTempDir("deepcode-fork-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-fork");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Fork source");
+  const now = "2026-01-01T00:00:00.000Z";
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = {
+    ...index.entries[0],
+    assistantReply: "Source reply",
+    assistantThinking: "Source thinking",
+    assistantRefusal: "old refusal",
+    toolCalls: [{ id: "old-call" }],
+    status: "failed",
+    failReason: "old failure",
+    usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, total_reqs: 1 },
+    usagePerModel: {
+      "test-model": { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, total_reqs: 1 },
+    },
+    activeTokens: 15,
+    processes: new Map([["123", { startTime: now, command: "sleep 10" }]]),
+    askPermissions: [{ toolCallId: "old-call", name: "bash", command: "sleep 10", scopes: ["unknown"] }],
+    planMode: true,
+  };
+  (manager as any).saveSessionsIndex(index);
+
+  const sourceMessages: SessionMessage[] = [
+    {
+      id: "source-user-message",
+      sessionId: sourceSessionId,
+      role: "user",
+      content: "Fork source",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+    {
+      id: "source-head-message",
+      sessionId: sourceSessionId,
+      role: "assistant",
+      content: "Source reply",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+  ];
+  (manager as any).saveSessionMessages(sourceSessionId, sourceMessages);
+
+  const trackedPath = path.join(workspace, "tracked.txt");
+  fs.writeFileSync(trackedPath, "source", "utf8");
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  const sourceCheckpoint = fileHistory.recordCheckpoint(sourceSessionId, [trackedPath], "source checkpoint");
+  assert.ok(sourceCheckpoint);
+
+  const forkedSessionId = manager.forkSession(sourceSessionId);
+  const forked = manager.getSession(forkedSessionId);
+  assert.ok(forked);
+  assert.deepEqual(forked.forkedFrom, {
+    sessionId: sourceSessionId,
+    messageId: "source-head-message",
+  });
+  assert.equal(forked.usage, null);
+  assert.equal(forked.usagePerModel, null);
+  assert.equal(forked.activeTokens, 15);
+  assert.equal(forked.status, "completed");
+  assert.equal(forked.failReason, null);
+  assert.equal(forked.assistantRefusal, null);
+  assert.equal(forked.toolCalls, null);
+  assert.equal(forked.processes, null);
+  assert.equal(forked.askPermissions, undefined);
+  assert.equal(forked.planMode, true);
+
+  const forkedMessages = manager.listSessionMessages(forkedSessionId);
+  assert.deepEqual(
+    forkedMessages.map((message) => ({ id: message.id, sessionId: message.sessionId, content: message.content })),
+    sourceMessages.map((message) => ({ id: message.id, sessionId: forkedSessionId, content: message.content }))
+  );
+  assert.deepEqual(manager.listSessionMessages(sourceSessionId), sourceMessages);
+  assert.equal(fileHistory.getCurrentCheckpointHash(forkedSessionId), sourceCheckpoint);
+
+  fs.writeFileSync(trackedPath, "forked", "utf8");
+  const forkedCheckpoint = fileHistory.recordCheckpoint(forkedSessionId, [trackedPath], "fork checkpoint");
+  assert.ok(forkedCheckpoint);
+  assert.notEqual(forkedCheckpoint, sourceCheckpoint);
+  assert.equal(fileHistory.getCurrentCheckpointHash(sourceSessionId), sourceCheckpoint);
+});
+
+test("SessionManager ignores malformed fork lineage in persisted entries", () => {
+  const workspace = createTempDir("deepcode-fork-lineage-workspace-");
+  const home = createTempDir("deepcode-fork-lineage-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-fork-lineage");
+  const sessionId = createSessionAndMessages(manager, "lineage-session", "Lineage");
+  const projectDir = (manager as any).getProjectStorage().projectDir;
+  const indexPath = path.join(projectDir, "sessions-index.json");
+  const persisted = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  persisted.entries[0].forkedFrom = { sessionId: sessionId };
+  fs.writeFileSync(indexPath, JSON.stringify(persisted), "utf8");
+
+  assert.equal(manager.getSession(sessionId)?.forkedFrom, undefined);
 });
 
 /**
@@ -3663,6 +3892,21 @@ function createSessionManager(projectRoot: string, machineId: string): SessionMa
   });
 }
 
+function createSessionManagerForModel(projectRoot: string, model: string): SessionManager {
+  return new SessionManager({
+    projectRoot,
+    createOpenAIClient: () => ({
+      client: null,
+      model,
+      thinkingEnabled: false,
+      machineId: "machine-id-image-test",
+    }),
+    getResolvedSettings: () => ({ model }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+}
+
 function countLoadedSkillMessages(messages: SessionMessage[], skillName: string): number {
   return messages.filter((message) => message.role === "system" && message.meta?.skill?.name === skillName).length;
 }
@@ -3713,7 +3957,11 @@ function createNotifyingSessionManager(
   });
 }
 
-function createMockedClientSessionManager(projectRoot: string, responses: unknown[]): SessionManager {
+function createMockedClientSessionManager(
+  projectRoot: string,
+  responses: unknown[],
+  autoCompactWindow?: number
+): SessionManager {
   const client = {
     chat: {
       completions: {
@@ -3737,7 +3985,7 @@ function createMockedClientSessionManager(projectRoot: string, responses: unknow
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", autoCompactWindow }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });

@@ -1,6 +1,6 @@
 # Session Persistence
 
-Deep Code stores per-project session history in the local user directory. This history powers `/resume`, `/continue`, and `/undo`, and it remains available after the current terminal process exits.
+Deep Code stores per-project session history in the local user directory. This history powers `/resume`, `/fork`, `/continue`, and `/undo`, and it remains available after the current terminal process exits.
 
 ## Storage Location
 
@@ -31,6 +31,7 @@ The project storage directory contains these main files and directories:
 - Latest assistant reply, thinking content, refusal reason, and failure reason.
 - Latest tool-call data, token usage, and active token count.
 - Metadata for subprocesses still tracked by the session.
+- The direct source session ID and source head message ID for forked sessions.
 
 The default session title comes from the first 100 characters of the first user prompt. Renaming a session from the session list updates the title in the index.
 
@@ -85,6 +86,12 @@ The per-project session list keeps the 50 most recent entries. When the limit is
 `/continue` first continues the active session. If there is no active session to continue, it opens the session selection flow.
 
 When continuing a session, Deep Code reads the message file, filters compacted old messages, repairs incomplete tool-call context, and converts the usable history into model request messages.
+
+### Forking A Session
+
+`/fork` copies the active conversation and switches to the new session. On the command line, `--fork <session-id>` copies a specific session; bare `-f` or `--fork` copies the most recently updated session in the current project. `--fork` cannot be combined with `--resume` or `--last`.
+
+The new session keeps the message history, current context token count, and code-checkpoint starting point, while cumulative `usage` and per-model usage are reset. Subsequent messages, model usage, and checkpoints update only the forked session and leave the source session unchanged.
 
 ### Long-Session Compaction
 

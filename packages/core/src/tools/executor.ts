@@ -3,6 +3,7 @@ import { handleBashTool } from "./bash-handler";
 import { handleEditTool } from "./edit-handler";
 import { handleReadTool } from "./read-handler";
 import { handleUpdatePlanTool } from "./update-plan-handler";
+import { handleUnderstandImageTool } from "./understand-image-handler";
 import { handleWebSearchTool } from "./web-search-handler";
 import { handleWriteTool } from "./write-handler";
 import type { McpManager } from "../mcp/mcp-manager";
@@ -83,6 +84,7 @@ export class ToolExecutor {
     this.toolHandlers.set("edit", handleEditTool);
     this.toolHandlers.set("AskUserQuestion", handleAskUserQuestionTool);
     this.toolHandlers.set("UpdatePlan", handleUpdatePlanTool);
+    this.toolHandlers.set("UnderstandImage", handleUnderstandImageTool);
     this.toolHandlers.set("WebSearch", handleWebSearchTool);
   }
 

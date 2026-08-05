@@ -75,6 +75,7 @@ Skills are discovered from these locations, in priority order:
 | `/`              | Open the skills / commands menu                         |
 | `/new`           | Start a fresh conversation                              |
 | `/resume`        | Choose a previous conversation to continue              |
+| `/fork`          | Fork the current conversation     |
 | `/continue`      | Continue the active conversation or pick one to resume  |
 | `/model`         | Switch model, thinking mode, and reasoning effort       |
 | `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)    |

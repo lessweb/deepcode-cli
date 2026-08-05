@@ -25,6 +25,8 @@ function createSettings(
     env: {},
     baseURL: "https://example.invalid",
     model: "test-model",
+    contextWindow: 256 * 1024,
+    autoCompactWindow: 128 * 1024,
     thinkingEnabled: false,
     reasoningEffort: "high",
     debugLogEnabled: false,
@@ -90,6 +92,7 @@ function createHarness(scenario: ManagerScenario = {}) {
   let disposed = 0;
   let interrupted = 0;
   let activeId: string | null = null;
+  let forkedFrom: string | null = null;
   let entry: SessionEntry | null = scenario.resumeExists ? createEntry(RESUME_ID, "completed") : null;
   let managerOptions: SessionManagerOptions | null = null;
   let initializedMcp: unknown;
@@ -110,6 +113,12 @@ function createHarness(scenario: ManagerScenario = {}) {
         },
         getActiveSessionId: () => activeId,
         getSession: (sessionId) => (entry?.id === sessionId ? entry : null),
+        forkSession: (sessionId) => {
+          forkedFrom = sessionId;
+          activeId = "forked-session";
+          entry = createEntry(activeId, "completed");
+          return activeId;
+        },
         handleUserPrompt: async (prompt) => {
           submitted.push(prompt);
           if (scenario.throwFromPrompt) throw scenario.throwFromPrompt;
@@ -166,6 +175,9 @@ function createHarness(scenario: ManagerScenario = {}) {
     },
     get interrupted() {
       return interrupted;
+    },
+    get forkedFrom() {
+      return forkedFrom;
     },
     get managerOptions() {
       return managerOptions;
@@ -224,6 +236,33 @@ test("runExecMode rejects a missing resume session and disposes resources", asyn
   );
 
   assert.equal(code, 1);
+  assert.deepEqual(harness.stdout, []);
+  assert.match(harness.stderr.join("\n"), /No saved session found/);
+  assert.equal(harness.disposed, 1);
+});
+
+test("runExecMode forks a validated session before submitting", async () => {
+  const harness = createHarness({ resumeExists: true, finalReply: "fork continued" });
+  const code = await runExecMode(
+    { prompt: "continue", projectRoot: "/tmp/project", forkSessionId: RESUME_ID, input: ttyInput() },
+    harness.dependencies
+  );
+
+  assert.equal(code, 0);
+  assert.equal(harness.forkedFrom, RESUME_ID);
+  assert.deepEqual(harness.stdout, ["fork continued"]);
+  assert.deepEqual(harness.submitted, [{ text: "continue" }]);
+});
+
+test("runExecMode rejects a missing fork source and disposes resources", async () => {
+  const harness = createHarness();
+  const code = await runExecMode(
+    { prompt: "continue", projectRoot: "/tmp/project", forkSessionId: RESUME_ID, input: ttyInput() },
+    harness.dependencies
+  );
+
+  assert.equal(code, 1);
+  assert.equal(harness.forkedFrom, null);
   assert.deepEqual(harness.stdout, []);
   assert.match(harness.stderr.join("\n"), /No saved session found/);
   assert.equal(harness.disposed, 1);

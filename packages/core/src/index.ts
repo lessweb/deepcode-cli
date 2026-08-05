@@ -14,6 +14,8 @@ export {
   modelConfigKey,
   getUserSettingsPath,
   getProjectSettingsPath,
+  getDefaultContextWindow,
+  getDefaultAutoCompactWindow,
   DEFAULT_MODEL,
   DEFAULT_BASE_URL,
   ATLASCLOUD_DEFAULT_MODEL,
@@ -87,6 +89,7 @@ export { handleReadTool } from "./tools/read-handler";
 export { handleWriteTool } from "./tools/write-handler";
 export { handleEditTool } from "./tools/edit-handler";
 export { handleUpdatePlanTool } from "./tools/update-plan-handler";
+export { handleUnderstandImageTool } from "./tools/understand-image-handler";
 export { handleWebSearchTool } from "./tools/web-search-handler";
 export { handleAskUserQuestionTool } from "./tools/ask-user-question-handler";
 

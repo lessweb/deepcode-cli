@@ -7,7 +7,6 @@ import MarkdownIt from "markdown-it";
 import type { SessionMessage } from "@vegamo/deepcode-core";
 import {
   SessionManager,
-  getCompactPromptTokenThreshold,
   type LlmStreamProgress,
   type PermissionScope,
   type SessionEntry,
@@ -400,6 +399,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     thinkingEnabled: boolean;
     reasoningEffort: ReasoningEffort;
     activeTokens: number;
+    contextWindow: number;
     compactPromptTokenThreshold: number;
     usage: unknown | null;
   } {
@@ -409,7 +409,8 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
       activeTokens: session?.activeTokens ?? 0,
-      compactPromptTokenThreshold: getCompactPromptTokenThreshold(settings.model),
+      contextWindow: settings.contextWindow,
+      compactPromptTokenThreshold: settings.autoCompactWindow,
       usage: session?.usage ?? null,
     };
   }

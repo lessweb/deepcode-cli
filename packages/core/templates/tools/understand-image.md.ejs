@@ -1,0 +1,31 @@
+<% if (!supportsMultimodal) { -%>
+## UnderstandImage
+
+Use this tool whenever you need to analyze, describe, or extract information from an image. The tool analyzes one local image according to your instructions.
+
+JSON schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "description": "A clear instruction describing what to analyze or extract from the image."
+    },
+    "image_path": {
+      "type": "string",
+      "description": "The absolute path of the JPEG, PNG, or WebP image to analyze."
+    }
+  },
+  "required": ["prompt", "image_path"],
+  "additionalProperties": false
+}
+```
+
+Usage:
+
+- Make the prompt specific about the details, text, objects, layout, or relationships you need.
+- Call the tool separately for each image when multiple images need analysis.
+- Only JPEG, PNG, and WebP are supported. PDF, GIF, PSD, SVG, and other formats are not supported.
+<% } -%>
