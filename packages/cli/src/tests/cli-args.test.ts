@@ -376,3 +376,43 @@ test("parseArguments exits when --last is combined with bare --resume", async ()
     assert.ok(exitSpy.calls.length >= 1);
   });
 });
+
+// ── parseArguments: --output-format ────────────────────────────────────────────
+
+test("parseArguments defaults outputFormat to text", async () => {
+  const r = await parseArguments(["-x", "-p", "hello"]);
+  assert.equal(r.outputFormat, "text");
+});
+
+test("parseArguments accepts --output-format json with exec", async () => {
+  const r = await parseArguments(["-x", "-p", "hello", "--output-format", "json"]);
+  assert.equal(r.outputFormat, "json");
+  assert.equal(r.exec, true);
+});
+
+test("parseArguments accepts an explicit --output-format text", async () => {
+  const r = await parseArguments(["-x", "-p", "hello", "--output-format", "text"]);
+  assert.equal(r.outputFormat, "text");
+});
+
+test("parseArguments exits when --output-format json is used without --exec", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["-p", "hello", "--output-format", "json"]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.includes(1));
+  });
+});
+
+test("parseArguments exits on an unknown --output-format value", async () => {
+  await withMockedExit(async (exitSpy) => {
+    try {
+      await parseArguments(["-x", "-p", "hello", "--output-format", "yaml"]);
+    } catch {
+      /* expected */
+    }
+    assert.ok(exitSpy.calls.includes(1));
+  });
+});

@@ -8,6 +8,7 @@ import {
   type SessionManagerOptions,
 } from "@vegamo/deepcode-core";
 import { buildExecPrompt, type ExecInputStream } from "./exec-input";
+import { ExecJsonEmitter, type ExecOutputFormat } from "./exec-json-output";
 import { writeStderrLine, writeStdoutLine } from "./utils/stdio-helpers";
 
 type ExecSessionManager = Pick<
@@ -32,6 +33,8 @@ export interface ExecRunnerOptions {
   projectRoot: string;
   resumeSessionId?: string;
   forkSessionId?: string;
+  /** `text` (default) prints the assistant reply; `json` emits NDJSON events. */
+  outputFormat?: ExecOutputFormat;
   input?: ExecInputStream;
 }
 
@@ -60,6 +63,7 @@ export async function runExecMode(
 ): Promise<number> {
   const deps = { ...defaultDependencies, ...dependencies };
   let manager: ExecSessionManager | null = null;
+  let json: ExecJsonEmitter | null = null;
   let interrupted = false;
 
   const handleSigint = (): void => {
@@ -70,35 +74,51 @@ export async function runExecMode(
   deps.signalTarget.on("SIGINT", handleSigint);
   try {
     const settings = deps.resolveSettings(options.projectRoot);
+    if (options.outputFormat === "json") {
+      json = new ExecJsonEmitter(deps.writeStdoutLine, {
+        cwd: options.projectRoot,
+        model: settings.model,
+        permissionMode: settings.permissions.defaultMode,
+        mcpServers: Object.keys(settings.mcpServers ?? {}),
+        resumedFrom: options.resumeSessionId,
+        forkedFrom: options.forkSessionId,
+      });
+    }
     manager = deps.createSessionManager({
       projectRoot: options.projectRoot,
       createOpenAIClient: () => createOpenAIClient(options.projectRoot),
       getResolvedSettings: () => deps.resolveSettings(options.projectRoot),
       renderMarkdown: (text) => text,
       nonInteractive: true,
-      onAssistantMessage: () => {},
+      onAssistantMessage: json ? (message) => json?.emitMessage(message) : () => {},
     });
 
     await manager.initMcpServers(settings.mcpServers);
     if (interrupted) {
+      json?.emitResult({ subtype: "interrupted", error: "Execution was interrupted." });
       return 130;
     }
 
     if (options.resumeSessionId) {
       if (!manager.getSession(options.resumeSessionId)) {
-        deps.writeStderrLine(`No saved session found with ID "${options.resumeSessionId}".`);
+        const message = `No saved session found with ID "${options.resumeSessionId}".`;
+        deps.writeStderrLine(message);
+        json?.emitResult({ subtype: "error", error: message });
         return 1;
       }
     }
     if (options.forkSessionId) {
       if (!manager.getSession(options.forkSessionId)) {
-        deps.writeStderrLine(`No saved session found with ID "${options.forkSessionId}".`);
+        const message = `No saved session found with ID "${options.forkSessionId}".`;
+        deps.writeStderrLine(message);
+        json?.emitResult({ subtype: "error", error: message });
         return 1;
       }
     }
 
     const prompt = await deps.buildPrompt(options.prompt, options.input ?? process.stdin);
     if (interrupted) {
+      json?.emitResult({ subtype: "interrupted", error: "Execution was interrupted." });
       return 130;
     }
 
@@ -107,44 +127,68 @@ export async function runExecMode(
     } else if (options.resumeSessionId) {
       manager.setActiveSessionId(options.resumeSessionId);
     }
+    // Resumed and forked runs know their id up front; a fresh session mints one
+    // inside handleUserPrompt and reports it through the first streamed message.
+    json?.noteSessionId(manager.getActiveSessionId());
 
     await manager.handleUserPrompt({ text: prompt });
     const sessionId = manager.getActiveSessionId();
     const session = sessionId ? manager.getSession(sessionId) : null;
+    json?.noteSessionId(sessionId);
 
     if (interrupted || session?.status === "interrupted") {
       if (!interrupted) {
         deps.writeStderrLine("Execution was interrupted.");
       }
+      json?.emitResult({ subtype: "interrupted", error: "Execution was interrupted.", status: session?.status });
       return interrupted ? 130 : 1;
     }
     if (!session) {
-      deps.writeStderrLine("Execution failed before a session was created.");
+      const message = "Execution failed before a session was created.";
+      deps.writeStderrLine(message);
+      json?.emitResult({ subtype: "error", error: message });
       return 1;
     }
     if (session.status === "ask_permission") {
-      deps.writeStderrLine(formatPermissionConfirmationError(session.askPermissions, settings.permissions));
+      const message = formatPermissionConfirmationError(session.askPermissions, settings.permissions);
+      deps.writeStderrLine(message);
+      json?.emitResult({ subtype: "permission_required", error: message, status: session.status });
       return 1;
     }
     if (session.status === "waiting_for_user") {
-      deps.writeStderrLine("Execution requires user input, which is unavailable in --exec mode.");
+      const message = "Execution requires user input, which is unavailable in --exec mode.";
+      deps.writeStderrLine(message);
+      json?.emitResult({ subtype: "input_required", error: message, status: session.status });
       return 1;
     }
     if (session.status !== "completed") {
-      deps.writeStderrLine(
-        session.failReason ? `Execution failed: ${session.failReason}` : `Execution failed (${session.status}).`
-      );
+      const message = session.failReason
+        ? `Execution failed: ${session.failReason}`
+        : `Execution failed (${session.status}).`;
+      deps.writeStderrLine(message);
+      json?.emitResult({ subtype: "error", error: message, status: session.status });
       return 1;
     }
 
-    deps.writeStdoutLine(session.assistantReply ?? "");
+    if (json) {
+      json.emitResult({
+        subtype: "success",
+        result: session.assistantReply ?? "",
+        status: session.status,
+        usage: session.usage,
+      });
+    } else {
+      deps.writeStdoutLine(session.assistantReply ?? "");
+    }
     return 0;
   } catch (error) {
     if (interrupted) {
+      json?.emitResult({ subtype: "interrupted", error: "Execution was interrupted." });
       return 130;
     }
     const message = error instanceof Error ? error.message : String(error);
     deps.writeStderrLine(`deepcode: ${message}`);
+    json?.emitResult({ subtype: "error", error: message });
     return 1;
   } finally {
     deps.signalTarget.off("SIGINT", handleSigint);
