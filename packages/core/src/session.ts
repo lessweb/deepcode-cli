@@ -30,6 +30,7 @@ import {
 import { McpManager } from "./mcp/mcp-manager";
 import {
   getDefaultAutoCompactWindow,
+  getUserDataDir,
   type McpServerConfig,
   type PermissionScope,
   type PermissionSettings,
@@ -845,7 +846,7 @@ ${agentInstructions}
     return [
       { root: path.join(this.projectRoot, ".deepcode", "skills"), displayRoot: "./.deepcode/skills" },
       { root: path.join(this.projectRoot, ".agents", "skills"), displayRoot: "./.agents/skills" },
-      { root: path.join(homeDir, ".deepcode", "skills"), displayRoot: "~/.deepcode/skills" },
+      { root: path.join(getUserDataDir(), "skills"), displayRoot: "~/.deepcode/skills" },
       { root: path.join(homeDir, ".agents", "skills"), displayRoot: "~/.agents/skills" },
       { root: this.getBundledSkillsRoot(), displayRoot: "bundled:" },
     ];
@@ -2008,7 +2009,7 @@ ${agentInstructions}
     sessionsIndexPath: string;
   } {
     const projectCode = getProjectCode(this.projectRoot);
-    const projectDir = path.join(os.homedir(), ".deepcode", "projects", projectCode);
+    const projectDir = path.join(getUserDataDir(), "projects", projectCode);
     const sessionsIndexPath = path.join(projectDir, "sessions-index.json");
     return { projectCode, projectDir, sessionsIndexPath };
   }
@@ -2400,7 +2401,7 @@ ${agentInstructions}
       return projectInstructions.content;
     }
 
-    return this.readNonEmptyFile(path.join(os.homedir(), ".deepcode", "AGENTS.md"));
+    return this.readNonEmptyFile(path.join(getUserDataDir(), "AGENTS.md"));
   }
 
   private buildSystemMessage(

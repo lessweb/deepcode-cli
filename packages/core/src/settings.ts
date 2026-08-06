@@ -655,8 +655,24 @@ export const DEFAULT_BASE_URL = "https://api.deepseek.com";
 // Settings file I/O
 // ---------------------------------------------------------------------------
 
+/** User-level config directory. Honors $XDG_CONFIG_HOME/deepcode on Linux; defaults to ~/.deepcode. (#226) */
+export function getUserConfigDir(): string {
+  if (process.platform === "linux" && process.env.XDG_CONFIG_HOME) {
+    return path.join(process.env.XDG_CONFIG_HOME, "deepcode");
+  }
+  return path.join(os.homedir(), ".deepcode");
+}
+
+/** User-level data directory (projects, logs, machine-id). Honors $XDG_DATA_HOME/deepcode on Linux; defaults to ~/.deepcode. (#226) */
+export function getUserDataDir(): string {
+  if (process.platform === "linux" && process.env.XDG_DATA_HOME) {
+    return path.join(process.env.XDG_DATA_HOME, "deepcode");
+  }
+  return path.join(os.homedir(), ".deepcode");
+}
+
 export function getUserSettingsPath(): string {
-  return path.join(os.homedir(), ".deepcode", "settings.json");
+  return path.join(getUserConfigDir(), "settings.json");
 }
 
 export function getProjectSettingsPath(projectRoot: string): string {

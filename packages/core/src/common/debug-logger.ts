@@ -1,6 +1,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { getUserDataDir } from "../settings";
 
 const DEBUG_LOG_FILE = "debug.log";
 
@@ -34,7 +35,7 @@ export function logOpenAIChatCompletionDebug(entry: OpenAIChatCompletionDebugEnt
 }
 
 export function getDebugLogPath(): string {
-  return path.join(os.homedir(), ".deepcode", "logs", DEBUG_LOG_FILE);
+  return path.join(getUserDataDir(), "logs", DEBUG_LOG_FILE);
 }
 
 export function normalizeDebugError(error: unknown): { name: string; message: string; stack?: string } {

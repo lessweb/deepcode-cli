@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
-import { resolveCurrentSettings } from "../settings";
+import { getUserDataDir, resolveCurrentSettings } from "../settings";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
 // global fetch (undici) only keeps connections alive for 4 seconds, which
@@ -108,7 +108,7 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
 
 function getMachineId(): string | undefined {
   try {
-    const idPath = path.join(os.homedir(), ".deepcode", "machine-id");
+    const idPath = path.join(getUserDataDir(), "machine-id");
     if (fs.existsSync(idPath)) {
       const raw = fs.readFileSync(idPath, "utf8").trim();
       if (raw) {

@@ -17,6 +17,7 @@ import {
   type DeepcodingSettings,
   type ReasoningEffort,
   type ResolvedDeepcodingSettings,
+  getUserSettingsPath,
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
 import { getNonce } from "./utils.js";
@@ -438,7 +439,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
   private readUserSettings(): DeepcodingSettings | null {
     try {
-      const settingsPath = path.join(os.homedir(), ".deepcode", "settings.json");
+      const settingsPath = getUserSettingsPath();
       if (!fs.existsSync(settingsPath)) {
         return null;
       }
