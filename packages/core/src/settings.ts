@@ -64,6 +64,13 @@ export type StatusLineProviderConfig =
       color?: string;
       newLine?: boolean;
       maxLength?: number;
+    }
+  | {
+      type: "context";
+      id?: string;
+      color?: string;
+      newLine?: boolean;
+      maxLength?: number;
     };
 
 export type StatusLineSettings = {
@@ -352,6 +359,15 @@ function normalizeStatusLineProvider(value: unknown): StatusLineProviderConfig |
       id,
       path: modulePath,
       timeoutMs,
+      color,
+      newLine,
+      maxLength,
+    };
+  }
+  if (type === "context") {
+    return {
+      type: "context",
+      id,
       color,
       newLine,
       maxLength,

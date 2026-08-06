@@ -11,6 +11,20 @@ import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } fr
 
 const TEST_PROCESS_ENV = {};
 
+test("resolveSettingsSources normalizes the statusline context provider (#234)", () => {
+  const resolved = resolveSettingsSources(
+    {
+      statusline: { enabled: true, providers: [{ type: "context" }] },
+      env: { API_KEY: "sk-test" },
+    },
+    null,
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.statusline.providers.length, 1);
+  assert.equal(resolved.statusline.providers[0]?.type, "context");
+});
+
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(
     {

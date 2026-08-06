@@ -1,6 +1,7 @@
 import type { ResolvedStatusLineSettings, StatusLineProviderConfig } from "@vegamo/deepcode-core";
 import { sanitizeStatusText } from "./sanitize";
 import { createCommandStatusProvider } from "./command-provider";
+import { createContextStatusProvider } from "./context-provider";
 import { loadModuleProvider, validateModulePath } from "./module-provider";
 import type { SessionInfo, StatusProvider, StatusSegment } from "./types";
 
@@ -146,6 +147,9 @@ export class StatusLineManager {
         provider.newLine = true;
       }
       return provider;
+    }
+    if (config.type === "context") {
+      return createContextStatusProvider(providerId, config.color, config.newLine, config.maxLength);
     }
     return null;
   }
