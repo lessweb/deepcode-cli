@@ -95,6 +95,7 @@ export type DeepcodingSettings = {
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
+  enabledSkillsDefaultOff?: boolean;
   statusline?: StatusLineSettings;
 };
 
@@ -115,6 +116,7 @@ export type ResolvedDeepcodingSettings = {
   mcpServers?: Record<string, McpServerConfig>;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
+  enabledSkillsDefaultOff: boolean;
   statusline: ResolvedStatusLineSettings;
 };
 
@@ -585,6 +587,12 @@ export function resolveSettingsSources(
     trimString(userSettings?.webSearchTool) ||
     "";
 
+  const enabledSkillsDefaultOff =
+    parseBoolean(systemEnv.ENABLED_SKILLS_DEFAULT_OFF) ??
+    parseBoolean(projectSettings?.enabledSkillsDefaultOff) ??
+    parseBoolean(userSettings?.enabledSkillsDefaultOff) ??
+    false;
+
   return {
     env,
     apiKey: trimString(env.API_KEY) || undefined,
@@ -602,6 +610,7 @@ export function resolveSettingsSources(
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
+    enabledSkillsDefaultOff,
     statusline: mergeStatusLine(userSettings, projectSettings),
   };
 }

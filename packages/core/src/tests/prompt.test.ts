@@ -77,6 +77,24 @@ test("getTools includes UpdatePlan with string plan schema", () => {
   assert.equal((tool.function.parameters.properties.plan as { type?: unknown }).type, "string");
 });
 
+test("getDefaultSkillPrompt honors whitelist mode via enabledSkillsDefaultOff (#178)", () => {
+  const name = "karpathy-guidelines";
+  const defaultPrompt = getDefaultSkillPrompt({});
+  const defaultOffPrompt = getDefaultSkillPrompt({ enabledSkillsDefaultOff: true });
+  const explicitOnPrompt = getDefaultSkillPrompt({
+    enabledSkillsDefaultOff: true,
+    enabledSkills: { [name]: true },
+  });
+  const explicitOffPrompt = getDefaultSkillPrompt({ enabledSkills: { [name]: false } });
+
+  assert.equal(defaultOffPrompt.length, 0, "whitelist mode with no enabled skills injects nothing");
+  if (defaultPrompt) {
+    assert.equal(defaultPrompt.includes(name), true, "default mode injects karpathy-guidelines");
+    assert.equal(explicitOnPrompt.includes(name), true, "whitelist mode injects explicitly enabled skill");
+    assert.equal(explicitOffPrompt.length, 0, "explicit false excludes the skill in default mode");
+  }
+});
+
 test("getTools requires bash sideEffects permission scopes", () => {
   const tool = getTools().find((candidate) => candidate.function.name === "bash");
   assert.ok(tool);
