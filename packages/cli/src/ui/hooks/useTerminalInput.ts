@@ -30,6 +30,8 @@ const HOME_SEQUENCES = new Set(["\u001B[H", "\u001B[1~", "\u001B[7~", "\u001BOH"
 const END_SEQUENCES = new Set(["\u001B[F", "\u001B[4~", "\u001B[8~", "\u001BOF"]);
 const SHIFT_RETURN_SEQUENCES = new Set(["\u001B\r", "\u001B[13;2u", "\u001B[13;2~", "\u001B[27;2;13~"]);
 const META_RETURN_SEQUENCES = new Set(["\u001B[13;3u", "\u001B[13;4u"]);
+// Ctrl+Enter in modifyOtherKeys mode: keycode 13 (Enter), modifier 5 (Ctrl).
+const CTRL_RETURN_SEQUENCES = new Set(["\u001B[13;5u", "\u001B[27;5;13~"]);
 const CTRL_LEFT_SEQUENCES = new Set(["\u001B[1;5D", "\u001B[5D"]);
 const CTRL_RIGHT_SEQUENCES = new Set(["\u001B[1;5C", "\u001B[5C"]);
 const META_LEFT_SEQUENCES = new Set(["\u001B[1;3D", "\u001B[3D", "\u001Bb"]);
@@ -124,9 +126,13 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
     end: END_SEQUENCES.has(raw),
     pageDown: raw === "\u001B[6~",
     pageUp: raw === "\u001B[5~",
-    return: raw === "\r" || SHIFT_RETURN_SEQUENCES.has(raw) || META_RETURN_SEQUENCES.has(raw),
+    return:
+      raw === "\r" ||
+      SHIFT_RETURN_SEQUENCES.has(raw) ||
+      META_RETURN_SEQUENCES.has(raw) ||
+      CTRL_RETURN_SEQUENCES.has(raw),
     escape: raw === "\u001B",
-    ctrl: CTRL_LEFT_SEQUENCES.has(raw) || CTRL_RIGHT_SEQUENCES.has(raw),
+    ctrl: CTRL_LEFT_SEQUENCES.has(raw) || CTRL_RIGHT_SEQUENCES.has(raw) || CTRL_RETURN_SEQUENCES.has(raw),
     shift: SHIFT_RETURN_SEQUENCES.has(raw),
     tab: raw === "\t" || raw === "\u001B[Z",
     backspace: BACKSPACE_BYTES.has(raw),

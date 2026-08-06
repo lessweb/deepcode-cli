@@ -186,6 +186,17 @@ test("parseTerminalInput recognizes alternate shifted return sequences", () => {
   }
 });
 
+test("parseTerminalInput recognizes ctrl+enter modifyOtherKeys sequences as newline", () => {
+  for (const sequence of ["\u001B[13;5u", "\u001B[27;5;13~"]) {
+    const { input, key } = parseTerminalInput(sequence);
+    assert.equal(key.return, true);
+    assert.equal(key.ctrl, true);
+    assert.equal(key.shift, false);
+    assert.equal(getPromptReturnKeyAction(key), "newline");
+    assert.equal(input.startsWith("["), true);
+  }
+});
+
 test("terminal extended key helpers request and restore modifyOtherKeys mode", () => {
   assert.equal(enableTerminalExtendedKeys(), "\u001B[>4;1m");
   assert.equal(disableTerminalExtendedKeys(), "\u001B[>4;0m");
