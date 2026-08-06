@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { cleanOutputForClipboard } from "../ui/core/clipboard";
 
 // eslint-disable-next-line @typescript-eslint/consistent-type-imports
 type ClipboardModule = typeof import("../ui/core/clipboard");
@@ -77,3 +78,9 @@ test(
     }
   }
 );
+
+test("cleanOutputForClipboard strips ANSI codes and normalizes line endings", () => {
+  assert.equal(cleanOutputForClipboard("\u001B[32mhello\u001B[39m\r\nworld\r\n"), "hello\nworld\n");
+  assert.equal(cleanOutputForClipboard("  code\n"), "  code\n");
+  assert.equal(cleanOutputForClipboard(""), "\n");
+});
