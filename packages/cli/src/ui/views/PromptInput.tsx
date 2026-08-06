@@ -62,6 +62,7 @@ import {
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import type { ModelConfigSelection, PermissionScope } from "@vegamo/deepcode-core";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
+import type { ModelProfileOption } from "../components/ModelsDropdown";
 import type { SessionEntry, SkillInfo } from "@vegamo/deepcode-core";
 import type { UserToolPermission } from "@vegamo/deepcode-core";
 import type { StatusSegment } from "../statusline";
@@ -100,6 +101,8 @@ type Props = {
   planMode: boolean;
   onSubmit: (submission: PromptSubmission) => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
+  modelProfiles?: ModelProfileOption[];
+  onProfileSelect?: (profileName: string) => string | Promise<string>;
   onRawModeChange?: (mode: string) => void;
   onPlanModeChange: (enabled: boolean) => void;
   onInterrupt: () => void;
@@ -135,6 +138,8 @@ export const PromptInput = React.memo(function PromptInput({
   planMode,
   onSubmit,
   onModelConfigChange,
+  modelProfiles,
+  onProfileSelect,
   onInterrupt,
   onToggleProcessStdout,
   onExitShortcut,
@@ -851,8 +856,10 @@ export const PromptInput = React.memo(function PromptInput({
         open={showModelDropdown}
         modelConfig={modelConfig}
         width={screenWidth}
+        profiles={modelProfiles}
         onClose={() => setShowModelDropdown(false)}
         onModelConfigChange={onModelConfigChange}
+        onProfileSelect={onProfileSelect}
         onStatusMessage={setStatusMessage}
       />
       <FileMentionMenu

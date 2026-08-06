@@ -8,8 +8,83 @@ import {
   type NotifySpawn,
 } from "../common/notify";
 import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { getModelProfiles, readSettingsFile, writeProfileSelection } from "../settings";
 
 const TEST_PROCESS_ENV = {};
+
+test("resolveSettings applies defaultProfile values as fallbacks (#204)", () => {
+  const resolved = resolveSettings(
+    {
+      profiles: {
+        "pro-max": { model: "deepseek-v4-pro", thinkingEnabled: true, reasoningEffort: "max", temperature: 0 },
+        "flash-quick": { model: "deepseek-v4-flash", thinkingEnabled: false, temperature: 0.7 },
+      },
+      defaultProfile: "flash-quick",
+      env: { API_KEY: "sk-test" },
+    },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.model, "deepseek-v4-flash");
+  assert.equal(resolved.thinkingEnabled, false);
+  assert.equal(resolved.temperature, 0.7);
+});
+
+test("resolveSettings keeps explicit user settings over defaultProfile (#204)", () => {
+  const resolved = resolveSettings(
+    {
+      model: "deepseek-v4-pro",
+      profiles: { "flash-quick": { model: "deepseek-v4-flash", thinkingEnabled: false } },
+      defaultProfile: "flash-quick",
+      env: { API_KEY: "sk-test" },
+    },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.model, "deepseek-v4-pro");
+});
+
+test("getModelProfiles filters invalid profile entries (#204)", () => {
+  const profiles = getModelProfiles({
+    profiles: { valid: { model: "deepseek-v4-flash" }, invalid: {}, missing: { temperature: 0.5 } },
+  });
+  assert.deepEqual(Object.keys(profiles).sort(), ["missing", "valid"]);
+});
+
+test("writeProfileSelection applies a profile to the project settings file (#204)", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-profile-test-"));
+  try {
+    fs.mkdirSync(path.join(dir, ".deepcode"), { recursive: true });
+    const projectSettingsPath = path.join(dir, ".deepcode", "settings.json");
+    fs.writeFileSync(
+      projectSettingsPath,
+      JSON.stringify({
+        env: { API_KEY: "sk-original" },
+        profiles: {
+          "pro-max": { model: "deepseek-v4-pro", thinkingEnabled: true, reasoningEffort: "max" },
+        },
+      }),
+      "utf8"
+    );
+
+    const result = writeProfileSelection("pro-max", dir);
+    assert.equal(result.changed, true);
+    assert.equal(result.profile?.model, "deepseek-v4-pro");
+
+    const saved = readSettingsFile(projectSettingsPath);
+    assert.equal(saved?.model, "deepseek-v4-pro");
+    assert.equal(saved?.thinkingEnabled, true);
+    assert.equal(saved?.env?.API_KEY, "sk-original");
+
+    const missing = writeProfileSelection("nope", dir);
+    assert.equal(missing.changed, false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(

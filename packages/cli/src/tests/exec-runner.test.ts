@@ -34,6 +34,7 @@ function createSettings(
     permissions,
     enabledSkills: {},
     statusline: { enabled: false, refreshMs: 1000, separator: " | ", providers: [] },
+    profiles: {},
   };
 }
 

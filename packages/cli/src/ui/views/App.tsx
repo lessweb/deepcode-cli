@@ -9,6 +9,7 @@ import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { buildLoadingText } from "../core/loading-text";
+import type { ModelProfileOption } from "../components/ModelsDropdown";
 import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
@@ -32,7 +33,12 @@ import {
   isCurrentSessionEmpty,
   renderRawModeMessages,
 } from "../utils";
-import { resolveCurrentSettings, writeModelConfigSelection } from "@vegamo/deepcode-core";
+import {
+  getModelProfiles,
+  resolveCurrentSettings,
+  writeModelConfigSelection,
+  writeProfileSelection,
+} from "@vegamo/deepcode-core";
 import { useStatusLine } from "../hooks";
 import type { SessionInfo } from "../statusline";
 import { isCollapsedThinking } from "../core/thinking-state";
@@ -131,6 +137,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const [showWelcome, setShowWelcome] = useState(true);
   const [welcomeNonce, setWelcomeNonce] = useState(0);
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot));
+  const modelProfiles = useMemo<ModelProfileOption[]>(
+    () => Object.keys(getModelProfiles(resolvedSettings)).map((name) => ({ name })),
+    [resolvedSettings]
+  );
   const [nowTick, setNowTick] = useState(0);
   const [mcpStatuses, setMcpStatuses] = useState<ReturnType<typeof sessionManager.getMcpStatus>>([]);
   const [showProcessStdout, setShowProcessStdout] = useState(false);
@@ -537,6 +547,48 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       void handlePrompt(submission);
     },
     [handlePrompt]
+  );
+
+  const handleProfileSelect = useCallback(
+    (profileName: string): string => {
+      const { changed, profile } = writeProfileSelection(profileName, projectRoot);
+      const next = resolveCurrentSettings(projectRoot);
+      setResolvedSettings(next);
+      if (!changed || !profile) {
+        return `Profile "${profileName}" not found in settings.json`;
+      }
+
+      const activeSessionId = sessionManager.getActiveSessionId();
+      const content = `/model\n└ Applied profile ${profileName} → ${profile.model ?? next.model} (${
+        next.thinkingEnabled ? next.reasoningEffort : "no thinking"
+      })`;
+      if (activeSessionId) {
+        sessionManager.addSessionSystemMessage(activeSessionId, content, true, { isModelChange: true });
+        const activeSession = sessionManager.getSession(activeSessionId);
+        setStatusLine(activeSession ? buildStatusLine(activeSession, next) : "");
+      } else {
+        const now = new Date().toISOString();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: crypto.randomUUID(),
+            sessionId: "local",
+            role: "system" as const,
+            content,
+            contentParams: null,
+            messageParams: null,
+            compacted: false,
+            visible: true,
+            createTime: now,
+            updateTime: now,
+            meta: { isModelChange: true },
+          },
+        ]);
+      }
+
+      return `Applied profile "${profileName}" (${profile.model ?? next.model})`;
+    },
+    [projectRoot, sessionManager]
   );
 
   const handlePlanImplementationChoice = useCallback(
@@ -1061,6 +1113,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           promptDraft={promptDraft}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
+          modelProfiles={modelProfiles}
+          onProfileSelect={handleProfileSelect}
           onRawModeChange={handleRawModeChange}
           onInterrupt={handleInterrupt}
           onToggleProcessStdout={handleToggleProcessStdout}
