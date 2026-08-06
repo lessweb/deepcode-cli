@@ -159,6 +159,10 @@ async function runWebSearchScript(
   return new Promise((resolve) => {
     const child = spawn(scriptPath, [query], {
       cwd: context.projectRoot,
+      // Node.js v20+ removed the automatic cmd.exe routing for .bat/.cmd
+      // files on Windows, so custom webSearchTool scripts pointing at .bat
+      // files need an explicit shell. (#190)
+      shell: process.platform === "win32",
       env: { ...process.env, ...configuredEnv },
       stdio: ["ignore", "pipe", "pipe"],
     });
