@@ -13,6 +13,8 @@ export {
   applyModelConfigSelection,
   modelConfigKey,
   getUserSettingsPath,
+  getUserConfigDir,
+  getUserDataDir,
   getProjectSettingsPath,
   getDefaultContextWindow,
   getDefaultAutoCompactWindow,

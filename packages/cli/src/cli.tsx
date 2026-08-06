@@ -1,8 +1,7 @@
 import { render } from "ink";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
-import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
+import { getProjectCode, getUserDataDir, setShellIfWindows } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
@@ -36,7 +35,7 @@ async function main(): Promise<void> {
   // Resolve --last to the most recent session ID for the current project
   if (parsed.last) {
     const projectCode = getProjectCode(projectRoot);
-    const indexPath = join(homedir(), ".deepcode", "projects", projectCode, "sessions-index.json");
+    const indexPath = join(getUserDataDir(), "projects", projectCode, "sessions-index.json");
     try {
       const index = JSON.parse(readFileSync(indexPath, "utf-8"));
       const entries: { id: string; updateTime: string }[] = Array.isArray(index?.entries) ? index.entries : [];
@@ -54,7 +53,7 @@ async function main(): Promise<void> {
 
   if (forkSessionId === true) {
     const projectCode = getProjectCode(projectRoot);
-    const indexPath = join(homedir(), ".deepcode", "projects", projectCode, "sessions-index.json");
+    const indexPath = join(getUserDataDir(), "projects", projectCode, "sessions-index.json");
     try {
       const index = JSON.parse(readFileSync(indexPath, "utf-8"));
       const entries: { id: string; updateTime: string }[] = Array.isArray(index?.entries) ? index.entries : [];
@@ -88,7 +87,7 @@ async function main(): Promise<void> {
   // Validate --resume <sessionId> before entering TUI
   if (typeof resumeSessionId === "string") {
     const projectCode = getProjectCode(projectRoot);
-    const indexPath = join(homedir(), ".deepcode", "projects", projectCode, "sessions-index.json");
+    const indexPath = join(getUserDataDir(), "projects", projectCode, "sessions-index.json");
     try {
       const index = JSON.parse(readFileSync(indexPath, "utf-8"));
       const found =
@@ -105,7 +104,7 @@ async function main(): Promise<void> {
 
   if (typeof forkSessionId === "string") {
     const projectCode = getProjectCode(projectRoot);
-    const indexPath = join(homedir(), ".deepcode", "projects", projectCode, "sessions-index.json");
+    const indexPath = join(getUserDataDir(), "projects", projectCode, "sessions-index.json");
     try {
       const index = JSON.parse(readFileSync(indexPath, "utf-8"));
       const found = Array.isArray(index?.entries) && index.entries.some((e: { id: string }) => e.id === forkSessionId);

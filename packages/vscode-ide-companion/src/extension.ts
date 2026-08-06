@@ -1,7 +1,6 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import OpenAI from "openai";
 import MarkdownIt from "markdown-it";
 import type { SessionMessage } from "@vegamo/deepcode-core";
@@ -17,6 +16,7 @@ import {
   type DeepcodingSettings,
   type ReasoningEffort,
   type ResolvedDeepcodingSettings,
+  getUserSettingsPath,
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
 import { getNonce } from "./utils.js";
@@ -438,7 +438,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
   private readUserSettings(): DeepcodingSettings | null {
     try {
-      const settingsPath = path.join(os.homedir(), ".deepcode", "settings.json");
+      const settingsPath = getUserSettingsPath();
       if (!fs.existsSync(settingsPath)) {
         return null;
       }

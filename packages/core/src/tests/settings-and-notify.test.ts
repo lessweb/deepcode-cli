@@ -8,8 +8,45 @@ import {
   type NotifySpawn,
 } from "../common/notify";
 import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { getUserConfigDir, getUserDataDir, getUserSettingsPath } from "../settings";
 
 const TEST_PROCESS_ENV = {};
+
+test("getUserConfigDir and getUserDataDir honor XDG env vars on Linux (#226)", () => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  const originalConfig = process.env.XDG_CONFIG_HOME;
+  const originalData = process.env.XDG_DATA_HOME;
+  try {
+    Object.defineProperty(process, "platform", { value: "linux" });
+    process.env.XDG_CONFIG_HOME = "/tmp/xdg-config";
+    process.env.XDG_DATA_HOME = "/tmp/xdg-data";
+    assert.equal(getUserConfigDir(), path.join("/tmp/xdg-config", "deepcode"));
+    assert.equal(getUserDataDir(), path.join("/tmp/xdg-data", "deepcode"));
+    assert.equal(getUserSettingsPath(), path.join("/tmp/xdg-config", "deepcode", "settings.json"));
+
+    delete process.env.XDG_CONFIG_HOME;
+    delete process.env.XDG_DATA_HOME;
+    assert.equal(getUserConfigDir(), path.join(os.homedir(), ".deepcode"));
+    assert.equal(getUserDataDir(), path.join(os.homedir(), ".deepcode"));
+  } finally {
+    if (originalConfig === undefined) {
+      delete process.env.XDG_CONFIG_HOME;
+    } else {
+      process.env.XDG_CONFIG_HOME = originalConfig;
+    }
+    if (originalData === undefined) {
+      delete process.env.XDG_DATA_HOME;
+    } else {
+      process.env.XDG_DATA_HOME = originalData;
+    }
+    if (originalPlatform) {
+      Object.defineProperty(process, "platform", originalPlatform);
+    }
+  }
+});
 
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(

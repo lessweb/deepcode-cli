@@ -1,11 +1,10 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import React from "react";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { render, type Instance } from "ink";
 import { UpdatePrompt, type UpdatePromptChoice } from "../ui";
-import { killProcessTree } from "@vegamo/deepcode-core";
+import { getUserDataDir, killProcessTree } from "@vegamo/deepcode-core";
 import type { PackageJson } from "../utils/package";
 
 type UpdateState = {
@@ -118,7 +117,7 @@ export function compareVersions(a: string, b: string): number {
 }
 
 export function getUpdateStatePath(): string {
-  return path.join(os.homedir(), ".deepcode", UPDATE_STATE_FILE);
+  return path.join(getUserDataDir(), UPDATE_STATE_FILE);
 }
 
 async function promptUpdateChoice({

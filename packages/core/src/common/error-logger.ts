@@ -1,9 +1,9 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import type { LlmErrorDetails } from "./llm-error";
+import { getUserDataDir } from "../settings";
 
-const LOG_DIR = path.join(os.homedir(), ".deepcode", "logs");
+const LOG_DIR = path.join(getUserDataDir(), "logs");
 const ERROR_LOG_PATH = path.join(LOG_DIR, "error.log");
 
 function ensureLogDir(): void {
