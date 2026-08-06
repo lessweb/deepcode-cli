@@ -2403,6 +2403,33 @@ ${agentInstructions}
     return this.readNonEmptyFile(path.join(os.homedir(), ".deepcode", "AGENTS.md"));
   }
 
+  /** Report which AGENTS.md instruction files exist and which one is loaded. (#262) */
+  getAgentInstructionSources(): Array<{ displayPath: string; absolutePath: string; exists: boolean; loaded: boolean }> {
+    const candidates = [
+      {
+        absolutePath: path.join(this.projectRoot, ".deepcode", "AGENTS.md"),
+        displayPath: "./.deepcode/AGENTS.md",
+      },
+      {
+        absolutePath: path.join(this.projectRoot, "AGENTS.md"),
+        displayPath: "./AGENTS.md",
+      },
+      {
+        absolutePath: path.join(os.homedir(), ".deepcode", "AGENTS.md"),
+        displayPath: "~/.deepcode/AGENTS.md",
+      },
+    ];
+    const project = this.loadProjectAgentInstructions();
+    const userContent = this.readNonEmptyFile(path.join(os.homedir(), ".deepcode", "AGENTS.md"));
+    const effectiveDisplayPath = project?.displayPath ?? (userContent ? candidates[2]!.displayPath : null);
+    return candidates.map((candidate) => ({
+      displayPath: candidate.displayPath,
+      absolutePath: candidate.absolutePath,
+      exists: fs.existsSync(candidate.absolutePath),
+      loaded: candidate.displayPath === effectiveDisplayPath,
+    }));
+  }
+
   private buildSystemMessage(
     sessionId: string,
     content: string,
