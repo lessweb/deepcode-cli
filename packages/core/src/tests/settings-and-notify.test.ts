@@ -11,6 +11,26 @@ import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } fr
 
 const TEST_PROCESS_ENV = {};
 
+test("resolveSettings reads timeoutMs and maxRetries (#13)", () => {
+  const resolved = resolveSettings(
+    { timeoutMs: 120000, maxRetries: 3, env: { API_KEY: "sk-test" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.timeoutMs, 120000);
+  assert.equal(resolved.maxRetries, 3);
+});
+
+test("resolveSettings prefers env TIMEOUT_MS and MAX_RETRIES over settings (#13)", () => {
+  const resolved = resolveSettings(
+    { timeoutMs: 120000, maxRetries: 3, env: { API_KEY: "sk-test" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    { DEEPCODE_TIMEOUT_MS: "90000", DEEPCODE_MAX_RETRIES: "5" }
+  );
+  assert.equal(resolved.timeoutMs, 90000);
+  assert.equal(resolved.maxRetries, 5);
+});
+
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(
     {
