@@ -683,6 +683,34 @@ export function readProjectSettings(projectRoot: string = process.cwd()): Deepco
   return readSettingsFile(getProjectSettingsPath(projectRoot));
 }
 
+export const DEFAULT_SETTINGS_TEMPLATE: DeepcodingSettings = {
+  env: {
+    API_KEY: "",
+    BASE_URL: DEFAULT_BASE_URL,
+    MODEL: DEFAULT_MODEL,
+  },
+};
+
+/**
+ * Create the user settings file on first run with a ready-to-edit template so
+ * the user only has to paste their API key instead of authoring the file and
+ * guessing the schema by hand. Never overwrites an existing file. (#202)
+ */
+export function ensureUserSettingsFile(settingsPath: string = getUserSettingsPath()): {
+  created: boolean;
+  path: string;
+} {
+  if (fs.existsSync(settingsPath)) {
+    return { created: false, path: settingsPath };
+  }
+  try {
+    writeSettingsFile(settingsPath, DEFAULT_SETTINGS_TEMPLATE);
+    return { created: true, path: settingsPath };
+  } catch {
+    return { created: false, path: settingsPath };
+  }
+}
+
 function writeSettingsFile(settingsPath: string, settings: DeepcodingSettings): void {
   fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
   fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
