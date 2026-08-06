@@ -1,7 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import React from "react";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { render, type Instance } from "ink";
 import { UpdatePrompt, type UpdatePromptChoice } from "../ui";
