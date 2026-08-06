@@ -3,6 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
+import type { HeadersInit } from "undici";
 import { resolveCurrentSettings } from "../settings";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
@@ -11,6 +12,19 @@ import { resolveCurrentSettings } from "../settings";
 // output between prompts.  By passing a dedicated Agent to undiciFetch we
 // keep connections reusable for three minutes after the last request.
 const keepAliveAgent = new Agent({ keepAliveTimeout: 180_000 });
+
+const DEFAULT_USER_AGENT = `deepcode-cli (Node.js ${process.version})`;
+
+// Inject a default User-Agent header into outgoing requests. Some CDNs and
+// WAFs (e.g. Cloudflare) block requests that arrive without a User-Agent as a
+// basic anti-bot measure. (#177)
+export function buildClientHeaders(initHeaders?: HeadersInit): Headers {
+  const headers = new Headers(initHeaders);
+  if (!headers.has("User-Agent")) {
+    headers.set("User-Agent", DEFAULT_USER_AGENT);
+  }
+  return headers;
+}
 
 // Module-level cache for the OpenAI client instance.  The client itself is
 // a stateless fetch wrapper, so it is safe to share across calls as long as
@@ -73,7 +87,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     apiKey: settings.apiKey,
     baseURL: settings.baseURL || undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: keepAliveAgent }),
+    fetch: (url: any, init: any) =>
+      undiciFetch(url, { ...init, headers: buildClientHeaders(init?.headers), dispatcher: keepAliveAgent }),
   });
   cachedOpenAIKey = cacheKey;
 
