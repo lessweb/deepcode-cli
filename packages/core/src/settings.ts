@@ -86,6 +86,8 @@ export type DeepcodingSettings = {
   autoCompactWindow?: number | string;
   model?: string;
   temperature?: number;
+  timeoutMs?: number;
+  maxRetries?: number;
   thinkingEnabled?: boolean;
   reasoningEffort?: ReasoningEffort;
   debugLogEnabled?: boolean;
@@ -106,6 +108,8 @@ export type ResolvedDeepcodingSettings = {
   contextWindow: number;
   autoCompactWindow: number;
   temperature?: number;
+  timeoutMs?: number;
+  maxRetries?: number;
   thinkingEnabled: boolean;
   reasoningEffort: ReasoningEffort;
   debugLogEnabled: boolean;
@@ -197,6 +201,52 @@ function parseTemperature(value: unknown): number | undefined {
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function parsePositiveInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim());
+    if (Number.isSafeInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function parseNonNegativeInt(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0) {
+    return value;
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value.trim());
+    if (Number.isSafeInteger(parsed) && parsed >= 0) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function firstPositiveInt(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parsePositiveInt(value);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function firstNonNegativeInt(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parseNonNegativeInt(value);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+  return undefined;
 }
 
 const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
@@ -561,6 +611,9 @@ export function resolveSettingsSources(
     parseTemperature(userSettings?.temperature) ??
     parseTemperature(userEnv.TEMPERATURE);
 
+  const timeoutMs = firstPositiveInt(systemEnv.TIMEOUT_MS, projectSettings?.timeoutMs, userSettings?.timeoutMs);
+  const maxRetries = firstNonNegativeInt(systemEnv.MAX_RETRIES, projectSettings?.maxRetries, userSettings?.maxRetries);
+
   const debugLogEnabled =
     parseBoolean(systemEnv.DEBUG_LOG_ENABLED) ??
     parseBoolean(projectSettings?.debugLogEnabled) ??
@@ -593,6 +646,8 @@ export function resolveSettingsSources(
     contextWindow,
     autoCompactWindow,
     temperature,
+    timeoutMs,
+    maxRetries,
     thinkingEnabled,
     reasoningEffort,
     debugLogEnabled,
