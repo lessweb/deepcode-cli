@@ -8,8 +8,31 @@ import {
   type NotifySpawn,
 } from "../common/notify";
 import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+import { DEFAULT_SETTINGS_TEMPLATE, ensureUserSettingsFile, readSettingsFile } from "../settings";
 
 const TEST_PROCESS_ENV = {};
+
+test("ensureUserSettingsFile scaffolds a template and never overwrites an existing file", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-settings-test-"));
+  try {
+    const settingsPath = path.join(dir, "settings.json");
+
+    const first = ensureUserSettingsFile(settingsPath);
+    assert.equal(first.created, true);
+    assert.equal(first.path, settingsPath);
+    assert.deepEqual(readSettingsFile(settingsPath), DEFAULT_SETTINGS_TEMPLATE);
+
+    fs.writeFileSync(settingsPath, JSON.stringify({ model: "custom-model" }), "utf8");
+    const second = ensureUserSettingsFile(settingsPath);
+    assert.equal(second.created, false);
+    assert.deepEqual(readSettingsFile(settingsPath), { model: "custom-model" });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(

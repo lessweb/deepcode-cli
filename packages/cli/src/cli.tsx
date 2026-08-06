@@ -2,7 +2,7 @@ import { render } from "ink";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
-import { setShellIfWindows, getProjectCode } from "@vegamo/deepcode-core";
+import { ensureUserSettingsFile, getProjectCode, setShellIfWindows } from "@vegamo/deepcode-core";
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import { parseArguments } from "./cli-args";
@@ -27,6 +27,13 @@ async function main(): Promise<void> {
   // On Windows without Git Bash, setShellIfWindows() throws and calls process.exit(1).
   // If called before argument parsing, --help and --version would fail on those machines.
   configureWindowsShell();
+
+  // First run: scaffold a ready-to-edit settings.json so the user only has to
+  // paste their API key instead of authoring the file by hand. (#202)
+  const scaffold = ensureUserSettingsFile();
+  if (scaffold.created) {
+    writeStderrLine(`Created ${scaffold.path} — edit it to add your API key.\n`);
+  }
 
   let initialPrompt = parsed.prompt;
   let resumeSessionId = parsed.resume;
