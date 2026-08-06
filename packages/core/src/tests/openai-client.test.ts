@@ -13,9 +13,8 @@ test("buildClientHeaders preserves existing headers and a custom User-Agent", ()
   assert.equal(headers.get("User-Agent"), "custom-agent");
 });
 
-test("buildClientHeaders accepts a Headers instance and keeps its entries", () => {
-  const source = new Headers({ "Content-Type": "application/json" });
-  const headers = buildClientHeaders(source);
+test("buildClientHeaders accepts tuple-array headers and keeps its entries", () => {
+  const headers = buildClientHeaders([["Content-Type", "application/json"]]);
   assert.equal(headers.get("Content-Type"), "application/json");
   assert.match(headers.get("User-Agent") ?? "", /^deepcode-cli /);
 });
