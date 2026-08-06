@@ -16,6 +16,8 @@ export {
   getProjectSettingsPath,
   getDefaultContextWindow,
   getDefaultAutoCompactWindow,
+  getModelProfiles,
+  writeProfileSelection,
   DEFAULT_MODEL,
   DEFAULT_BASE_URL,
 } from "./settings";

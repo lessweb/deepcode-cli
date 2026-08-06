@@ -80,6 +80,15 @@ export type ResolvedStatusLineSettings = {
   providers: StatusLineProviderConfig[];
 };
 
+export type ModelProfile = {
+  model?: string;
+  baseUrl?: string;
+  apiKey?: string;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: ReasoningEffort;
+  temperature?: number;
+};
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   contextWindow?: number | string;
@@ -96,6 +105,8 @@ export type DeepcodingSettings = {
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
   statusline?: StatusLineSettings;
+  profiles?: Record<string, ModelProfile>;
+  defaultProfile?: string;
 };
 
 export type ResolvedDeepcodingSettings = {
@@ -116,6 +127,7 @@ export type ResolvedDeepcodingSettings = {
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
   statusline: ResolvedStatusLineSettings;
+  profiles: Record<string, ModelProfile>;
 };
 
 export type ModelConfigSelection = {
@@ -197,6 +209,56 @@ function parseTemperature(value: unknown): number | undefined {
 
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeProfile(value: unknown): ModelProfile | null {
+  if (!isPlainObject(value)) {
+    return null;
+  }
+  const profile: ModelProfile = {};
+  const model = trimString(value["model"]);
+  if (model) {
+    profile.model = model;
+  }
+  const baseUrl = trimString(value["baseUrl"]);
+  if (baseUrl) {
+    profile.baseUrl = baseUrl;
+  }
+  const apiKey = trimString(value["apiKey"]);
+  if (apiKey) {
+    profile.apiKey = apiKey;
+  }
+  const thinkingEnabled = parseBoolean(value["thinkingEnabled"]);
+  if (thinkingEnabled !== undefined) {
+    profile.thinkingEnabled = thinkingEnabled;
+  }
+  const reasoningEffort = resolveReasoningEffort(value["reasoningEffort"]);
+  if (reasoningEffort) {
+    profile.reasoningEffort = reasoningEffort;
+  }
+  const temperature = parseTemperature(value["temperature"]);
+  if (temperature !== undefined) {
+    profile.temperature = temperature;
+  }
+  return Object.keys(profile).length > 0 ? profile : null;
+}
+
+function resolveActiveProfile(
+  userSettings: DeepcodingSettings | null | undefined,
+  projectSettings: DeepcodingSettings | null | undefined
+): ModelProfile | null {
+  for (const source of [projectSettings, userSettings]) {
+    const name = source?.defaultProfile;
+    const profiles = source?.profiles;
+    if (!name || !profiles || !isPlainObject(profiles)) {
+      continue;
+    }
+    const profile = normalizeProfile(profiles[name]);
+    if (profile) {
+      return profile;
+    }
+  }
+  return null;
 }
 
 const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
@@ -518,6 +580,7 @@ export function resolveSettingsSources(
     ...projectEnv,
     ...systemEnv,
   };
+  const profile = resolveActiveProfile(userSettings, projectSettings);
 
   const model =
     trimString(systemEnv.MODEL) ||
@@ -525,6 +588,7 @@ export function resolveSettingsSources(
     trimString(projectEnv.MODEL) ||
     trimString(userSettings?.model) ||
     trimString(userEnv.MODEL) ||
+    trimString(profile?.model) ||
     defaults.model;
 
   const contextWindow =
@@ -544,6 +608,7 @@ export function resolveSettingsSources(
     parseBoolean(projectEnv.THINKING_ENABLED) ??
     parseBoolean(userSettings?.thinkingEnabled) ??
     parseBoolean(userEnv.THINKING_ENABLED) ??
+    profile?.thinkingEnabled ??
     defaultsToThinkingMode(model);
 
   const reasoningEffort =
@@ -552,6 +617,7 @@ export function resolveSettingsSources(
     resolveReasoningEffort(projectEnv.REASONING_EFFORT) ??
     resolveReasoningEffort(userSettings?.reasoningEffort) ??
     resolveReasoningEffort(userEnv.REASONING_EFFORT) ??
+    profile?.reasoningEffort ??
     "max";
 
   const temperature =
@@ -559,7 +625,8 @@ export function resolveSettingsSources(
     parseTemperature(projectSettings?.temperature) ??
     parseTemperature(projectEnv.TEMPERATURE) ??
     parseTemperature(userSettings?.temperature) ??
-    parseTemperature(userEnv.TEMPERATURE);
+    parseTemperature(userEnv.TEMPERATURE) ??
+    profile?.temperature;
 
   const debugLogEnabled =
     parseBoolean(systemEnv.DEBUG_LOG_ENABLED) ??
@@ -587,8 +654,8 @@ export function resolveSettingsSources(
 
   return {
     env,
-    apiKey: trimString(env.API_KEY) || undefined,
-    baseURL: trimString(env.BASE_URL) || defaults.baseURL,
+    apiKey: trimString(env.API_KEY) || trimString(profile?.apiKey) || undefined,
+    baseURL: trimString(env.BASE_URL) || trimString(profile?.baseUrl) || defaults.baseURL,
     model,
     contextWindow,
     autoCompactWindow,
@@ -603,6 +670,7 @@ export function resolveSettingsSources(
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),
+    profiles: { ...getModelProfiles(userSettings), ...getModelProfiles(projectSettings) },
   };
 }
 
@@ -715,6 +783,66 @@ export function writeModelConfigSelection(
     }
   }
   return result;
+}
+
+export function getModelProfiles(settings: DeepcodingSettings | null | undefined): Record<string, ModelProfile> {
+  const result: Record<string, ModelProfile> = {};
+  const profiles = settings?.profiles;
+  if (!profiles || !isPlainObject(profiles)) {
+    return result;
+  }
+  for (const [name, value] of Object.entries(profiles)) {
+    const profile = normalizeProfile(value);
+    if (profile && name.trim()) {
+      result[name.trim()] = profile;
+    }
+  }
+  return result;
+}
+
+/**
+ * Apply a named profile from settings.profiles to the current configuration,
+ * writing the merged settings back to disk. (#204)
+ */
+export function writeProfileSelection(
+  profileName: string,
+  projectRoot: string = process.cwd()
+): { changed: boolean; profile: ModelProfile | null } {
+  const projectSettingsPath = getProjectSettingsPath(projectRoot);
+  const shouldWriteProjectSettings = fs.existsSync(projectSettingsPath);
+  const rawSettings = shouldWriteProjectSettings ? readProjectSettings(projectRoot) : readSettings();
+  const profile = getModelProfiles(rawSettings)[profileName] ?? null;
+  if (!profile) {
+    return { changed: false, profile: null };
+  }
+
+  const next: DeepcodingSettings = { ...(rawSettings ?? {}) };
+  if (profile.model) {
+    next.model = profile.model;
+  }
+  if (profile.thinkingEnabled !== undefined) {
+    next.thinkingEnabled = profile.thinkingEnabled;
+  }
+  if (profile.reasoningEffort) {
+    next.reasoningEffort = profile.reasoningEffort;
+  }
+  if (profile.temperature !== undefined) {
+    next.temperature = profile.temperature;
+  }
+  if (profile.baseUrl || profile.apiKey) {
+    next.env = {
+      ...(next.env ?? {}),
+      ...(profile.baseUrl ? { BASE_URL: profile.baseUrl } : {}),
+      ...(profile.apiKey ? { API_KEY: profile.apiKey } : {}),
+    };
+  }
+
+  if (shouldWriteProjectSettings) {
+    writeProjectSettings(next, projectRoot);
+  } else {
+    writeSettings(next);
+  }
+  return { changed: true, profile };
 }
 
 export function resolveCurrentSettings(projectRoot: string = process.cwd()): ResolvedDeepcodingSettings {

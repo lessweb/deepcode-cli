@@ -19,6 +19,10 @@ export const MODEL_COMMAND_THINKING_OPTIONS: ThinkingModeOption[] = [
   { label: "No thinking", thinkingEnabled: false },
 ];
 
+export type ModelProfileOption = {
+  name: string;
+};
+
 function getThinkingOptionIndex(config: Pick<ModelConfigSelection, "thinkingEnabled" | "reasoningEffort">): number {
   const index = MODEL_COMMAND_THINKING_OPTIONS.findIndex((option) => {
     if (!config.thinkingEnabled) {
@@ -33,8 +37,10 @@ type Props = {
   open: boolean;
   modelConfig: ModelConfigSelection;
   width: number;
+  profiles?: ModelProfileOption[];
   onClose: () => void;
   onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
+  onProfileSelect?: (profileName: string) => string | Promise<string>;
   onStatusMessage?: (message: string | null) => void;
 };
 
@@ -42,8 +48,10 @@ const ModelsDropdown: React.FC<Props> = ({
   open,
   modelConfig,
   width,
+  profiles,
   onClose,
   onModelConfigChange,
+  onProfileSelect,
   onStatusMessage,
 }) => {
   const [step, setStep] = useState<ModelStep | null>(null);
@@ -53,29 +61,47 @@ const ModelsDropdown: React.FC<Props> = ({
   // Initialize state when opened
   useEffect(() => {
     if (open) {
+      const profileCount = profiles?.length ?? 0;
       const currentIndex = MODEL_COMMAND_MODELS.findIndex((m) => m === modelConfig.model);
       setPendingModel(null);
       setStep("model");
-      setActiveIndex(currentIndex >= 0 ? currentIndex : 0);
+      setActiveIndex(currentIndex >= 0 ? profileCount + currentIndex : 0);
     } else {
       setStep(null);
     }
-  }, [open, modelConfig.model]);
+  }, [open, modelConfig.model, profiles]);
 
   // Validate activeIndex bounds
   useEffect(() => {
     if (!step) {
       return;
     }
-    const optionCount = step === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
+    const optionCount =
+      step === "model" ? (profiles?.length ?? 0) + MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
     if (activeIndex >= optionCount) {
       setActiveIndex(Math.max(0, optionCount - 1));
     }
-  }, [activeIndex, step]);
+  }, [activeIndex, step, profiles]);
 
   function selectItem(): void {
     if (step === "model") {
-      const model = MODEL_COMMAND_MODELS[activeIndex] ?? modelConfig.model;
+      const profileCount = profiles?.length ?? 0;
+      if (activeIndex < profileCount && profiles?.[activeIndex] && onProfileSelect) {
+        const profile = profiles[activeIndex];
+        onClose();
+        Promise.resolve(onProfileSelect(profile.name))
+          .then((message) => {
+            if (message) {
+              onStatusMessage?.(message);
+            }
+          })
+          .catch((error) => {
+            const msg = error instanceof Error ? error.message : String(error);
+            onStatusMessage?.(`Failed to apply profile: ${msg}`);
+          });
+        return;
+      }
+      const model = MODEL_COMMAND_MODELS[activeIndex - profileCount] ?? modelConfig.model;
       setPendingModel(model);
       setStep("thinking");
       setActiveIndex(getThinkingOptionIndex(modelConfig));
@@ -107,7 +133,10 @@ const ModelsDropdown: React.FC<Props> = ({
         return;
       }
 
-      const optionCount = step === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
+      const optionCount =
+        step === "model"
+          ? (profiles?.length ?? 0) + MODEL_COMMAND_MODELS.length
+          : MODEL_COMMAND_THINKING_OPTIONS.length;
 
       if (key.upArrow) {
         setActiveIndex((idx) => (idx - 1 + optionCount) % optionCount);
@@ -135,12 +164,20 @@ const ModelsDropdown: React.FC<Props> = ({
 
   const items =
     step === "model"
-      ? MODEL_COMMAND_MODELS.map((model) => ({
-          key: model,
-          label: model,
-          description: model === modelConfig.model ? "current model" : "",
-          selected: model === (pendingModel ?? modelConfig.model),
-        }))
+      ? [
+          ...(profiles ?? []).map((profile) => ({
+            key: `profile:${profile.name}`,
+            label: `⚡ ${profile.name}`,
+            description: "apply saved profile",
+            selected: false,
+          })),
+          ...MODEL_COMMAND_MODELS.map((model) => ({
+            key: model,
+            label: model,
+            description: model === modelConfig.model ? "current model" : "",
+            selected: model === (pendingModel ?? modelConfig.model),
+          })),
+        ]
       : MODEL_COMMAND_THINKING_OPTIONS.map((option, i) => ({
           key: option.label,
           label: option.label,
