@@ -103,6 +103,7 @@ export type PromptToolOptions = {
 
 type DefaultSkillPromptOptions = {
   enabledSkills?: Record<string, boolean>;
+  enabledSkillsDefaultOff?: boolean;
 };
 
 const DEFAULT_SKILL_TEMPLATES = ["karpathy-guidelines.md"];
@@ -161,13 +162,18 @@ function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): s
 
 function readDefaultSkillDocs(
   extensionRoot: string,
-  enabledSkills: Record<string, boolean> = {}
+  enabledSkills: Record<string, boolean> = {},
+  enabledSkillsDefaultOff = false
 ): Array<{ name: string; content: string }> {
   const skillsDir = path.join(extensionRoot, "templates", "skills");
   return DEFAULT_SKILL_TEMPLATES.map((entry) => {
     const fullPath = path.join(skillsDir, entry);
     const name = path.basename(entry, ".md");
-    if (enabledSkills[name] === false) {
+    // Whitelist mode (#178): when enabledSkillsDefaultOff is set, only skills
+    // explicitly enabled with `true` are injected; otherwise exclude only
+    // skills explicitly disabled with `false`.
+    const excluded = enabledSkillsDefaultOff ? enabledSkills[name] !== true : enabledSkills[name] === false;
+    if (excluded) {
       return null;
     }
     try {
@@ -182,7 +188,7 @@ function readDefaultSkillDocs(
 }
 
 export function getDefaultSkillPrompt(options: DefaultSkillPromptOptions = {}): string {
-  const skillDocs = readDefaultSkillDocs(getExtensionRoot(), options.enabledSkills);
+  const skillDocs = readDefaultSkillDocs(getExtensionRoot(), options.enabledSkills, options.enabledSkillsDefaultOff);
   if (skillDocs.length === 0) {
     return "";
   }

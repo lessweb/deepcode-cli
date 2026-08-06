@@ -11,6 +11,22 @@ import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } fr
 
 const TEST_PROCESS_ENV = {};
 
+test("resolveSettings reads enabledSkillsDefaultOff from settings and env (#178)", () => {
+  const resolved = resolveSettings(
+    { enabledSkillsDefaultOff: true, env: { API_KEY: "sk-test" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.enabledSkillsDefaultOff, true);
+
+  const fromEnv = resolveSettings(
+    { env: { API_KEY: "sk-test" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    { DEEPCODE_ENABLED_SKILLS_DEFAULT_OFF: "true" }
+  );
+  assert.equal(fromEnv.enabledSkillsDefaultOff, true);
+});
+
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(
     {

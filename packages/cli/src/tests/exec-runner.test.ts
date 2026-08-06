@@ -33,6 +33,7 @@ function createSettings(
     telemetryEnabled: false,
     permissions,
     enabledSkills: {},
+    enabledSkillsDefaultOff: false,
     statusline: { enabled: false, refreshMs: 1000, separator: " | ", providers: [] },
   };
 }

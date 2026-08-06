@@ -370,6 +370,7 @@ export class SessionManager {
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
+    enabledSkillsDefaultOff?: boolean;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -1181,7 +1182,10 @@ ${agentInstructions}
     const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
     this.appendSessionMessage(sessionId, systemMessage);
 
-    const defaultSkillPrompt = getDefaultSkillPrompt({ enabledSkills: this.getResolvedSettings().enabledSkills });
+    const defaultSkillPrompt = getDefaultSkillPrompt({
+      enabledSkills: this.getResolvedSettings().enabledSkills,
+      enabledSkillsDefaultOff: this.getResolvedSettings().enabledSkillsDefaultOff,
+    });
     if (defaultSkillPrompt) {
       const defaultSkillMessage = this.buildSystemMessage(sessionId, defaultSkillPrompt);
       this.appendSessionMessage(sessionId, defaultSkillMessage);
