@@ -30,6 +30,7 @@ import {
 import { McpManager } from "./mcp/mcp-manager";
 import {
   getDefaultAutoCompactWindow,
+  getDefaultContextWindow,
   type McpServerConfig,
   type PermissionScope,
   type PermissionSettings,
@@ -54,7 +55,7 @@ import {
 } from "./common/permissions";
 import { clearSessionWorkingDir } from "./tools/bash-handler";
 import { reportNewPrompt } from "./common/telemetry";
-import { OpenAIMessageConverter } from "./common/openai-message-converter";
+import { estimateOpenAIMessagesTokens, OpenAIMessageConverter } from "./common/openai-message-converter";
 import { supportsMultimodal } from "./common/model-capabilities";
 
 export type { PermissionScope } from "./settings";
@@ -1395,9 +1396,18 @@ ${agentInstructions}
           }
         }
 
+        let requestMessages = this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId));
+        let messages = this.messageConverter.buildMessages(requestMessages, thinkingEnabled, model);
         const compactPromptTokenThreshold =
           this.getResolvedSettings().autoCompactWindow ?? getCompactPromptTokenThreshold(model);
-        if (session.activeTokens > compactPromptTokenThreshold) {
+        const estimatedTokens = estimateOpenAIMessagesTokens(messages);
+        const contextWindow = this.getResolvedSettings().contextWindow ?? getDefaultContextWindow(model);
+        // Pre-send token budget guard (#269): compact when the reported
+        // activeTokens exceed the auto-compact window OR when the estimated
+        // request size would exceed the model context window (the estimate
+        // catches cases where activeTokens undercounts, e.g. large tool
+        // outputs stored in history).
+        if (session.activeTokens > compactPromptTokenThreshold || estimatedTokens > contextWindow) {
           const message = this.buildAssistantMessage(
             sessionId,
             "The conversation is getting long, compacting...",
@@ -1406,13 +1416,11 @@ ${agentInstructions}
           message.meta = { asThinking: true };
           this.onAssistantMessage(message, false);
           await this.compactSession(sessionId, sessionController.signal);
+          // Rebuild messages after compaction so the request stays within budget.
+          requestMessages = this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId));
+          messages = this.messageConverter.buildMessages(requestMessages, thinkingEnabled, model);
         }
 
-        const messages = this.messageConverter.buildMessages(
-          this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId)),
-          thinkingEnabled,
-          model
-        );
         const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
         const response = await this.createChatCompletionStream(
           client,
@@ -1590,30 +1598,45 @@ ${agentInstructions}
 
     const compactPrompt = getCompactPrompt(sessionMessages.slice(startIndex, endIndex));
     const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
-    const response = await this.createChatCompletionStream(
-      client,
-      {
-        model,
-        ...(temperature !== undefined ? { temperature } : {}),
-        messages: [{ role: "user", content: compactPrompt }],
-        ...thinkingOptions,
-      },
-      signal ? { signal } : undefined,
-      sessionId,
-      {
-        enabled: debugLogEnabled,
-        location: "SessionManager.compactSession",
-        baseURL,
-        params: { temperature, thinkingEnabled, reasoningEffort },
+
+    let compactedSummary = "";
+    let responseUsage: ModelUsage | null = null;
+    try {
+      const response = await this.createChatCompletionStream(
+        client,
+        {
+          model,
+          ...(temperature !== undefined ? { temperature } : {}),
+          messages: [{ role: "user", content: compactPrompt }],
+          ...thinkingOptions,
+        },
+        signal ? { signal } : undefined,
+        sessionId,
+        {
+          enabled: debugLogEnabled,
+          location: "SessionManager.compactSession",
+          baseURL,
+          params: { temperature, thinkingEnabled, reasoningEffort },
+        }
+      );
+      this.throwIfAborted(signal);
+      const rawLlmResponse = response.choices?.[0]?.message?.content;
+      const llmResponse = typeof rawLlmResponse === "string" ? rawLlmResponse : "";
+      compactedSummary = llmResponse.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim();
+      responseUsage = response.usage ?? null;
+    } catch (error) {
+      // Degraded compaction (#269): if the summarization call itself fails
+      // (e.g. the request already exceeds the model context limit), still
+      // drop the oldest messages so the session can continue instead of
+      // deadlocking on repeated 400 errors.
+      if (signal?.aborted || this.isInterrupted(sessionId)) {
+        throw error;
       }
-    );
-    this.throwIfAborted(signal);
-    const rawLlmResponse = response.choices?.[0]?.message?.content;
-    const llmResponse = typeof rawLlmResponse === "string" ? rawLlmResponse : "";
-    const compactedSummary = llmResponse.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim();
+      compactedSummary =
+        "(conversation summary unavailable — earlier messages were truncated to stay within the context window.)";
+    }
 
     const now = new Date().toISOString();
-    const responseUsage = response.usage ?? null;
     this.updateSessionEntry(sessionId, (entry) => ({
       ...entry,
       usage: accumulateUsage(entry.usage, responseUsage),
