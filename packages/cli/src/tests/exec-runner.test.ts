@@ -369,3 +369,158 @@ test("runExecMode disposes resources when stdin cannot be read", async () => {
   assert.match(harness.stderr.join("\n"), /Failed to read stdin: stdin unavailable/);
   assert.equal(harness.disposed, 1);
 });
+
+// ── --output-format json ──────────────────────────────────────────────────────
+
+function parseEvents(stdout: string[]): Record<string, unknown>[] {
+  return stdout.map((line) => {
+    assert.doesNotMatch(line, /\n/, "each event must occupy exactly one line");
+    return JSON.parse(line) as Record<string, unknown>;
+  });
+}
+
+test("runExecMode emits an init event carrying the session id before the result", async () => {
+  const harness = createHarness();
+  const code = await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", outputFormat: "json", input: ttyInput() },
+    harness.dependencies
+  );
+
+  assert.equal(code, 0);
+  const events = parseEvents(harness.stdout);
+  const init = events[0];
+  assert.equal(init.type, "system");
+  assert.equal(init.subtype, "init");
+  // The id is minted inside handleUserPrompt, so it reaches stdout via the
+  // first streamed message — before the turn finishes.
+  assert.equal(init.session_id, "new-session");
+  assert.equal(init.cwd, "/tmp/project");
+  assert.equal(init.model, "test-model");
+  assert.deepEqual(init.mcp_servers, []);
+
+  const result = events[events.length - 1];
+  assert.equal(result.type, "result");
+  assert.equal(result.subtype, "success");
+  assert.equal(result.is_error, false);
+  assert.equal(result.session_id, "new-session");
+  assert.equal(result.result, "final answer");
+  assert.equal(typeof result.duration_ms, "number");
+});
+
+test("runExecMode streams session messages as their own json events", async () => {
+  const harness = createHarness();
+  await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", outputFormat: "json", input: ttyInput() },
+    harness.dependencies
+  );
+
+  const events = parseEvents(harness.stdout);
+  const assistant = events.find((event) => event.type === "assistant");
+  assert.ok(assistant, "expected an assistant event");
+  assert.equal(assistant.session_id, "new-session");
+  const message = assistant.message as Record<string, unknown>;
+  assert.equal(message.id, "tool-message");
+  assert.equal(message.role, "assistant");
+  assert.deepEqual(message.message_params, { tool_calls: [{ function: { name: "read" } }] });
+});
+
+test("runExecMode emits exactly one init and one result event", async () => {
+  const harness = createHarness();
+  await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", outputFormat: "json", input: ttyInput() },
+    harness.dependencies
+  );
+
+  const events = parseEvents(harness.stdout);
+  assert.equal(events.filter((event) => event.subtype === "init").length, 1);
+  assert.equal(events.filter((event) => event.type === "result").length, 1);
+});
+
+test("runExecMode reports the resumed session id in the init event", async () => {
+  const harness = createHarness({ resumeExists: true });
+  const code = await runExecMode(
+    {
+      prompt: "task",
+      projectRoot: "/tmp/project",
+      resumeSessionId: RESUME_ID,
+      outputFormat: "json",
+      input: ttyInput(),
+    },
+    harness.dependencies
+  );
+
+  assert.equal(code, 0);
+  const init = parseEvents(harness.stdout)[0];
+  assert.equal(init.session_id, RESUME_ID);
+  assert.equal(init.resumed_from, RESUME_ID);
+});
+
+test("runExecMode emits an error result event for a failed turn", async () => {
+  const harness = createHarness({ finalStatus: "failed", failReason: "model exploded" });
+  const code = await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", outputFormat: "json", input: ttyInput() },
+    harness.dependencies
+  );
+
+  assert.equal(code, 1);
+  const result = parseEvents(harness.stdout).at(-1)!;
+  assert.equal(result.type, "result");
+  assert.equal(result.subtype, "error");
+  assert.equal(result.is_error, true);
+  assert.equal(result.status, "failed");
+  assert.match(String(result.error), /model exploded/);
+  // The human-readable diagnostic is unchanged on stderr.
+  assert.match(harness.stderr.join("\n"), /model exploded/);
+});
+
+test("runExecMode emits a permission_required result event without a session reply", async () => {
+  const harness = createHarness({
+    finalStatus: "ask_permission",
+    askPermissions: [
+      { toolCallId: "call-1", name: "bash", command: "rm -rf /", description: "", scopes: ["write-out-cwd"] },
+    ],
+    permissions: { allow: [], deny: [], ask: ["write-out-cwd"], defaultMode: "allowAll" },
+  });
+  const code = await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", outputFormat: "json", input: ttyInput() },
+    harness.dependencies
+  );
+
+  assert.equal(code, 1);
+  const result = parseEvents(harness.stdout).at(-1)!;
+  assert.equal(result.subtype, "permission_required");
+  assert.equal(result.is_error, true);
+  assert.match(String(result.error), /permission confirmation/);
+});
+
+test("runExecMode still emits an init and result event when no session is created", async () => {
+  const harness = createHarness();
+  const code = await runExecMode(
+    {
+      prompt: "task",
+      projectRoot: "/tmp/project",
+      resumeSessionId: RESUME_ID,
+      outputFormat: "json",
+      input: ttyInput(),
+    },
+    harness.dependencies
+  );
+
+  assert.equal(code, 1);
+  const events = parseEvents(harness.stdout);
+  assert.equal(events[0].subtype, "init");
+  assert.equal(events[0].session_id, null);
+  assert.equal(events[1].type, "result");
+  assert.equal(events[1].is_error, true);
+});
+
+test("runExecMode writes plain text and no json events by default", async () => {
+  const harness = createHarness();
+  const code = await runExecMode(
+    { prompt: "task", projectRoot: "/tmp/project", input: ttyInput() },
+    harness.dependencies
+  );
+
+  assert.equal(code, 0);
+  assert.deepEqual(harness.stdout, ["final answer"]);
+});
