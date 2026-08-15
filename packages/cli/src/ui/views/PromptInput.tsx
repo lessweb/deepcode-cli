@@ -212,7 +212,7 @@ export const PromptInput = React.memo(function PromptInput({
     ? statusMessage
     : busy
       ? busyStatusText
-      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
+      : `enter send · shift+enter/ctrl+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
   const showFooterText = useMemo(
     () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
     [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
@@ -968,11 +968,13 @@ export function isRawModeShortcut(input: string, key: Pick<InputKey, "ctrl">): b
 
 export type PromptReturnKeyAction = "submit" | "newline" | null;
 
-export function getPromptReturnKeyAction(key: Pick<InputKey, "return" | "shift" | "meta">): PromptReturnKeyAction {
+export function getPromptReturnKeyAction(
+  key: Pick<InputKey, "return" | "shift" | "meta" | "ctrl">
+): PromptReturnKeyAction {
   if (!key.return) {
     return null;
   }
-  if (key.shift || key.meta) {
+  if (key.shift || key.meta || key.ctrl) {
     return "newline";
   }
   return "submit";
