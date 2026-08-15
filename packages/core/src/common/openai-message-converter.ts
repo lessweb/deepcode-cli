@@ -276,3 +276,47 @@ export class OpenAIMessageConverter {
     );
   }
 }
+
+/**
+ * Estimate the token count of an OpenAI messages array (chars / 4 heuristic).
+ * Used as a pre-send budget guard so requests never exceed the model context
+ * window even when the reported usage (activeTokens) undercounts. (#269)
+ */
+export function estimateOpenAIMessagesTokens(messages: ChatCompletionMessageParam[]): number {
+  let chars = 0;
+  for (const message of messages) {
+    chars += estimateMessageChars(message);
+  }
+  return Math.max(1, Math.ceil(chars / 4));
+}
+
+function estimateMessageChars(message: ChatCompletionMessageParam): number {
+  let chars = 0;
+  const content = message.content;
+  if (typeof content === "string") {
+    chars += content.length;
+  } else if (Array.isArray(content)) {
+    for (const part of content) {
+      if (part.type === "text") {
+        chars += part.text.length;
+      } else if (part.type === "image_url") {
+        const url = (part as { image_url?: { url?: unknown } }).image_url?.url;
+        if (typeof url === "string") {
+          chars += url.length;
+        }
+      }
+    }
+  }
+
+  const params = message as unknown as { tool_calls?: unknown[]; tool_call_id?: string; name?: string };
+  if (params.name) {
+    chars += params.name.length;
+  }
+  if (params.tool_call_id) {
+    chars += params.tool_call_id.length;
+  }
+  if (Array.isArray(params.tool_calls)) {
+    chars += JSON.stringify(params.tool_calls).length;
+  }
+  return chars;
+}

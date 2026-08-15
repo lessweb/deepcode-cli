@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { OpenAIMessageConverter } from "../common/openai-message-converter";
+import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import { estimateOpenAIMessagesTokens, OpenAIMessageConverter } from "../common/openai-message-converter";
 import type { SessionMessage } from "../session";
 
 // ---------------------------------------------------------------------------
@@ -505,4 +506,42 @@ test("OpenAIMessageConverter.findToolFunction handles null/empty toolCalls", () 
 
   const toolCalls = [null, undefined, { noId: true }];
   assert.equal(c.findToolFunction(toolCalls as unknown[], "call-1"), null);
+});
+
+// ---------------------------------------------------------------------------
+// estimateOpenAIMessagesTokens (#269)
+// ---------------------------------------------------------------------------
+
+test("estimateOpenAIMessagesTokens estimates tokens from text content", () => {
+  const messages = [
+    { role: "user", content: "x".repeat(400) },
+    { role: "assistant", content: "y".repeat(200) },
+  ] as unknown as ChatCompletionMessageParam[];
+  assert.equal(estimateOpenAIMessagesTokens(messages), Math.ceil(600 / 4));
+});
+
+test("estimateOpenAIMessagesTokens counts image_url data URIs", () => {
+  const messages = [
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "hi" },
+        { type: "image_url", image_url: { url: "data:image/png;base64," + "A".repeat(100) } },
+      ],
+    },
+  ] as unknown as ChatCompletionMessageParam[];
+  // 2 chars text + 122 chars data-URI ("data:image/png;base64," is 22 chars) => 124 chars
+  assert.equal(estimateOpenAIMessagesTokens(messages), Math.ceil(124 / 4));
+});
+
+test("estimateOpenAIMessagesTokens includes tool call payloads", () => {
+  const messages = [
+    {
+      role: "assistant",
+      content: "",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "read", arguments: '{"file_path":"/tmp/a"}' } }],
+    },
+  ] as unknown as ChatCompletionMessageParam[];
+  const tokens = estimateOpenAIMessagesTokens(messages);
+  assert.ok(tokens >= 1);
 });
