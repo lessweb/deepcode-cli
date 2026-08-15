@@ -1731,7 +1731,7 @@ ${agentInstructions}
       contentParts.push(`Failed to kill processes: ${failedPids.join(", ")}.`);
     }
 
-    this.onAssistantMessage(this.buildUserMessage(sessionId, { text: contentParts.join(" ") }), false);
+    this.onAssistantMessage(this.buildSystemMessage(sessionId, contentParts.join(" ")), false);
   }
 
   private isInterrupted(sessionId: string): boolean {
