@@ -48,3 +48,6 @@ jobs:
 
       - name: Test
         run: npm test
+
+      - name: Test Scripts
+        run: npm run test:scripts
