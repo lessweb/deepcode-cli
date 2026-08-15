@@ -13,6 +13,9 @@ export type SlashCommandKind =
   | "undo"
   | "mcp"
   | "raw"
+  | "tokens"
+  | "context"
+  | "cost"
   | "exit";
 
 export type SlashCommandItem = {
@@ -91,6 +94,24 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     label: "/raw",
     args: ["lite", "normal", "raw-scrollback"],
     description: "Toggle display mode for viewing or collapsing reasoning content",
+  },
+  {
+    kind: "tokens",
+    name: "tokens",
+    label: "/tokens",
+    description: "Show token usage for the current session",
+  },
+  {
+    kind: "context",
+    name: "context",
+    label: "/context",
+    description: "Show context window usage for the current session",
+  },
+  {
+    kind: "cost",
+    name: "cost",
+    label: "/cost",
+    description: "Show estimated cost for the current session",
   },
   {
     kind: "exit",

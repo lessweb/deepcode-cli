@@ -31,6 +31,9 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
     "undo",
     "mcp",
     "raw",
+    "tokens",
+    "context",
+    "cost",
     "exit",
   ]);
 });
