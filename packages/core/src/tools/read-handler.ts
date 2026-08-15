@@ -3,6 +3,7 @@ import * as path from "path";
 import ignore from "ignore";
 import type { ToolExecutionContext, ToolExecutionFollowUpMessage, ToolExecutionResult } from "./executor";
 import { readTextFileWithMetadata } from "../common/file-utils";
+import { supportsMultimodal } from "../common/model-capabilities";
 import {
   createFullFileSnippet,
   createSnippet,
@@ -14,6 +15,9 @@ import {
 const DEFAULT_LINE_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
 const LINE_NUMBER_WIDTH = 6;
+// Cap for attaching image payloads (as base64) to the conversation history so
+// a single read cannot add hundreds of thousands of tokens. (#181)
+const MAX_ATTACHED_IMAGE_BYTES = 15 * 1024 * 1024;
 const DEFAULT_GITIGNORE = [
   "node_modules/",
   ".git/",
@@ -179,15 +183,27 @@ export async function handleReadTool(
         timestamp: Math.floor(stat.mtimeMs),
         isPartialView: true,
       });
+      // Gate base64 image inlining on the active model's multimodality and a
+      // size cap so text-only models never accumulate megabytes of base64 in
+      // the conversation history. (#181)
+      const llmContext = context.createOpenAIClient?.();
+      const multimodal = supportsMultimodal(llmContext?.model ?? "");
+      const tooLarge = buffer.length > MAX_ATTACHED_IMAGE_BYTES;
+      const followUpMessages =
+        multimodal && !tooLarge ? [buildImageFollowUpMessage(filePath, mime, buffer)] : undefined;
       return {
         ok: true,
         name: "read",
-        output: "File loaded.",
+        output: !multimodal
+          ? "File loaded (image content not attached: the active model does not support images)."
+          : tooLarge
+            ? `File loaded (image content not attached: file exceeds the ${formatBytes(MAX_ATTACHED_IMAGE_BYTES)} attach limit).`
+            : "File loaded.",
         metadata: {
           mime,
           bytes: buffer.length,
         },
-        followUpMessages: [buildImageFollowUpMessage(filePath, mime, buffer)],
+        followUpMessages,
       };
     }
 
@@ -454,6 +470,16 @@ function getImageMimeType(ext: string): string {
     default:
       return "image/png";
   }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) {
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  if (bytes >= 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${bytes} B`;
 }
 
 function buildImageFollowUpMessage(filePath: string, mime: string, buffer: Buffer): ToolExecutionFollowUpMessage {
