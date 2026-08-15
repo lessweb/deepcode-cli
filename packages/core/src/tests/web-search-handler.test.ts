@@ -385,6 +385,17 @@ test("WebSearch returns a configuration error when neither a script nor an LLM c
   );
 });
 
+test("WebSearch executes a configured .bat script on Windows", { skip: process.platform !== "win32" }, async () => {
+  const workspace = createTempWorkspace();
+  const scriptPath = path.join(workspace, "web-search.bat");
+  fs.writeFileSync(scriptPath, "@echo off\r\necho query=%1\r\n", "utf8");
+
+  const result = await handleWebSearchTool({ query: "test" }, createContext(workspace, { webSearchTool: scriptPath }));
+
+  assert.equal(result.ok, true);
+  assert.match(result.output ?? "", /query=test/);
+});
+
 function createContext(
   projectRoot: string,
   options: {
