@@ -9,6 +9,7 @@ import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { buildLoadingText } from "../core/loading-text";
+import { cleanOutputForClipboard, writeClipboardText } from "../core/clipboard";
 import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
@@ -394,6 +395,22 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "copy") {
+        const activeSessionId = sessionManager.getActiveSessionId();
+        const sessionMessages = activeSessionId ? sessionManager.listSessionMessages(activeSessionId) : [];
+        const lastAssistant = [...sessionMessages].reverse().find((msg) => msg.role === "assistant");
+        const content = typeof lastAssistant?.content === "string" ? lastAssistant.content : "";
+        if (!content.trim()) {
+          setErrorLine("No assistant response to copy yet.");
+          return;
+        }
+        if (writeClipboardText(cleanOutputForClipboard(content))) {
+          setMessages((prev) => [...prev, buildSyntheticUserMessage("Copied last response to clipboard", 0)]);
+        } else {
+          setErrorLine("Failed to copy: no clipboard tool available.");
+        }
         return;
       }
 

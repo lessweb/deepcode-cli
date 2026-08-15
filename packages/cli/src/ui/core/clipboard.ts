@@ -156,3 +156,47 @@ export async function readClipboardImageAsync(): Promise<ClipboardImage | null> 
     });
   });
 }
+
+const ANSI_ESCAPE_REGEX = /\u001B\[[0-9;]*m/g;
+
+/**
+ * Prepare assistant output for clean clipboard pasting: strip ANSI escape
+ * codes and normalize line endings so the copied text pastes without terminal
+ * color codes. (#127)
+ */
+export function cleanOutputForClipboard(text: string): string {
+  const withoutAnsi = text.replace(ANSI_ESCAPE_REGEX, "");
+  return withoutAnsi.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trimEnd() + "\n";
+}
+
+function tryRunWithInput(command: string, args: string[], input: string): boolean {
+  try {
+    const result = spawnSync(command, args, { input, encoding: "utf8", maxBuffer: 32 * 1024 * 1024 });
+    return result.status === 0 && !result.error;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Copy plain text to the system clipboard using the platform-native helper.
+ * Returns false when no clipboard tool is available. (#127)
+ */
+export function writeClipboardText(text: string): boolean {
+  if (!text) {
+    return false;
+  }
+  if (process.platform === "darwin") {
+    return tryRunWithInput("pbcopy", [], text);
+  }
+  if (process.platform === "linux") {
+    if (tryRunWithInput("xclip", ["-selection", "clipboard"], text)) {
+      return true;
+    }
+    return tryRunWithInput("wl-copy", [], text);
+  }
+  if (process.platform === "win32") {
+    return tryRunWithInput("powershell", ["-NoProfile", "-Command", "[Console]::In.ReadToEnd() | Set-Clipboard"], text);
+  }
+  return false;
+}

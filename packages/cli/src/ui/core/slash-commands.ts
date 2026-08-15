@@ -13,6 +13,7 @@ export type SlashCommandKind =
   | "undo"
   | "mcp"
   | "raw"
+  | "copy"
   | "exit";
 
 export type SlashCommandItem = {
@@ -91,6 +92,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     label: "/raw",
     args: ["lite", "normal", "raw-scrollback"],
     description: "Toggle display mode for viewing or collapsing reasoning content",
+  },
+  {
+    kind: "copy",
+    name: "copy",
+    label: "/copy",
+    description: "Copy the last assistant response to the clipboard",
   },
   {
     kind: "exit",
