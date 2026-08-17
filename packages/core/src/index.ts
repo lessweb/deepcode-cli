@@ -19,6 +19,8 @@ export {
   getDefaultAutoCompactWindow,
   DEFAULT_MODEL,
   DEFAULT_BASE_URL,
+  ATLASCLOUD_DEFAULT_MODEL,
+  ATLASCLOUD_BASE_URL,
 } from "./settings";
 export type {
   DeepcodingSettings,
