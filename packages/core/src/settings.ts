@@ -101,6 +101,8 @@ export type DeepcodingSettings = {
   fileQuotaCleanupBatch?: number;
   maxRequestFilesBytes?: number;
   mcpServers?: Record<string, McpServerConfig>;
+  /** When true, MCP server launcher commands are restricted to an allowlist. */
+  strictMcpConfig?: boolean;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
   statusline?: StatusLineSettings;
@@ -128,6 +130,7 @@ export type ResolvedDeepcodingSettings = {
   fileQuotaCleanupBatch: number;
   maxRequestFilesBytes: number;
   mcpServers?: Record<string, McpServerConfig>;
+  strictMcpConfig: boolean;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
   statusline: ResolvedStatusLineSettings;
@@ -632,6 +635,11 @@ export function resolveSettingsSources(
     trimString(projectSettings?.webSearchTool) ||
     trimString(userSettings?.webSearchTool) ||
     "";
+  const strictMcpConfig =
+    parseBoolean(systemEnv.STRICT_MCP_CONFIG) ??
+    parseBoolean(projectSettings?.strictMcpConfig) ??
+    parseBoolean(userSettings?.strictMcpConfig) ??
+    false;
 
   const multimodal =
     resolveMultimodalMode(systemEnv.MULTIMODAL) ??
@@ -697,6 +705,7 @@ export function resolveSettingsSources(
     fileQuotaCleanupBatch,
     maxRequestFilesBytes,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
+    strictMcpConfig,
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),

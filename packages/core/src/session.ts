@@ -400,6 +400,7 @@ export class SessionManager {
     autoCompactWindow?: number;
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
+    strictMcpConfig?: boolean;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
   };
@@ -451,6 +452,7 @@ export class SessionManager {
   }
 
   async initMcpServers(servers?: Record<string, McpServerConfig>): Promise<void> {
+    this.mcpManager.setStrictMode(this.getResolvedSettings().strictMcpConfig ?? false);
     this.mcpManager.setOnToolsListChanged(() => {
       this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
     });
