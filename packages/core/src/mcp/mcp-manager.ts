@@ -1,5 +1,11 @@
 import { createHash } from "crypto";
-import { McpClient, type McpToolDefinition, type McpPromptDefinition, type McpResourceDefinition } from "./mcp-client";
+import {
+  McpClient,
+  type McpToolDefinition,
+  type McpPromptDefinition,
+  type McpResourceDefinition,
+} from "./mcp-client";
+import { McpHttpClient } from "./mcp-http-client";
 import type { McpServerConfig } from "../settings";
 
 const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
@@ -14,7 +20,7 @@ type McpToolEntry = {
   originalName: string;
   namespacedName: string;
   definition: McpToolDefinition;
-  client: McpClient;
+  client: McpClient | McpHttpClient;
 };
 
 export type McpServerStatus = {
@@ -22,12 +28,18 @@ export type McpServerStatus = {
   status: "starting" | "ready" | "failed" | "reconnecting";
   connected: boolean;
   error?: string;
+  deferred?: boolean;
   toolCount: number;
   tools: string[];
   promptCount: number;
   prompts: string[];
   resourceCount: number;
   resources: string[];
+};
+
+export type McpInitFailure = {
+  name: string;
+  error: string;
 };
 
 function buildMcpNamespacedName(
@@ -56,24 +68,53 @@ function buildMcpNamespacedName(
   }
 }
 
+/**
+ * Module-level pool of spawned stdio MCP clients keyed by (command,args,env).
+ * Lets several managers / sessions in the same process reuse one spawned
+ * server instead of re-spawning the same python/node process every time.
+ */
+const pooledMcpClients = new Map<string, McpClient>();
+
+function mcpSpawnKey(config: McpServerConfig): string {
+  return JSON.stringify([config.command, config.args ?? [], config.env ?? {}]);
+}
+
+function configHash(config: McpServerConfig): string {
+  return createHash("sha256").update(JSON.stringify(config)).digest("hex").slice(0, 16);
+}
+
+function filterTools(tools: McpToolDefinition[], config: McpServerConfig): McpToolDefinition[] {
+  if (config.enabledTools && config.enabledTools.length > 0) {
+    const allow = new Set(config.enabledTools);
+    tools = tools.filter((t) => allow.has(t.name));
+  }
+  if (config.disabledTools && config.disabledTools.length > 0) {
+    const deny = new Set(config.disabledTools);
+    tools = tools.filter((t) => !deny.has(t.name));
+  }
+  return tools;
+}
+
 export class McpManager {
-  private clients: McpClient[] = [];
+  private clients: Array<McpClient | McpHttpClient> = [];
   private tools: McpToolEntry[] = [];
   private prompts: Array<{
     serverName: string;
     namespacedName: string;
     definition: McpPromptDefinition;
-    client: McpClient;
+    client: McpClient | McpHttpClient;
   }> = [];
   private resources: Array<{
     serverName: string;
     namespacedName: string;
     definition: McpResourceDefinition;
-    client: McpClient;
+    client: McpClient | McpHttpClient;
   }> = [];
   private initialized = false;
   private disposed = false;
   private configuredServerNames: string[] = [];
+  private configHashes: Record<string, string> = {};
+  private deferredServers = new Set<string>();
   private serverStatuses: McpServerStatus[] = [];
   private onToolsListChanged: (() => void) | null = null;
   private onStatusChanged: (() => void) | null = null;
@@ -94,6 +135,7 @@ export class McpManager {
         name,
         status: "starting",
         connected: false,
+        ...(servers[name]?.deferLoading ? { deferred: true } : {}),
         toolCount: 0,
         tools: [],
         promptCount: 0,
@@ -104,19 +146,41 @@ export class McpManager {
     }
   }
 
-  async initialize(servers?: Record<string, McpServerConfig>): Promise<void> {
-    if (this.initialized || this.disposed) return;
+  /**
+   * Connect all configured (non-deferred) MCP servers. Serial like before, but:
+   * - per-server connectTimeoutMs (P0-3)
+   * - required servers fail startup, optional ones just report (P0-3)
+   * - deferLoading servers are skipped here and connect lazily (P0-1)
+   * - failures are returned as a summary for the caller to surface (P1-6)
+   */
+  async initialize(servers?: Record<string, McpServerConfig>): Promise<McpInitFailure[]> {
+    if (this.initialized || this.disposed) return [];
     this.initialized = true;
 
-    if (!servers || Object.keys(servers).length === 0) return;
+    if (!servers || Object.keys(servers).length === 0) return [];
 
     this.serverConfigs = servers;
     this.prepare(servers);
 
+    const failures: McpInitFailure[] = [];
     for (const [name, config] of Object.entries(servers)) {
       if (this.disposed) break;
-      await this.connectServer(name, config);
+      this.configHashes[name] = configHash(config);
+      if (config.deferLoading) {
+        this.deferredServers.add(name);
+        continue;
+      }
+      try {
+        await this.connectServer(name, config);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failures.push({ name, error: message });
+        if (config.required) {
+          throw new Error(`Required MCP server "${name}" failed to initialize: ${message}`);
+        }
+      }
     }
+    return failures;
   }
 
   async reconnect(name: string, config?: McpServerConfig): Promise<void> {
@@ -125,6 +189,12 @@ export class McpManager {
     if (!effectiveConfig) return;
     if (config) {
       this.serverConfigs[name] = config;
+      this.configHashes[name] = configHash(config);
+      if (config.deferLoading) {
+        this.deferredServers.add(name);
+      } else {
+        this.deferredServers.delete(name);
+      }
     }
 
     this.setStatus({
@@ -140,7 +210,94 @@ export class McpManager {
       resources: [],
     });
 
-    await this.connectServer(name, effectiveConfig);
+    try {
+      await this.connectServer(name, effectiveConfig);
+    } catch {
+      // status is already marked failed inside connectServer
+    }
+  }
+
+  /**
+   * Reconcile the configured servers against a (possibly changed) config map.
+   * New/changed servers are connected, removed ones are disconnected. Used for
+   * hot reload without restarting the process (P1-5).
+   */
+  async refreshServers(servers?: Record<string, McpServerConfig>): Promise<McpInitFailure[]> {
+    if (this.disposed) return [];
+    if (!servers) return [];
+
+    const nextNames = new Set(Object.keys(servers));
+    for (const name of [...this.configuredServerNames]) {
+      if (!nextNames.has(name)) {
+        this.disconnectServer(name);
+      }
+    }
+
+    this.serverConfigs = servers;
+    const failures: McpInitFailure[] = [];
+    for (const [name, config] of Object.entries(servers)) {
+      const nextHash = configHash(config);
+      const changed = this.configHashes[name] !== nextHash;
+      this.configHashes[name] = nextHash;
+      if (config.deferLoading) {
+        this.deferredServers.add(name);
+        continue;
+      }
+      this.deferredServers.delete(name);
+      if (!changed && this.isConnected(name)) {
+        continue;
+      }
+      try {
+        await this.connectServer(name, config);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        failures.push({ name, error: message });
+        if (config.required) {
+          throw new Error(`Required MCP server "${name}" failed: ${message}`);
+        }
+      }
+    }
+    return failures;
+  }
+
+  /** Connect a server that is configured but not connected (lazy / deferred / crashed). */
+  async ensureConnected(name: string): Promise<boolean> {
+    if (this.disposed) return false;
+    if (this.isConnected(name)) return true;
+    const config = this.serverConfigs[name];
+    if (!config) return false;
+    try {
+      await this.connectServer(name, config);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private isConnected(name: string): boolean {
+    return this.clients.some((c) => c.name === name && c.isConnected());
+  }
+
+  private disconnectServer(name: string): void {
+    const client = this.clients.find((c) => c.name === name);
+    if (client) {
+      client.disconnect();
+      this.clients = this.clients.filter((c) => c.name !== name);
+    }
+    // Drop any pooled stdio client we spawned for this server (its pid died
+    // with disconnect above; a stale pooled entry would resurrect nothing).
+    for (const [key, pooled] of pooledMcpClients) {
+      if (pooled.name === name && !pooled.isConnected()) {
+        pooledMcpClients.delete(key);
+      }
+    }
+    this.tools = this.tools.filter((t) => t.serverName !== name);
+    this.prompts = this.prompts.filter((p) => p.serverName !== name);
+    this.resources = this.resources.filter((r) => r.serverName !== name);
+    this.configuredServerNames = this.configuredServerNames.filter((n) => n !== name);
+    this.deferredServers.delete(name);
+    this.serverStatuses = this.serverStatuses.filter((s) => s.name !== name);
+    this.onToolsListChanged?.();
   }
 
   private async connectServer(name: string, config: McpServerConfig): Promise<void> {
@@ -152,32 +309,53 @@ export class McpManager {
     this.prompts = this.prompts.filter((p) => p.serverName !== name);
     this.resources = this.resources.filter((r) => r.serverName !== name);
 
-    let client: McpClient | null = null;
+    const timeout = config.connectTimeoutMs ?? MCP_STARTUP_TIMEOUT_MS;
+    let client: McpClient | McpHttpClient | null = null;
+    let pooled = false;
     try {
-      client = new McpClient(
-        name,
-        config.command,
-        config.args ?? [],
-        config.env,
-        (method) => {
-          if (method === "notifications/tools/list_changed") {
-            this.refreshServerTools(name, client!).catch(() => {});
-          }
-        },
-        (reason) => {
-          if (!this.disposed && this.serverConfigs[name]) {
-            this.onServerCrash(name, reason);
-          }
+      if (config.url) {
+        // Remote MCP (streamable-http/SSE)
+        client = new McpHttpClient(name, config.url, config.headers, timeout);
+        await client.connect();
+        if (this.disposed) {
+          client.disconnect();
+          return;
         }
-      );
-      await client.connect(MCP_STARTUP_TIMEOUT_MS);
-      if (this.disposed) {
-        client.disconnect();
-        return;
+      } else {
+        // stdio with reuse pool
+        const key = mcpSpawnKey(config);
+        const existing = pooledMcpClients.get(key);
+        if (existing?.isConnected()) {
+          client = existing;
+          pooled = true;
+        } else {
+          client = new McpClient(
+            name,
+            config.command,
+            config.args ?? [],
+            config.env,
+            (method) => {
+              if (method === "notifications/tools/list_changed") {
+                this.refreshServerTools(name, client!).catch(() => {});
+              }
+            },
+            (reason) => {
+              if (!this.disposed && this.serverConfigs[name]) {
+                this.onServerCrash(name, reason);
+              }
+            }
+          );
+          await client.connect(timeout);
+          pooledMcpClients.set(key, client);
+        }
+        if (this.disposed) {
+          if (!pooled) client.disconnect();
+          return;
+        }
       }
       this.clients.push(client);
 
-      const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
+      const serverTools = filterTools(await client.listTools(timeout), config);
       if (this.disposed) return;
       const toolNamespacedNames: string[] = [];
       const usedToolNames = new Set(this.tools.map((tool) => tool.namespacedName));
@@ -196,7 +374,7 @@ export class McpManager {
 
       let serverPrompts: McpPromptDefinition[] = [];
       try {
-        serverPrompts = await client.listPrompts(MCP_STARTUP_TIMEOUT_MS);
+        serverPrompts = await client.listPrompts(timeout);
       } catch {
         // server may not support prompts
       }
@@ -215,7 +393,7 @@ export class McpManager {
 
       let serverResources: McpResourceDefinition[] = [];
       try {
-        serverResources = await client.listResources(MCP_STARTUP_TIMEOUT_MS);
+        serverResources = await client.listResources(timeout);
       } catch {
         // server may not support resources
       }
@@ -258,6 +436,7 @@ export class McpManager {
         resourceCount: 0,
         resources: [],
       });
+      throw err;
     }
   }
 
@@ -291,6 +470,7 @@ export class McpManager {
           name,
           status: "starting",
           connected: false,
+          ...(this.deferredServers.has(name) ? { deferred: true } : {}),
           toolCount: 0,
           tools: [],
           promptCount: 0,
@@ -337,12 +517,33 @@ export class McpManager {
     return name.startsWith("mcp__");
   }
 
+  private owningServerForName(name: string): string | null {
+    if (!name.startsWith("mcp__")) return null;
+    const rest = name.slice("mcp__".length);
+    const sep = rest.indexOf("__");
+    if (sep === -1) return null;
+    const candidate = rest.slice(0, sep);
+    if (this.serverConfigs[candidate]) {
+      return candidate;
+    }
+    return null;
+  }
+
   async executeMcpTool(
     name: string,
     args: Record<string, unknown>,
     timeoutMs = MCP_CALL_TOOL_TIMEOUT_MS
   ): Promise<{ ok: boolean; name: string; output?: string; error?: string }> {
-    const tool = this.tools.find((t) => t.namespacedName === name);
+    let tool = this.tools.find((t) => t.namespacedName === name);
+
+    // Lazy connect (P0-1): if the owning server is configured but not yet
+    // connected (deferred / crashed), bring it up and retry the lookup.
+    if (!tool) {
+      const serverName = this.owningServerForName(name);
+      if (serverName && (await this.ensureConnected(serverName))) {
+        tool = this.tools.find((t) => t.namespacedName === name);
+      }
+    }
     if (!tool) {
       return { ok: false, name, error: `Unknown MCP tool: ${name}` };
     }
@@ -371,7 +572,13 @@ export class McpManager {
     name: string,
     args: Record<string, unknown>
   ): Promise<{ ok: boolean; name: string; output?: string; error?: string }> {
-    const prompt = this.prompts.find((p) => p.namespacedName === name);
+    let prompt = this.prompts.find((p) => p.namespacedName === name);
+    if (!prompt) {
+      const serverName = this.owningServerForName(name);
+      if (serverName && (await this.ensureConnected(serverName))) {
+        prompt = this.prompts.find((p) => p.namespacedName === name);
+      }
+    }
     if (!prompt) {
       return { ok: false, name, error: `Unknown MCP prompt: ${name}` };
     }
@@ -400,7 +607,13 @@ export class McpManager {
     name: string,
     uri: string
   ): Promise<{ ok: boolean; name: string; output?: string; error?: string }> {
-    const resource = this.resources.find((r) => r.namespacedName === name);
+    let resource = this.resources.find((r) => r.namespacedName === name);
+    if (!resource) {
+      const serverName = this.owningServerForName(name);
+      if (serverName && (await this.ensureConnected(serverName))) {
+        resource = this.resources.find((r) => r.namespacedName === name);
+      }
+    }
     if (!resource) {
       return { ok: false, name, error: `Unknown MCP resource: ${name}` };
     }
@@ -430,17 +643,25 @@ export class McpManager {
     for (const client of this.clients) {
       client.disconnect();
     }
+    // Drop pooled entries we spawned; their processes were killed above.
+    for (const [key, pooled] of pooledMcpClients) {
+      if (!pooled.isConnected()) {
+        pooledMcpClients.delete(key);
+      }
+    }
     this.clients = [];
     this.tools = [];
     this.prompts = [];
     this.resources = [];
     this.serverStatuses = [];
     this.configuredServerNames = [];
+    this.configHashes = {};
+    this.deferredServers.clear();
     this.serverConfigs = {};
     this.initialized = false;
   }
 
-  private async refreshServerTools(serverName: string, client: McpClient): Promise<void> {
+  private async refreshServerTools(serverName: string, client: McpClient | McpHttpClient): Promise<void> {
     const serverTools = await client.listTools(MCP_STARTUP_TIMEOUT_MS);
     this.tools = this.tools.filter((t) => t.serverName !== serverName);
     const toolNamespacedNames: string[] = [];
