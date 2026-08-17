@@ -103,6 +103,32 @@ export type McpSpawnSpec = {
   windowsHide?: boolean;
 };
 
+/**
+ * Module-level registry of every MCP child process we spawned.
+ * Used as a last-resort cleanup on process exit so aborted/interrupted runs
+ * never leave orphan MCP servers behind (each python server holds RAM).
+ */
+const liveMcpProcesses = new Set<number>();
+
+export function registerMcpProcess(pid: number): void {
+  liveMcpProcesses.add(pid);
+}
+
+export function unregisterMcpProcess(pid: number): void {
+  liveMcpProcesses.delete(pid);
+}
+
+export function killAllMcpProcesses(): void {
+  for (const pid of liveMcpProcesses) {
+    try {
+      killProcessTree(pid, "SIGKILL", { killGroupOnNonWindows: false });
+    } catch {
+      // best effort — the process may already be gone
+    }
+  }
+  liveMcpProcesses.clear();
+}
+
 export class McpClient {
   private process: ChildProcess | null = null;
   private reader: Interface | null = null;
@@ -128,6 +154,11 @@ export class McpClient {
     this.disconnectHandler = onDisconnect ?? null;
   }
 
+  /** Server name for manager bookkeeping (pool / lazy connect / refresh). */
+  get name(): string {
+    return this.serverName;
+  }
+
   async connect(timeoutMs: number): Promise<void> {
     return new Promise((resolve, reject) => {
       this.intentionallyDisconnected = false;
@@ -144,6 +175,9 @@ export class McpClient {
         shell: spawnSpec.shell,
         windowsHide: spawnSpec.windowsHide,
       });
+      if (typeof this.process.pid === "number") {
+        registerMcpProcess(this.process.pid);
+      }
 
       let resolved = false;
       const safeReject = (err: Error) => {
@@ -160,6 +194,9 @@ export class McpClient {
       });
 
       this.process.on("close", (code) => {
+        if (typeof this.process?.pid === "number") {
+          unregisterMcpProcess(this.process.pid);
+        }
         const reason = `MCP server "${this.serverName}" exited with code ${code}`;
         const error = this.withStderr(reason);
         for (const [, pending] of this.pendingRequests) {
@@ -289,6 +326,7 @@ export class McpClient {
     }
     if (this.process) {
       if (typeof this.process.pid === "number") {
+        unregisterMcpProcess(this.process.pid);
         killProcessTree(this.process.pid, "SIGTERM", { killGroupOnNonWindows: false });
       } else {
         this.process.kill();

@@ -157,6 +157,7 @@ function createHarness(scenario: ManagerScenario = {}) {
         },
         initMcpServers: async (servers) => {
           initializedMcp = servers;
+          return [];
         },
         interruptActiveSession: () => {
           interrupted += 1;

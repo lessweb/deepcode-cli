@@ -102,8 +102,8 @@ export { handleAskUserQuestionTool } from "./tools/ask-user-question-handler";
 
 // MCP
 export { McpManager } from "./mcp/mcp-manager";
-export { McpClient } from "./mcp/mcp-client";
-export type { McpServerStatus } from "./mcp/mcp-manager";
+export { McpClient, killAllMcpProcesses } from "./mcp/mcp-client";
+export type { McpServerStatus, McpInitFailure } from "./mcp/mcp-manager";
 
 // Common utilities
 export { createOpenAIClient, resolveOpenAIConnection, DEEPCODE_PLUS_BASE_URL } from "./common/openai-client";
