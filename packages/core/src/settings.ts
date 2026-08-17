@@ -80,6 +80,88 @@ export type ResolvedStatusLineSettings = {
   providers: StatusLineProviderConfig[];
 };
 
+/**
+ * One configured LLM provider entry (pi-ai-style multi-provider layer).
+ * `type` mirrors the pi-ai provider kinds: "openai" (OpenAI-compatible,
+ * incl. deepseek) or "anthropic" (Anthropic Messages API, incl.
+ * deepseek-anthropic compatible endpoints).
+ */
+export type ProviderConfig = {
+  type?: string;
+  apiBase?: string;
+  apiKey?: string;
+  models?: string[];
+};
+
+export type ProviderSettings = {
+  active?: string;
+  providers?: Record<string, ProviderConfig>;
+};
+
+/** Normalized provider aliases → provider kind. */
+export type ResolvedProvider = {
+  name: string;
+  kind: "openai" | "anthropic";
+  apiBase: string;
+  apiKey: string | undefined;
+  models: string[];
+};
+
+const PROVIDER_KIND_BY_TYPE: Record<string, "openai" | "anthropic"> = {
+  openai: "openai",
+  openai_compat: "openai",
+  deepseek: "openai",
+  ollama: "openai",
+  anthropic: "anthropic",
+  deepseek_anthropic: "anthropic",
+  deepseek_anthropic_compat: "anthropic",
+};
+
+export function normalizeProviderKind(type: string | undefined): "openai" | "anthropic" {
+  const key = (type ?? "").trim().toLowerCase().replace(/-/g, "_");
+  return PROVIDER_KIND_BY_TYPE[key] ?? "openai";
+}
+
+/**
+ * Resolve the active provider from the `provider` config block (pi-ai style).
+ * Falls back to the legacy env-driven path (env.API_KEY/BASE_URL) when no
+ * provider block is configured. `active` may be a provider name or alias.
+ */
+export function resolveActiveProvider(
+  userSettings: { provider?: ProviderSettings } | null | undefined,
+  projectSettings: { provider?: ProviderSettings } | null | undefined,
+  legacyApiKey: string | undefined,
+  legacyBaseURL: string | undefined
+): ResolvedProvider | undefined {
+  const merged: ProviderSettings = {
+    active: projectSettings?.provider?.active ?? userSettings?.provider?.active,
+    providers: {
+      ...(userSettings?.provider?.providers ?? {}),
+      ...(projectSettings?.provider?.providers ?? {}),
+    },
+  };
+  const active = merged.active?.trim();
+  if (!active || !merged.providers) {
+    return undefined;
+  }
+  // Aliases: active may name a provider directly or use "name:type" form.
+  const config =
+    merged.providers[active] ??
+    Object.values(merged.providers).find(
+      (p) => normalizeProviderKind(p?.type) === normalizeProviderKind(active)
+    );
+  if (!config) {
+    return undefined;
+  }
+  return {
+    name: active,
+    kind: normalizeProviderKind(config.type),
+    apiBase: config.apiBase ?? legacyBaseURL ?? "",
+    apiKey: config.apiKey ?? legacyApiKey,
+    models: config.models ?? [],
+  };
+}
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   contextWindow?: number | string;
@@ -93,6 +175,7 @@ export type DeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  provider?: ProviderSettings;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
   statusline?: StatusLineSettings;
@@ -113,6 +196,8 @@ export type ResolvedDeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   mcpServers?: Record<string, McpServerConfig>;
+  /** Resolved active provider (pi-ai style); falls back to the legacy env path. */
+  provider?: ResolvedProvider;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
   statusline: ResolvedStatusLineSettings;
@@ -584,6 +669,12 @@ export function resolveSettingsSources(
     trimString(projectSettings?.webSearchTool) ||
     trimString(userSettings?.webSearchTool) ||
     "";
+  const provider = resolveActiveProvider(
+    userSettings,
+    projectSettings,
+    trimString(env.API_KEY) || undefined,
+    trimString(env.BASE_URL) || defaults.baseURL
+  );
 
   return {
     env,
@@ -600,6 +691,7 @@ export function resolveSettingsSources(
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
+    provider,
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
     statusline: mergeStatusLine(userSettings, projectSettings),
