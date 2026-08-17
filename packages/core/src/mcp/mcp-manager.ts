@@ -113,9 +113,16 @@ export class McpManager {
     this.serverConfigs = servers;
     this.prepare(servers);
 
-    for (const [name, config] of Object.entries(servers)) {
+    // Parallel connect with bounded concurrency: batches of CONCURRENCY
+    // servers start together, so total startup is ~1/CONCURRENCY of serial
+    // while avoiding a memory spike from spawning every process at once.
+    // Promise.allSettled keeps one failing server from blocking its batch.
+    const entries = Object.entries(servers);
+    const CONCURRENCY = 5;
+    for (let i = 0; i < entries.length; i += CONCURRENCY) {
       if (this.disposed) break;
-      await this.connectServer(name, config);
+      const batch = entries.slice(i, i + CONCURRENCY);
+      await Promise.allSettled(batch.map(([name, config]) => this.connectServer(name, config)));
     }
   }
 
