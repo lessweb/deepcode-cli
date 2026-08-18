@@ -73,7 +73,7 @@ export type PromptSubmission = {
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
-  command?: "new" | "resume" | "fork" | "continue" | "undo" | "mcp" | "exit";
+  command?: "new" | "resume" | "fork" | "continue" | "undo" | "mcp" | "agents" | "exit";
 };
 
 export type PromptDraft = {
@@ -731,6 +731,11 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "mcp") {
       onSubmit({ text: "/mcp", imageUrls: [], command: "mcp" });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "agents") {
+      onSubmit({ text: "/agents", imageUrls: [], command: "agents" });
       resetPromptInput();
       return;
     }

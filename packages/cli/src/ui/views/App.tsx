@@ -9,6 +9,7 @@ import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { buildLoadingText } from "../core/loading-text";
+import { buildAgentInstructionsReport } from "../core/agent-instructions";
 import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
@@ -394,6 +395,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       if (submission.command === "mcp") {
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
+        return;
+      }
+      if (submission.command === "agents") {
+        const report = buildAgentInstructionsReport(sessionManager.getAgentInstructionSources());
+        setMessages((prev) => [...prev, buildSyntheticUserMessage(report, 0)]);
         return;
       }
 
