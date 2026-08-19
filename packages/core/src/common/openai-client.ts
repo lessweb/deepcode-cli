@@ -4,6 +4,10 @@ import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
 import { readDeepcodePlusApiKey, resolveCurrentSettings } from "../settings";
+import {
+  createAnthropicCompatibleClient,
+  type AnthropicCompatibleClient,
+} from "./anthropic-client";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
 // global fetch (undici) only keeps connections alive for 4 seconds, which
@@ -35,7 +39,7 @@ export function resolveOpenAIConnection(
 }
 
 export function createOpenAIClient(projectRoot: string = process.cwd()): {
-  client: OpenAI | null;
+  client: OpenAI | AnthropicCompatibleClient | null;
   model: string;
   baseURL: string;
   temperature?: number;
@@ -52,11 +56,16 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
   const settings = resolveCurrentSettings(projectRoot);
   const plusApiKey = readDeepcodePlusApiKey();
   const connection = resolveOpenAIConnection(settings, plusApiKey);
-  if (!connection.apiKey) {
+  // pi-ai style provider block wins over the legacy env / PLUS resolution.
+  const provider = settings.provider;
+  const apiKey = provider?.apiKey ?? connection.apiKey;
+  const baseURL = provider?.apiBase ?? connection.baseURL;
+  const model = provider?.models?.[0] ?? settings.model;
+  if (!apiKey) {
     return {
       client: null,
-      model: settings.model,
-      baseURL: connection.baseURL,
+      model,
+      baseURL,
       temperature: settings.temperature,
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
@@ -70,12 +79,32 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     };
   }
 
-  const cacheKey = `${connection.apiKey}::${connection.baseURL}`;
+  // Anthropic-compatible provider: route through the Anthropic Messages API
+  // adapter (also works with DeepSeek's anthropic-compatible endpoint).
+  if (provider?.kind === "anthropic") {
+    return {
+      client: createAnthropicCompatibleClient({ apiKey, baseURL, model }),
+      model,
+      baseURL,
+      temperature: settings.temperature,
+      thinkingEnabled: settings.thinkingEnabled,
+      reasoningEffort: settings.reasoningEffort,
+      debugLogEnabled: settings.debugLogEnabled,
+      telemetryEnabled: settings.telemetryEnabled,
+      notify: settings.notify,
+      webSearchTool: settings.webSearchTool,
+      env: settings.env,
+      machineId: getMachineId(),
+      plusApiKey,
+    };
+  }
+
+  const cacheKey = `${apiKey}::${baseURL}`;
   if (cachedOpenAI && cachedOpenAIKey === cacheKey) {
     return {
       client: cachedOpenAI,
-      model: settings.model,
-      baseURL: connection.baseURL,
+      model,
+      baseURL,
       temperature: settings.temperature,
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
@@ -90,8 +119,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
   }
 
   cachedOpenAI = new OpenAI({
-    apiKey: connection.apiKey,
-    baseURL: connection.baseURL || undefined,
+    apiKey,
+    baseURL: baseURL || undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: keepAliveAgent }),
   });
@@ -112,8 +141,8 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
 
   return {
     client: cachedOpenAI,
-    model: settings.model,
-    baseURL: connection.baseURL,
+    model,
+    baseURL,
     temperature: settings.temperature,
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.reasoningEffort,
