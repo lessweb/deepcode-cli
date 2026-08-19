@@ -65,7 +65,8 @@ describe("private-storage", () => {
       assert.ok(!out.includes(dangerous), `must not contain ${dangerous}`);
     }
     // The current user keeps full control (with or without inherited flag).
-    assert.match(out, /:\(I?\)\(F\)/, "current user must retain full control");
+    // icacls prints either `user:(F)` or `user:(I)(F)` depending on the ACE.
+    assert.match(out, /:\(I?\)?\(F\)/, "current user must retain full control");
   });
 
   it("is idempotent when called repeatedly", () => {
