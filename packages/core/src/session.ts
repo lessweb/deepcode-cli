@@ -29,7 +29,7 @@ import {
   type ToolExecutionHooks,
   type ToolExecutionResult,
 } from "./tools/executor";
-import { McpManager } from "./mcp/mcp-manager";
+import { McpManager, type McpInitFailure } from "./mcp/mcp-manager";
 import {
   getDefaultAutoCompactWindow,
   type McpServerConfig,
@@ -423,7 +423,7 @@ export class SessionManager {
     return this.messageConverter.buildMessages(messages, thinkingEnabled, model, multimodal);
   }
 
-  async initMcpServers(servers?: Record<string, McpServerConfig>): Promise<void> {
+  async initMcpServers(servers?: Record<string, McpServerConfig>): Promise<McpInitFailure[]> {
     this.mcpManager.setOnToolsListChanged(() => {
       this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
     });
@@ -431,8 +431,19 @@ export class SessionManager {
     this.mcpManager.setOnStatusChanged(() => {
       this.onMcpStatusChanged?.();
     });
-    await this.mcpManager.initialize(servers);
+    const failures = await this.mcpManager.initialize(servers);
     this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
+    return failures;
+  }
+
+  /**
+   * Hot-reload MCP servers against a (possibly changed) config map without
+   * restarting the process.
+   */
+  async refreshMcpServers(servers?: Record<string, McpServerConfig>): Promise<McpInitFailure[]> {
+    const failures = await this.mcpManager.refreshServers(servers);
+    this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
+    return failures;
   }
 
   getMcpStatus() {

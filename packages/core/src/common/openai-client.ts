@@ -34,6 +34,17 @@ export function resolveOpenAIConnection(
   return { apiKey: undefined, baseURL: settings.baseURL };
 }
 
+/**
+ * Model catalog cache keyed by baseURL (P2-8 from the CodeWhale learnings
+ * report). The warmup below stores whatever `models/list` returns, so any
+ * later catalog lookup for the same base URL can skip the network round-trip.
+ */
+const modelCatalogCache = new Map<string, OpenAI.Models.Model[]>();
+
+export function getCachedModelCatalog(baseURL: string | undefined): OpenAI.Models.Model[] | undefined {
+  return modelCatalogCache.get(baseURL || "default");
+}
+
 export function createOpenAIClient(projectRoot: string = process.cwd()): {
   client: OpenAI | null;
   model: string;
@@ -100,11 +111,15 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
   // Fire-and-forget warmup: pre-establish TCP+TLS connection to the API
   // server while the user is composing their first prompt.  Bounded by a
   // short timeout so a slow / unreachable API never blocks process exit.
+  // The fetched model catalog is stored per baseURL for later reuse.
   void (async () => {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 3000);
     try {
-      await cachedOpenAI.models.list({ signal: ac.signal }).catch(() => {});
+      const list = await cachedOpenAI.models.list({ signal: ac.signal }).catch(() => null);
+      if (list && Array.isArray(list.data)) {
+        modelCatalogCache.set(settings.baseURL || "default", list.data);
+      }
     } finally {
       clearTimeout(timer);
     }

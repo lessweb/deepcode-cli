@@ -21,6 +21,28 @@ export type McpServerConfig = {
   command: string;
   args?: string[];
   env?: Record<string, string>;
+  /**
+   * Per-server connect/discovery timeout in ms.
+   * Defaults to DEEPCODE_MCP_TIMEOUT env (or 30_000). Lets fast servers use a
+   * tight timeout while slow servers get more room, instead of one global value.
+   */
+  connectTimeoutMs?: number;
+  /** If true, startup fails when this server cannot be reached (otherwise best-effort). */
+  required?: boolean;
+  /**
+   * If true, the server is NOT connected at startup; it connects lazily on the
+   * first tool call that routes to it (via ensureConnected in executeMcpTool)
+   * or via reconnect. Keeps headless startup fast when a server is rarely used.
+   */
+  deferLoading?: boolean;
+  /** If set, only these tools (exact server-side names) are exposed. */
+  enabledTools?: string[];
+  /** If set, these tools (exact server-side names) are hidden. */
+  disabledTools?: string[];
+  /** Remote MCP (streamable-http/SSE): set url instead of command. */
+  url?: string;
+  /** Extra HTTP headers for remote MCP servers. */
+  headers?: Record<string, string>;
 };
 
 export type PermissionScope =
