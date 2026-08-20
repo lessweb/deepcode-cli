@@ -105,6 +105,51 @@ export { normalizeFilePath, getSnippet, clearSessionState, recordFileState, getF
 export { GitFileHistory } from "./common/file-history";
 export { killProcessTree } from "./common/process-tree";
 export { launchNotifyScript } from "./common/notify";
+export { JobQueue, getGlobalJobQueue, createSpawnRequest } from "./common/job-queue";
+export type {
+  JobStatus,
+  SpawnRequest,
+  SpawnReady,
+  ExitPayload,
+  JobState,
+  JobEventCallbacks,
+} from "./common/job-queue";
+export {
+  STRICT_SANDBOX_PROFILE,
+  DEFAULT_DEV_PROFILE,
+  UNRESTRICTED_PROFILE,
+  legacyProfileFromScopes,
+  checkFileSystemAccess,
+  checkNetworkAccess,
+  checkGitAccess,
+  parsePermissionProfile,
+} from "./common/permission-profile";
+export type {
+  FileSystemAccessLevel,
+  FileSystemPathKind,
+  FileSystemSandboxEntry,
+  NetworkPermissions,
+  GitPermissions,
+  ManagedPermissionConfig,
+  PermissionProfile,
+} from "./common/permission-profile";
+export {
+  startAutoSave,
+  logAgentMessage,
+  logToolCall,
+  logPermissionDecision,
+  logTokenUsage,
+  saveCheckpoint,
+  queryRecentLogs,
+  queryLogsByJsonPath,
+  queryTokenStats,
+  queryPermissionHistory,
+  closeSession,
+  deleteSession,
+  closeAll,
+} from "./common/session-log";
+export { parseSkillFile, parseSkillContent, skillPolicyToProfile, validateSkillName } from "./common/skill-parser";
+export type { SkillMeta, SkillDependency, SkillInterface, SkillPolicy } from "./common/skill-parser";
 export { reportNewPrompt } from "./common/telemetry";
 export { DEEPSEEK_V4_MODELS, supportsMultimodal, defaultsToThinkingMode } from "./common/model-capabilities";
 export type { MultimodalMode } from "./common/model-capabilities";
