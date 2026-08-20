@@ -18,6 +18,8 @@ import {
 const MAX_OUTPUT_CHARS = 30000;
 const MAX_CAPTURE_CHARS = 10 * 1024 * 1024;
 const BACKGROUND_OUTPUT_DIR = path.join(os.tmpdir(), "deepcode-background");
+/** Background-task logs older than this are deleted on the next background start. */
+const BACKGROUND_LOG_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 const TRAILING_BACKGROUND_OPERATOR_PATTERN = /(^|[^\\&])\s*&\s*$/;
 const sessionWorkingDirs = new Map<string, string>();
 
@@ -26,6 +28,37 @@ export function clearSessionWorkingDir(sessionId: string): void {
     return;
   }
   sessionWorkingDirs.delete(sessionId);
+}
+
+/**
+ * Delete background-task logs older than {@link BACKGROUND_LOG_MAX_AGE_MS}.
+ * Best-effort: the temp dir is shared and may contain files from other
+ * processes, so we only remove ``*.log`` files past the age cutoff and never
+ * touch directories. Called once per background command start — cheap enough
+ * to avoid a dedicated sweeper task.
+ */
+export function sweepOldBackgroundLogs(nowMs: number = Date.now(), dir: string = BACKGROUND_OUTPUT_DIR): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return; // dir does not exist yet
+  }
+  const cutoff = nowMs - BACKGROUND_LOG_MAX_AGE_MS;
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.endsWith(".log")) {
+      continue;
+    }
+    const full = path.join(dir, entry.name);
+    try {
+      const stat = fs.statSync(full);
+      if (stat.mtimeMs < cutoff) {
+        fs.unlinkSync(full);
+      }
+    } catch {
+      // File may have been removed concurrently; skip.
+    }
+  }
 }
 
 type ToolCommandResult = {
@@ -264,6 +297,7 @@ function startBackgroundShellCommand(
   context: ToolExecutionContext
 ): ToolExecutionResult {
   fs.mkdirSync(BACKGROUND_OUTPUT_DIR, { recursive: true });
+  sweepOldBackgroundLogs();
   const taskId = `bash-${randomUUID()}`;
   const outputPath = path.join(BACKGROUND_OUTPUT_DIR, `${taskId}.log`);
   const startedAtMs = Date.now();

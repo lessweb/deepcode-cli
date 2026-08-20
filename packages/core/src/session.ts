@@ -37,6 +37,7 @@ import {
   type PermissionSettings,
 } from "./settings";
 import { logApiError } from "./common/error-logger";
+import { writeFileAtomic } from "./common/private-storage";
 import { logOpenAIChatCompletionDebug, normalizeDebugError } from "./common/debug-logger";
 import { describeLlmError, getLlmErrorDetails } from "./common/llm-error";
 import { killProcessTree } from "./common/process-tree";
@@ -1566,7 +1567,7 @@ ${agentInstructions}
               toolCalls,
               usage: accumulateUsage(entry.usage, responseUsage),
               usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-              activeTokens: getTotalTokens(responseUsage),
+              activeTokens: (entry.activeTokens ?? 0) + getTotalTokens(responseUsage),
               status: "ask_permission",
               failReason: null,
               askPermissions: permissionPlan.askPermissions,
@@ -1592,7 +1593,7 @@ ${agentInstructions}
           toolCalls,
           usage: accumulateUsage(entry.usage, responseUsage),
           usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-          activeTokens: getTotalTokens(responseUsage),
+          activeTokens: (entry.activeTokens ?? 0) + getTotalTokens(responseUsage),
           status: refusal ? "failed" : waitingForUser ? "waiting_for_user" : toolCalls ? "processing" : "completed",
           failReason: refusal ? refusal : entry.failReason,
           askPermissions: undefined,
@@ -1705,7 +1706,8 @@ ${agentInstructions}
       ...entry,
       usage: accumulateUsage(entry.usage, responseUsage),
       usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-      activeTokens: getTotalTokens(responseUsage),
+      // 压缩后上下文已精简, 重置 activeTokens 避免立即再次触发压缩
+      activeTokens: 0,
       updateTime: now,
     }));
 
@@ -2222,7 +2224,7 @@ ${agentInstructions}
       })),
       originalPath: this.projectRoot,
     };
-    fs.writeFileSync(sessionsIndexPath, JSON.stringify(normalized, null, 2), "utf8");
+    writeFileAtomic(sessionsIndexPath, JSON.stringify(normalized, null, 2));
   }
 
   private getSessionMessagesPath(sessionId: string): string {
@@ -2293,7 +2295,7 @@ ${agentInstructions}
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
     const payload = messages.map((message) => JSON.stringify(message)).join("\n");
-    fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
+    writeFileAtomic(messagePath, payload ? `${payload}\n` : "");
   }
 
   private updateSessionEntry(sessionId: string, updater: (entry: SessionEntry) => SessionEntry): SessionEntry | null {
