@@ -496,6 +496,57 @@ test("resolveSettingsSources merges MCP env with documented priority", () => {
   });
 });
 
+test("resolveSettingsSources preserves deferLoading and extra MCP fields (project wins, user falls back)", () => {
+  const resolved = resolveSettingsSources(
+    {
+      mcpServers: {
+        lazy: {
+          command: "node",
+          args: ["user-lazy.js"],
+          deferLoading: true,
+          required: false,
+          enabledTools: ["user_tool"],
+          connectTimeoutMs: 5000,
+        },
+        urlOnly: {
+          command: "node",
+          url: "https://user.example.com/sse",
+          headers: { Authorization: "user-token" },
+        },
+      },
+    },
+    {
+      mcpServers: {
+        lazy: {
+          command: "python",
+          deferLoading: false,
+          disabledTools: ["project_hidden"],
+        },
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    {}
+  );
+
+  // Project field wins when set.
+  assert.equal(resolved.mcpServers?.lazy?.command, "python");
+  assert.equal(resolved.mcpServers?.lazy?.deferLoading, false);
+  assert.deepEqual(resolved.mcpServers?.lazy?.disabledTools, ["project_hidden"]);
+  // User field falls back when project does not set it.
+  assert.deepEqual(resolved.mcpServers?.lazy?.args, ["user-lazy.js"]);
+  assert.equal(resolved.mcpServers?.lazy?.required, false);
+  assert.deepEqual(resolved.mcpServers?.lazy?.enabledTools, ["user_tool"]);
+  assert.equal(resolved.mcpServers?.lazy?.connectTimeoutMs, 5000);
+  // URL / headers survive the merge untouched.
+  assert.equal(resolved.mcpServers?.urlOnly?.url, "https://user.example.com/sse");
+  assert.deepEqual(resolved.mcpServers?.urlOnly?.headers, {
+    Authorization: "user-token",
+  });
+});
+
 test("resolveSettings defaults DeepSeek v4 models to thinking mode", () => {
   const resolved = resolveSettings(
     {
