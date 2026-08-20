@@ -43,9 +43,38 @@ Edit `~/.deepcode/settings.json` and add the `mcpServers` field:
 
 | Field     | Type     | Required | Description                                                                                                                                                        |
 | --------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `command` | string   | Yes      | Path or command of the MCP server executable (e.g., `npx`, `node`, `python`). When the command is `npx`, Deep Code automatically prepends `-y` to the arguments. |
+| `command` | string   | No       | Executable path or command for a local stdio server (e.g., `npx`, `node`, `python`). When the command is `npx`, Deep Code automatically prepends `-y` to the arguments. |
 | `args`    | string[] | No       | List of arguments to pass to the command                                                                                                                           |
 | `env`     | object   | No       | Environment variables (e.g., API keys) to pass to the MCP server process                                                                                           |
+| `type`    | string   | No       | Transport: `stdio` (local subprocess, default) or `http` (remote Streamable HTTP). Defaults to `http` when a `url` is given.                                       |
+| `url`     | string   | No       | HTTP(S) endpoint of a remote MCP server (Streamable HTTP). When set, the server is remote and no `command` is needed.                                              |
+| `headers` | object   | No       | HTTP headers (e.g., `Authorization`) sent with each remote request, typically for authentication.                                                                 |
+
+> Use `command`/`args`/`env` for local servers, or `url`/`headers` for remote servers — one or the other.
+
+## Remote MCP Servers (Streamable HTTP)
+
+In addition to local stdio servers, Deep Code can connect to remote MCP servers over **Streamable HTTP** (MCP 2025-03-26). Just provide a `url` (or set `type: "http"` explicitly):
+
+```json
+{
+  "mcpServers": {
+    "remote-service": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
+```
+
+- `url`: the remote server's HTTP(S) endpoint.
+- `headers`: optional HTTP headers attached to every request, typically for authentication (e.g., `Authorization`).
+- The `Mcp-Session-Id` returned by the server on initialize is captured automatically and echoed on subsequent requests.
+
+> Only Streamable HTTP is supported for now; the legacy two-endpoint HTTP+SSE transport and OAuth authorization flows are not yet handled.
 
 ## Common MCP Examples
 
