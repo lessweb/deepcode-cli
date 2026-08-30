@@ -1,6 +1,7 @@
 import {
   SessionManager,
   createOpenAIClient,
+  killAllMcpProcesses,
   resolveCurrentSettings,
   type AskPermissionRequest,
   type AskPermissionScope,
@@ -62,6 +63,13 @@ export async function runExecMode(
   let manager: ExecSessionManager | null = null;
   let interrupted = false;
 
+  // Last-resort cleanup: whatever happens (crash, abort, hard exit), no MCP
+  // child process is left behind as an orphan holding RAM.
+  const killOnExit = (): void => {
+    killAllMcpProcesses();
+  };
+  process.on("exit", killOnExit);
+
   const handleSigint = (): void => {
     interrupted = true;
     manager?.interruptActiveSession();
@@ -79,7 +87,14 @@ export async function runExecMode(
       onAssistantMessage: () => {},
     });
 
-    await manager.initMcpServers(settings.mcpServers);
+    const mcpFailures = await manager.initMcpServers(settings.mcpServers);
+    if (mcpFailures.length > 0) {
+      deps.writeStderrLine(
+        `MCP servers failed to start (${mcpFailures.length}): ${mcpFailures
+          .map((f) => `${f.name} (${f.error.slice(0, 80)})`)
+          .join("; ")}`
+      );
+    }
     if (interrupted) {
       return 130;
     }
@@ -148,7 +163,9 @@ export async function runExecMode(
     return 1;
   } finally {
     deps.signalTarget.off("SIGINT", handleSigint);
+    process.off("exit", killOnExit);
     manager?.dispose();
+    killAllMcpProcesses();
   }
 }
 
