@@ -77,6 +77,7 @@ Skills 会按以下优先级扫描：
 | `/fork`     | 从当前对话创建独立的新会话                    |
 | `/continue` | 继续当前对话，或选择历史对话恢复                 |
 | `/model`    | 切换模型、思考模式和推理强度                   |
+| `/plan`     | 切换到规划模式（Plan Mode）              |
 | `/raw`      | 切换显示模式（Normal / Lite / Raw 滚动回溯） |
 | `/init`     | 初始化 AGENTS.md 文件                 |
 | `/skills`   | 列出可用 skills                      |

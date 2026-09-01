@@ -92,8 +92,9 @@ Plan Mode 的核心规则是**只规划，不动手**。例如以下操作是**�
 | **1. implement this plan** | 退出 Plan Mode，自动发送实现指令，让 AI 开始按方案写代码 |
 | **2. stay in Plan mode** | 保持在 Plan Mode，继续修改或完善方案 |
 | **3. switch to Default mode** | 退出 Plan Mode，回到默认模式（不自动开始实现） |
+| **4. clear context and implement this plan** | 派生一个干净的新会话（仅携带系统提示与方案），在全新上下文中开始实现 |
 
-你可以用数字键 `1-3` 直接选择，也可以用 `↑/↓` 移动光标后按 `Enter` 确认。按 `Esc` 等同于选择 "stay in Plan mode"。
+你可以用数字键 `1-4` 直接选择，也可以用 `↑/↓` 移动光标后按 `Enter` 确认。按 `Esc` 等同于选择 "stay in Plan mode"。
 
 ## Plan Mode 与 UpdatePlan 工具的区别
 
