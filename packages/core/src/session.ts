@@ -2320,6 +2320,101 @@ ${agentInstructions}
   }
 
   /**
+   * Derive a clean implementation session from a completed Plan Mode session.
+   * Unlike forkSession (which copies the full conversation history), this builds a
+   * fresh message list carrying only the system prompt, runtime context, AGENTS.md
+   * instructions, and the approved plan — so implementation starts from a clean
+   * context while file history stays traceable to the source session's checkpoint.
+   */
+  startPlanImplementationSession(sourceSessionId: string, planText: string): string {
+    const source = this.getSession(sourceSessionId);
+    if (!source) {
+      throw new Error(`No saved session found with ID "${sourceSessionId}".`);
+    }
+
+    const sourceMessages = this.listSessionMessages(sourceSessionId);
+    const sourceMessage = sourceMessages.at(-1);
+    if (!sourceMessage || typeof sourceMessage.id !== "string" || !sourceMessage.id) {
+      throw new Error(`Session "${sourceSessionId}" has no messages to derive from.`);
+    }
+
+    const sessionId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const entry: SessionEntry = {
+      id: sessionId,
+      summary: source.summary,
+      assistantReply: null,
+      assistantThinking: null,
+      assistantRefusal: null,
+      toolCalls: null,
+      status: "completed",
+      failReason: null,
+      usage: null,
+      usagePerModel: null,
+      activeTokens: 0,
+      createTime: now,
+      updateTime: now,
+      processes: null,
+      planMode: false,
+      forkedFrom: {
+        sessionId: sourceSessionId,
+        messageId: sourceMessage.id,
+      },
+    };
+
+    const promptToolOptions = this.getPromptToolOptions();
+    const messages: SessionMessage[] = [
+      this.buildSystemMessage(sessionId, getSystemPrompt(this.projectRoot, promptToolOptions)),
+      this.buildSystemMessage(
+        sessionId,
+        getRuntimeContext(
+          this.projectRoot,
+          promptToolOptions.model,
+          this.getResolvedSettings().permissions?.addWorkingDirs
+        )
+      ),
+    ];
+
+    const agentInstructions = this.loadAgentInstructions();
+    if (agentInstructions) {
+      messages.push(this.buildSystemMessage(sessionId, agentInstructions));
+    }
+
+    messages.push(
+      this.buildSystemMessage(sessionId, `<proposed_plan>\n${planText}\n</proposed_plan>`, null, false, {
+        isSummary: true,
+      })
+    );
+
+    this.saveSessionMessages(sessionId, messages);
+    this.getFileHistory().forkSession(sourceSessionId, sessionId);
+
+    const index = this.loadSessionsIndex();
+    index.entries.push(entry);
+    const sortedEntries = index.entries.slice().sort((a, b) => {
+      const aTime = Date.parse(a.updateTime);
+      const bTime = Date.parse(b.updateTime);
+      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
+        return b.updateTime.localeCompare(a.updateTime);
+      }
+      return bTime - aTime;
+    });
+    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
+    const keptIds = new Set(keptEntries.map((item) => item.id));
+    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
+    index.entries = keptEntries;
+    this.saveSessionsIndex(index);
+    for (const dropped of droppedEntries) {
+      this.cleanupSessionResources(dropped.id, {
+        removeMessages: true,
+        processIds: this.getProcessIds(dropped.processes ?? null),
+      });
+    }
+
+    return sessionId;
+  }
+
+  /**
    * Delete a session by its ID.
    * Removes the session entry from the index and cleans up associated resources
    * such as message files, in-memory state caches, working directory state,

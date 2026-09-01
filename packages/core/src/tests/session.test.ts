@@ -4618,6 +4618,87 @@ test("SessionManager.forkSession copies conversation state with fresh usage and 
   assert.equal(fileHistory.getCurrentCheckpointHash(sourceSessionId), sourceCheckpoint);
 });
 
+test("SessionManager.startPlanImplementationSession derives a clean context with the approved plan", () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-plan-impl-workspace-");
+  const home = createTempDir("deepcode-plan-impl-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-impl");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Plan source");
+  const now = "2026-01-01T00:00:00.000Z";
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = {
+    ...index.entries[0],
+    summary: "Plan source",
+    planMode: true,
+  };
+  (manager as any).saveSessionsIndex(index);
+
+  const sourceMessages: SessionMessage[] = [
+    {
+      id: "source-user-message",
+      sessionId: sourceSessionId,
+      role: "user",
+      content: "Plan source",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+    {
+      id: "source-head-message",
+      sessionId: sourceSessionId,
+      role: "assistant",
+      content: "<proposed_plan>\nOld plan\n</proposed_plan>",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+  ];
+  (manager as any).saveSessionMessages(sourceSessionId, sourceMessages);
+
+  const trackedPath = path.join(workspace, "tracked.txt");
+  fs.writeFileSync(trackedPath, "source", "utf8");
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  const sourceCheckpoint = fileHistory.recordCheckpoint(sourceSessionId, [trackedPath], "source checkpoint");
+  assert.ok(sourceCheckpoint);
+
+  const planText = "Build a thing\nwith two steps.";
+  const sessionId = manager.startPlanImplementationSession(sourceSessionId, planText);
+  const derived = manager.getSession(sessionId);
+  assert.ok(derived);
+  assert.equal(derived.summary, "Plan source");
+  assert.equal(derived.planMode, false);
+  assert.equal(derived.usage, null);
+  assert.equal(derived.usagePerModel, null);
+  assert.equal(derived.activeTokens, 0);
+  assert.equal(derived.status, "completed");
+  assert.deepEqual(derived.forkedFrom, {
+    sessionId: sourceSessionId,
+    messageId: "source-head-message",
+  });
+
+  const messages = manager.listSessionMessages(sessionId);
+  assert.equal(messages.length, 3);
+  assert.ok(messages.every((message) => message.role === "system"));
+  assert.ok(!messages.some((message) => message.id === "source-user-message" || message.id === "source-head-message"));
+  const planMessage = messages.at(-1)!;
+  assert.equal(planMessage.visible, false);
+  assert.equal(planMessage.meta?.isSummary, true);
+  assert.equal(planMessage.content, `<proposed_plan>\n${planText}\n</proposed_plan>`);
+
+  assert.equal(fileHistory.getCurrentCheckpointHash(sessionId), sourceCheckpoint);
+  assert.deepEqual(manager.listSessionMessages(sourceSessionId), sourceMessages);
+});
+
 test("SessionManager ignores malformed fork lineage in persisted entries", () => {
   const workspace = createTempDir("deepcode-fork-lineage-workspace-");
   const home = createTempDir("deepcode-fork-lineage-home-");
