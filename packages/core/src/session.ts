@@ -108,6 +108,15 @@ const PLAN_MODE_FORCE_ASK_SCOPES = [
   "mutate-git-log",
 ] as const satisfies readonly PermissionScope[];
 
+function buildPlanImplementationMessage(planText: string): string {
+  const fullWidthPunctuationCount = (planText.match(/[，、；。]/g) ?? []).length;
+  const directive =
+    fullWidthPunctuationCount > 5
+      ? "先前的一位智能体产出了以下方案以完成用户任务。请在全新上下文中实现该方案，把方案视为用户意图的来源，按需重新读取文件，并持续推进到实现与验证。"
+      : "A previous agent produced the plan below to accomplish the user's task. Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.";
+  return `${directive}\n\n<proposed_plan>\n${planText}\n</proposed_plan>`;
+}
+
 type ChatCompletionDebugOptions = {
   enabled?: boolean;
   location: string;
@@ -308,6 +317,7 @@ export type MessageMeta = {
   asThinking?: boolean;
   isAnswers?: boolean;
   isSummary?: boolean;
+  isPlan?: boolean;
   isModelChange?: boolean;
   skill?: SkillInfo;
   skillCatalog?: Array<{ name: string; description: string }>;
@@ -2251,6 +2261,30 @@ ${agentInstructions}
     return index.entries.find((entry) => entry.id === sessionId) ?? null;
   }
 
+  private registerSessionEntry(entry: SessionEntry): void {
+    const index = this.loadSessionsIndex();
+    index.entries.push(entry);
+    const sortedEntries = index.entries.slice().sort((a, b) => {
+      const aTime = Date.parse(a.updateTime);
+      const bTime = Date.parse(b.updateTime);
+      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
+        return b.updateTime.localeCompare(a.updateTime);
+      }
+      return bTime - aTime;
+    });
+    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
+    const keptIds = new Set(keptEntries.map((item) => item.id));
+    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
+    index.entries = keptEntries;
+    this.saveSessionsIndex(index);
+    for (const dropped of droppedEntries) {
+      this.cleanupSessionResources(dropped.id, {
+        removeMessages: true,
+        processIds: this.getProcessIds(dropped.processes ?? null),
+      });
+    }
+  }
+
   forkSession(sourceSessionId: string): string {
     const source = this.getSession(sourceSessionId);
     if (!source) {
@@ -2294,27 +2328,7 @@ ${agentInstructions}
     this.saveSessionMessages(sessionId, forkedMessages);
     this.getFileHistory().forkSession(sourceSessionId, sessionId);
 
-    const index = this.loadSessionsIndex();
-    index.entries.push(entry);
-    const sortedEntries = index.entries.slice().sort((a, b) => {
-      const aTime = Date.parse(a.updateTime);
-      const bTime = Date.parse(b.updateTime);
-      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
-        return b.updateTime.localeCompare(a.updateTime);
-      }
-      return bTime - aTime;
-    });
-    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
-    const keptIds = new Set(keptEntries.map((item) => item.id));
-    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
-    index.entries = keptEntries;
-    this.saveSessionsIndex(index);
-    for (const dropped of droppedEntries) {
-      this.cleanupSessionResources(dropped.id, {
-        removeMessages: true,
-        processIds: this.getProcessIds(dropped.processes ?? null),
-      });
-    }
+    this.registerSessionEntry(entry);
 
     return sessionId;
   }
@@ -2330,6 +2344,14 @@ ${agentInstructions}
     const source = this.getSession(sourceSessionId);
     if (!source) {
       throw new Error(`No saved session found with ID "${sourceSessionId}".`);
+    }
+    if (source.planMode !== true) {
+      throw new Error(`Session "${sourceSessionId}" is not in Plan Mode.`);
+    }
+
+    const trimmedPlanText = planText.trim();
+    if (!trimmedPlanText) {
+      throw new Error("The approved plan text must not be empty.");
     }
 
     const sourceMessages = this.listSessionMessages(sourceSessionId);
@@ -2381,35 +2403,15 @@ ${agentInstructions}
     }
 
     messages.push(
-      this.buildSystemMessage(sessionId, `<proposed_plan>\n${planText}\n</proposed_plan>`, null, false, {
-        isSummary: true,
+      this.buildSystemMessage(sessionId, buildPlanImplementationMessage(trimmedPlanText), null, false, {
+        isPlan: true,
       })
     );
 
     this.saveSessionMessages(sessionId, messages);
     this.getFileHistory().forkSession(sourceSessionId, sessionId);
 
-    const index = this.loadSessionsIndex();
-    index.entries.push(entry);
-    const sortedEntries = index.entries.slice().sort((a, b) => {
-      const aTime = Date.parse(a.updateTime);
-      const bTime = Date.parse(b.updateTime);
-      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
-        return b.updateTime.localeCompare(a.updateTime);
-      }
-      return bTime - aTime;
-    });
-    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
-    const keptIds = new Set(keptEntries.map((item) => item.id));
-    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
-    index.entries = keptEntries;
-    this.saveSessionsIndex(index);
-    for (const dropped of droppedEntries) {
-      this.cleanupSessionResources(dropped.id, {
-        removeMessages: true,
-        processIds: this.getProcessIds(dropped.processes ?? null),
-      });
-    }
+    this.registerSessionEntry(entry);
 
     return sessionId;
   }

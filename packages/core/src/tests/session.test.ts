@@ -4692,11 +4692,48 @@ test("SessionManager.startPlanImplementationSession derives a clean context with
   assert.ok(!messages.some((message) => message.id === "source-user-message" || message.id === "source-head-message"));
   const planMessage = messages.at(-1)!;
   assert.equal(planMessage.visible, false);
-  assert.equal(planMessage.meta?.isSummary, true);
-  assert.equal(planMessage.content, `<proposed_plan>\n${planText}\n</proposed_plan>`);
+  assert.equal(planMessage.meta?.isPlan, true);
+  assert.equal(
+    planMessage.content,
+    `A previous agent produced the plan below to accomplish the user's task. Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.\n\n<proposed_plan>\n${planText}\n</proposed_plan>`
+  );
 
   assert.equal(fileHistory.getCurrentCheckpointHash(sessionId), sourceCheckpoint);
   assert.deepEqual(manager.listSessionMessages(sourceSessionId), sourceMessages);
+});
+
+test("SessionManager.startPlanImplementationSession rejects a source session that is not in Plan Mode", () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-plan-impl-nonplan-workspace-");
+  const home = createTempDir("deepcode-plan-impl-nonplan-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-impl-nonplan");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Not a plan session");
+
+  assert.throws(() => manager.startPlanImplementationSession(sourceSessionId, "Build a thing."), /is not in Plan Mode/);
+});
+
+test("SessionManager.startPlanImplementationSession rejects an empty plan text", () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-plan-impl-empty-workspace-");
+  const home = createTempDir("deepcode-plan-impl-empty-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-impl-empty");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Plan source");
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = {
+    ...index.entries[0],
+    planMode: true,
+  };
+  (manager as any).saveSessionsIndex(index);
+
+  assert.throws(() => manager.startPlanImplementationSession(sourceSessionId, "   \n"), /must not be empty/);
 });
 
 test("SessionManager ignores malformed fork lineage in persisted entries", () => {
