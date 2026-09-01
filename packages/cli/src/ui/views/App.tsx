@@ -20,7 +20,12 @@ import {
   formatAskUserQuestionAnswers,
 } from "../core/ask-user-question";
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
-import { PlanImplementationPrompt, extractProposedPlan, getImplementationPrompt } from "./PlanImplementationPrompt";
+import {
+  PlanImplementationPrompt,
+  extractProposedPlan,
+  getImplementationPrompt,
+  type PlanImplementationChoice,
+} from "./PlanImplementationPrompt";
 import { buildExitSummaryText, buildPluginRateLimitHintText, buildResumeHintText } from "../exit-summary";
 import { RawMode, useRawModeContext } from "../contexts";
 import { renderMessageToStdout } from "../components/MessageView/utils";
@@ -561,10 +566,44 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   );
 
   const handlePlanImplementationChoice = useCallback(
-    (choice: "implement" | "stay" | "default") => {
+    async (choice: PlanImplementationChoice) => {
       const proposedPlan = pendingPlanImplementation;
       setPendingPlanImplementation(null);
       if (choice === "stay") {
+        return;
+      }
+      if (choice === "clearContext" && proposedPlan) {
+        const sourceSessionId = sessionManager.getActiveSessionId();
+        if (!sourceSessionId) {
+          setErrorLine("No active session to derive from.");
+          return;
+        }
+        try {
+          const sessionId = sessionManager.startPlanImplementationSession(sourceSessionId, proposedPlan);
+          sessionManager.setActiveSessionId(sessionId);
+          await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+          const session = sessionManager.getSession(sessionId);
+          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
+          setRunningProcesses(null);
+          setActiveStatus(session?.status ?? null);
+          setActiveAskPermissions(undefined);
+          setPlanMode(false);
+          setPendingPermissionReply(null);
+          setErrorLine(null);
+          const source = sessionManager.getSession(sourceSessionId);
+          if (source?.summary && !source.summary.includes("（规划）")) {
+            sessionManager.renameSession(sourceSessionId, `${source.summary}（规划）`);
+          }
+          refreshSessionsList();
+          await refreshSkills(sessionId);
+          handleSubmit({
+            text: getImplementationPrompt(proposedPlan),
+            imageUrls: [],
+            planMode: false,
+          });
+        } catch (error) {
+          setErrorLine(error instanceof Error ? error.message : String(error));
+        }
         return;
       }
       setPlanMode(false);
@@ -576,7 +615,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         });
       }
     },
-    [handleSubmit, pendingPlanImplementation]
+    [
+      handleSubmit,
+      pendingPlanImplementation,
+      sessionManager,
+      resetStaticView,
+      refreshSessionsList,
+      refreshSkills,
+      projectRoot,
+    ]
   );
 
   const handleExitShortcut = useCallback(() => {

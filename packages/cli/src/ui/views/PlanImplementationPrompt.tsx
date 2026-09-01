@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { useTerminalInput } from "../hooks";
 import type { InputKey } from "../hooks";
 
-type PlanImplementationChoice = "implement" | "stay" | "default";
+export type PlanImplementationChoice = "implement" | "stay" | "default" | "clearContext";
 
 type Props = {
   onSelect: (choice: PlanImplementationChoice) => void;
@@ -13,6 +13,7 @@ const CHOICES: Array<{ value: PlanImplementationChoice; label: string }> = [
   { value: "implement", label: "implement this plan" },
   { value: "stay", label: "stay in Plan mode" },
   { value: "default", label: "switch to Default mode" },
+  { value: "clearContext", label: "clear context and implement this plan" },
 ];
 
 /** Return only a complete proposed plan, so historical or partial tags cannot trigger the chooser. */
@@ -37,7 +38,7 @@ export function getPlanImplementationChoice(
   if (key.escape) {
     return "stay";
   }
-  if (input && /^[1-3]$/.test(input)) {
+  if (input && /^[1-4]$/.test(input)) {
     return CHOICES[Number(input) - 1]!.value;
   }
   return key.return ? CHOICES[cursor]!.value : null;
@@ -81,7 +82,7 @@ export function PlanImplementationPrompt({ onSelect }: Props): React.ReactElemen
         ))}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>1-3 select · ↑/↓ move · Enter select</Text>
+        <Text dimColor>1-4 select · ↑/↓ move · Enter select</Text>
       </Box>
     </Box>
   );

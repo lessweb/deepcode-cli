@@ -185,6 +185,18 @@ test("getPlanImplementationChoice treats escape as staying in Plan Mode", () => 
   assert.equal(getPlanImplementationChoice("", { escape: true, return: false }, 0), "stay");
 });
 
+test("getPlanImplementationChoice maps digit keys 1-4 to the four choices", () => {
+  assert.equal(getPlanImplementationChoice("1", { escape: false, return: false }, 0), "implement");
+  assert.equal(getPlanImplementationChoice("2", { escape: false, return: false }, 0), "stay");
+  assert.equal(getPlanImplementationChoice("3", { escape: false, return: false }, 0), "default");
+  assert.equal(getPlanImplementationChoice("4", { escape: false, return: false }, 0), "clearContext");
+});
+
+test("getPlanImplementationChoice selects the choice at the cursor on return", () => {
+  assert.equal(getPlanImplementationChoice("", { escape: false, return: true }, 0), "implement");
+  assert.equal(getPlanImplementationChoice("", { escape: false, return: true }, 3), "clearContext");
+});
+
 test("prompt return key action submits on plain enter", () => {
   const { key } = parseTerminalInput("\r");
   assert.equal(getPromptReturnKeyAction(key), "submit");
