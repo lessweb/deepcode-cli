@@ -568,8 +568,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const handlePlanImplementationChoice = useCallback(
     async (choice: PlanImplementationChoice) => {
       const proposedPlan = pendingPlanImplementation;
-      setPendingPlanImplementation(null);
       if (choice === "stay") {
+        setPendingPlanImplementation(null);
         return;
       }
       if (choice === "clearContext" && proposedPlan) {
@@ -581,6 +581,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         try {
           const sessionId = sessionManager.startPlanImplementationSession(sourceSessionId, proposedPlan);
           sessionManager.setActiveSessionId(sessionId);
+          setPendingPlanImplementation(null);
           await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
           const session = sessionManager.getSession(sessionId);
           setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
@@ -591,8 +592,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           setPendingPermissionReply(null);
           setErrorLine(null);
           const source = sessionManager.getSession(sourceSessionId);
-          if (source?.summary && !source.summary.includes("（规划）")) {
-            sessionManager.renameSession(sourceSessionId, `${source.summary}（规划）`);
+          if (source?.summary && !source.summary.includes(" (planned)")) {
+            sessionManager.renameSession(sourceSessionId, `${source.summary} (planned)`);
           }
           refreshSessionsList();
           await refreshSkills(sessionId);
@@ -603,9 +604,11 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           });
         } catch (error) {
           setErrorLine(error instanceof Error ? error.message : String(error));
+          setPendingPlanImplementation(proposedPlan);
         }
         return;
       }
+      setPendingPlanImplementation(null);
       setPlanMode(false);
       if (choice === "implement" && proposedPlan) {
         handleSubmit({
