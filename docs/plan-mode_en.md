@@ -92,7 +92,9 @@ After the plan is output, Deep Code automatically shows a choice dialog—no ext
 | **1. implement this plan** | Leave Plan Mode and automatically send an implementation prompt so the AI starts coding |
 | **2. stay in Plan mode** | Stay in Plan Mode to continue refining the plan |
 | **3. switch to Default mode** | Leave Plan Mode and return to Default mode without starting implementation |
-| **4. clear context and implement this plan** | Derive a clean new session (carrying only the system prompt and plan) to implement in a fresh context |
+| **4. clear context and implement this plan** | Derive a clean new session (carrying only the system prompt, runtime context, AGENTS.md instructions, and the plan) to implement in a fresh context |
+
+Note: skills loaded during planning are not carried over; implementation can reload them via the skill tool as needed.
 
 You can press `1-4` to select directly, or use `↑/↓` to move the cursor and `Enter` to confirm. Pressing `Esc` is equivalent to choosing "stay in Plan mode."
 
