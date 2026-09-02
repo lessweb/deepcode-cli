@@ -92,9 +92,9 @@ Plan Mode 的核心规则是**只规划，不动手**。例如以下操作是**�
 | **1. implement this plan** | 退出 Plan Mode，自动发送实现指令，让 AI 开始按方案写代码 |
 | **2. stay in Plan mode** | 保持在 Plan Mode，继续修改或完善方案 |
 | **3. switch to Default mode** | 退出 Plan Mode，回到默认模式（不自动开始实现） |
-| **4. clear context and implement this plan** | 派生一个干净的新会话（仅携带系统提示、运行上下文、AGENTS.md 指令与方案），在全新上下文中开始实现 |
+| **4. clear context and implement this plan** | 以已批准方案启动干净的新会话 |
 
-注意：该选项不会把规划阶段加载的 skills 带入新会话；实现时可按需通过 skill 工具重新加载。
+已批准方案会成为干净会话的第一条用户消息。新会话重新加载当前配置与 AGENTS.md，并通过精简目录重新发现可用 skills，不复制规划对话或完整 skill 内容。工作区不变，源会话可恢复，文件历史可用时继承；两个会话分别标记为 `planned` 和 `implementation`。
 
 你可以用数字键 `1-4` 直接选择，也可以用 `↑/↓` 移动光标后按 `Enter` 确认。按 `Esc` 等同于选择 "stay in Plan mode"。
 
