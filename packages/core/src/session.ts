@@ -108,7 +108,19 @@ const PLAN_MODE_FORCE_ASK_SCOPES = [
   "mutate-git-log",
 ] as const satisfies readonly PermissionScope[];
 
-function buildPlanImplementationMessage(planText: string): string {
+export function extractProposedPlan(content: string | null): string | null {
+  if (!content) {
+    return null;
+  }
+
+  let latestPlan: string | null = null;
+  for (const match of content.matchAll(/<proposed_plan>\s*([\s\S]*?\S[\s\S]*?)\s*<\/proposed_plan>/g)) {
+    latestPlan = match[1] ?? null;
+  }
+  return latestPlan;
+}
+
+export function buildPlanImplementationHandoff(planText: string): string {
   const fullWidthPunctuationCount = (planText.match(/[，、；。]/g) ?? []).length;
   const directive =
     fullWidthPunctuationCount > 5
@@ -175,6 +187,10 @@ function replaceStringValues(value: unknown, search: string, replacement: string
 
 function isUsageRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function summarizeCompletionOptions(options?: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -300,6 +316,16 @@ export type SessionEntry = {
     sessionId: string;
     messageId: string;
   };
+  derivedFrom?: {
+    kind: "plan-implementation";
+    sessionId: string;
+    messageId: string;
+  };
+};
+
+export type PlanImplementationSessionResult = {
+  sessionId: string;
+  implementationPrompt: string;
 };
 
 export type SessionsIndex = {
@@ -317,7 +343,6 @@ export type MessageMeta = {
   asThinking?: boolean;
   isAnswers?: boolean;
   isSummary?: boolean;
-  isPlan?: boolean;
   isModelChange?: boolean;
   skill?: SkillInfo;
   skillCatalog?: Array<{ name: string; description: string }>;
@@ -395,7 +420,7 @@ export type SessionManagerOptions = {
   onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   onLlmRetry?: (event: LlmRetryEvent) => void;
   onMcpStatusChanged?: () => void;
-  onProcessStdout?: (pid: number, chunk: string) => void;
+  onProcessStdout?: (pid: number, chunk: string, sessionId: string) => void;
   loadSharp?: SharpLoader;
   nonInteractive?: boolean;
 };
@@ -442,7 +467,7 @@ export class SessionManager {
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   private readonly onLlmRetry?: (event: LlmRetryEvent) => void;
   private readonly onMcpStatusChanged?: () => void;
-  private readonly onProcessStdout?: (pid: number, chunk: string) => void;
+  private readonly onProcessStdout?: (pid: number, chunk: string, sessionId: string) => void;
   private readonly nonInteractive: boolean;
   private activeSessionId: string | null = null;
   private activePromptController: AbortController | null = null;
@@ -1475,7 +1500,6 @@ ${agentInstructions}
     userPrompt = this.preparePromptImages(sessionId, userPrompt);
     this.ensureFileHistorySession(sessionId);
     const now = new Date().toISOString();
-    const index = this.loadSessionsIndex();
     const entry: SessionEntry = {
       id: sessionId,
       summary: originalSummary,
@@ -1493,46 +1517,10 @@ ${agentInstructions}
       processes: null,
       planMode: Boolean(userPrompt.planMode),
     };
-    index.entries.push(entry);
-    const sortedEntries = index.entries.slice().sort((a, b) => {
-      const aTime = Date.parse(a.updateTime);
-      const bTime = Date.parse(b.updateTime);
-      if (Number.isNaN(aTime) || Number.isNaN(bTime)) {
-        return b.updateTime.localeCompare(a.updateTime);
-      }
-      return bTime - aTime;
-    });
-    const keptEntries = sortedEntries.slice(0, MAX_SESSION_ENTRIES);
-    const keptIds = new Set(keptEntries.map((item) => item.id));
-    const droppedEntries = sortedEntries.filter((item) => !keptIds.has(item.id));
-    index.entries = keptEntries;
-    this.saveSessionsIndex(index);
-    for (const dropped of droppedEntries) {
-      this.cleanupSessionResources(dropped.id, {
-        removeMessages: true,
-        processIds: this.getProcessIds(dropped.processes ?? null),
-      });
-    }
+    this.registerSessionEntry(entry);
 
-    const promptToolOptions = this.getPromptToolOptions();
-    const systemPrompt = getSystemPrompt(this.projectRoot, promptToolOptions);
-    const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
-    this.appendSessionMessage(sessionId, systemMessage);
-
-    const runtimeContextMessage = this.buildSystemMessage(
-      sessionId,
-      getRuntimeContext(
-        this.projectRoot,
-        promptToolOptions.model,
-        this.getResolvedSettings().permissions?.addWorkingDirs
-      )
-    );
-    this.appendSessionMessage(sessionId, runtimeContextMessage);
-
-    const agentInstructions = this.loadAgentInstructions();
-    if (agentInstructions) {
-      const instructionsMessage = this.buildSystemMessage(sessionId, agentInstructions);
-      this.appendSessionMessage(sessionId, instructionsMessage);
+    for (const message of this.buildTrustedSessionPrefix(sessionId)) {
+      this.appendSessionMessage(sessionId, message);
     }
 
     this.appendPlanModeTransitionMessages(sessionId, false, Boolean(userPrompt.planMode));
@@ -1541,15 +1529,17 @@ ${agentInstructions}
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
+    this.activeSessionId = sessionId;
+
     let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
-      const skills = await this.listSkills();
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal });
+      const skills = await this.listSkills(sessionId);
+      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
       this.throwIfAborted(signal);
       const skillSet = new Set(skillNames);
       matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
     }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
+    userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
 
     this.appendSkillMessages(sessionId, userPrompt.skills);
@@ -1561,7 +1551,6 @@ ${agentInstructions}
       )
     );
 
-    this.activeSessionId = sessionId;
     await this.activateSession(sessionId, controller);
     return sessionId;
   }
@@ -2285,6 +2274,16 @@ ${agentInstructions}
     }
   }
 
+  private removeSessionEntryBestEffort(sessionId: string): void {
+    try {
+      const index = this.loadSessionsIndex();
+      index.entries = index.entries.filter((entry) => entry.id !== sessionId);
+      this.saveSessionsIndex(index);
+    } catch {
+      // Preserve the original creation error; cleanup is best effort.
+    }
+  }
+
   forkSession(sourceSessionId: string): string {
     const source = this.getSession(sourceSessionId);
     if (!source) {
@@ -2336,11 +2335,15 @@ ${agentInstructions}
   /**
    * Derive a clean implementation session from a completed Plan Mode session.
    * Unlike forkSession (which copies the full conversation history), this builds a
-   * fresh message list carrying only the system prompt, runtime context, AGENTS.md
-   * instructions, and the approved plan — so implementation starts from a clean
-   * context while file history stays traceable to the source session's checkpoint.
+   * fresh trusted prefix carrying the current system prompt, runtime context,
+   * AGENTS.md instructions, and a compact current skill catalog. The caller submits
+   * the returned user-role handoff so implementation starts from a clean context
+   * while file history stays traceable to the source session's checkpoint.
    */
-  startPlanImplementationSession(sourceSessionId: string, planText: string): string {
+  async startPlanImplementationSession(
+    sourceSessionId: string,
+    expectedPlan: string
+  ): Promise<PlanImplementationSessionResult> {
     const source = this.getSession(sourceSessionId);
     if (!source) {
       throw new Error(`No saved session found with ID "${sourceSessionId}".`);
@@ -2348,17 +2351,59 @@ ${agentInstructions}
     if (source.planMode !== true) {
       throw new Error(`Session "${sourceSessionId}" is not in Plan Mode.`);
     }
-
-    const trimmedPlanText = planText.trim();
-    if (!trimmedPlanText) {
+    if (source.status !== "completed") {
+      throw new Error(`Session "${sourceSessionId}" is not completed.`);
+    }
+    if (!expectedPlan.trim()) {
       throw new Error("The approved plan text must not be empty.");
     }
 
     const sourceMessages = this.listSessionMessages(sourceSessionId);
-    const sourceMessage = sourceMessages.at(-1);
-    if (!sourceMessage || typeof sourceMessage.id !== "string" || !sourceMessage.id) {
-      throw new Error(`Session "${sourceSessionId}" has no messages to derive from.`);
+    let sourceMessage: SessionMessage | undefined;
+    let planText: string | null = null;
+    for (let index = sourceMessages.length - 1; index >= 0; index -= 1) {
+      const message = sourceMessages[index];
+      if (message?.role !== "assistant") {
+        continue;
+      }
+      const proposedPlan = extractProposedPlan(message.content);
+      if (proposedPlan !== null) {
+        sourceMessage = message;
+        planText = proposedPlan;
+        break;
+      }
     }
+    if (!sourceMessage || planText === null) {
+      throw new Error(`Session "${sourceSessionId}" has no complete proposed plan to implement.`);
+    }
+    if (!isNonEmptyString(sourceMessage.id)) {
+      throw new Error(`Session "${sourceSessionId}" has a proposed plan without a valid message ID.`);
+    }
+    if (expectedPlan !== planText) {
+      throw new Error("The approved plan no longer matches the latest proposed plan in the source session.");
+    }
+
+    const advertisedSkillNames = new Set<string>();
+    const advertisedSkillPaths = new Set<string>();
+    for (const message of sourceMessages) {
+      if (typeof message.meta?.skill?.name === "string" && message.meta.skill.name) {
+        advertisedSkillNames.add(message.meta.skill.name);
+      }
+      if (typeof message.meta?.skill?.path === "string" && message.meta.skill.path) {
+        advertisedSkillPaths.add(message.meta.skill.path);
+      }
+      if (Array.isArray(message.meta?.skillCatalog)) {
+        for (const skill of message.meta.skillCatalog) {
+          if (typeof skill?.name === "string" && skill.name) {
+            advertisedSkillNames.add(skill.name);
+          }
+        }
+      }
+    }
+    const currentSkills = await this.listSkills();
+    const skillCatalog = currentSkills
+      .filter((skill) => advertisedSkillNames.has(skill.name) || advertisedSkillPaths.has(skill.path))
+      .map((skill) => ({ name: skill.name, description: skill.description }));
 
     const sessionId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -2378,42 +2423,34 @@ ${agentInstructions}
       updateTime: now,
       processes: null,
       planMode: false,
-      forkedFrom: {
+      derivedFrom: {
+        kind: "plan-implementation",
         sessionId: sourceSessionId,
         messageId: sourceMessage.id,
       },
     };
 
-    const promptToolOptions = this.getPromptToolOptions();
-    const messages: SessionMessage[] = [
-      this.buildSystemMessage(sessionId, getSystemPrompt(this.projectRoot, promptToolOptions)),
-      this.buildSystemMessage(
-        sessionId,
-        getRuntimeContext(
-          this.projectRoot,
-          promptToolOptions.model,
-          this.getResolvedSettings().permissions?.addWorkingDirs
-        )
-      ),
-    ];
-
-    const agentInstructions = this.loadAgentInstructions();
-    if (agentInstructions) {
-      messages.push(this.buildSystemMessage(sessionId, agentInstructions));
+    const messages = this.buildTrustedSessionPrefix(sessionId);
+    if (skillCatalog.length > 0) {
+      messages.push(
+        this.buildSystemMessage(sessionId, buildSkillCatalogPrompt(skillCatalog), null, false, { skillCatalog })
+      );
     }
 
-    messages.push(
-      this.buildSystemMessage(sessionId, buildPlanImplementationMessage(trimmedPlanText), null, false, {
-        isPlan: true,
-      })
-    );
+    try {
+      this.saveSessionMessages(sessionId, messages);
+      this.getFileHistory().forkSession(sourceSessionId, sessionId);
+      this.registerSessionEntry(entry);
+    } catch (error) {
+      this.removeSessionEntryBestEffort(sessionId);
+      this.cleanupSessionResources(sessionId, { removeMessages: true });
+      throw error;
+    }
 
-    this.saveSessionMessages(sessionId, messages);
-    this.getFileHistory().forkSession(sourceSessionId, sessionId);
-
-    this.registerSessionEntry(entry);
-
-    return sessionId;
+    return {
+      sessionId,
+      implementationPrompt: buildPlanImplementationHandoff(planText),
+    };
   }
 
   /**
@@ -2734,6 +2771,7 @@ ${agentInstructions}
       controller.abort();
     }
     this.sessionControllers.delete(sessionId);
+    this.getFileHistory().deleteSession(sessionId);
     if (options.removeMessages) {
       this.removeSessionMessages([sessionId]);
       try {
@@ -2995,6 +3033,26 @@ ${agentInstructions}
     };
   }
 
+  private buildTrustedSessionPrefix(sessionId: string): SessionMessage[] {
+    const promptToolOptions = this.getPromptToolOptions();
+    const messages = [
+      this.buildSystemMessage(sessionId, getSystemPrompt(this.projectRoot, promptToolOptions)),
+      this.buildSystemMessage(
+        sessionId,
+        getRuntimeContext(
+          this.projectRoot,
+          promptToolOptions.model,
+          this.getResolvedSettings().permissions?.addWorkingDirs
+        )
+      ),
+    ];
+    const agentInstructions = this.loadAgentInstructions();
+    if (agentInstructions) {
+      messages.push(this.buildSystemMessage(sessionId, agentInstructions));
+    }
+    return messages;
+  }
+
   private buildFollowUpMessage(sessionId: string, message: ToolExecutionFollowUpMessage): SessionMessage {
     const now = new Date().toISOString();
     return {
@@ -3167,7 +3225,7 @@ ${agentInstructions}
     const hooks: ToolExecutionHooks = {
       onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
-      onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
+      onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk, sessionId),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
       onBackgroundProcessComplete: (completion) => this.addBackgroundProcessCompletionMessage(sessionId, completion),
       onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
@@ -3654,6 +3712,7 @@ ${agentInstructions}
       planMode: value.planMode === true,
       pluginRateLimitedTool: this.normalizePluginRateLimitedTool(value.pluginRateLimitedTool),
       forkedFrom: this.normalizeForkedFrom(value.forkedFrom),
+      derivedFrom: this.normalizeDerivedFrom(value.derivedFrom),
     };
   }
 
@@ -3666,17 +3725,30 @@ ${agentInstructions}
       return undefined;
     }
     const forkedFrom = value as Record<string, unknown>;
-    if (
-      typeof forkedFrom.sessionId !== "string" ||
-      !forkedFrom.sessionId ||
-      typeof forkedFrom.messageId !== "string" ||
-      !forkedFrom.messageId
-    ) {
+    if (!isNonEmptyString(forkedFrom.sessionId) || !isNonEmptyString(forkedFrom.messageId)) {
       return undefined;
     }
     return {
       sessionId: forkedFrom.sessionId,
       messageId: forkedFrom.messageId,
+    };
+  }
+
+  private normalizeDerivedFrom(value: unknown): SessionEntry["derivedFrom"] {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+      return undefined;
+    }
+    const derivedFrom = value as Record<string, unknown>;
+    if (derivedFrom.kind !== "plan-implementation") {
+      return undefined;
+    }
+    const lineage = this.normalizeForkedFrom(value);
+    if (!lineage) {
+      return undefined;
+    }
+    return {
+      kind: "plan-implementation",
+      ...lineage,
     };
   }
 

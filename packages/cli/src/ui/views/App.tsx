@@ -578,10 +578,16 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           setErrorLine("No active session to derive from.");
           return;
         }
+        let derivedSessionId: string | null = null;
+        let submissionStarted = false;
         try {
-          const sessionId = sessionManager.startPlanImplementationSession(sourceSessionId, proposedPlan);
+          const { sessionId, implementationPrompt } = await sessionManager.startPlanImplementationSession(
+            sourceSessionId,
+            proposedPlan
+          );
+          derivedSessionId = sessionId;
           sessionManager.setActiveSessionId(sessionId);
-          setPendingPlanImplementation(null);
+          processStdoutRef.current.clear();
           await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
           const session = sessionManager.getSession(sessionId);
           setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
@@ -591,20 +597,35 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           setPlanMode(false);
           setPendingPermissionReply(null);
           setErrorLine(null);
-          const source = sessionManager.getSession(sourceSessionId);
-          if (source?.summary && !source.summary.includes(" (planned)")) {
-            sessionManager.renameSession(sourceSessionId, `${source.summary} (planned)`);
-          }
           refreshSessionsList();
           await refreshSkills(sessionId);
-          handleSubmit({
-            text: getImplementationPrompt(proposedPlan),
+          setPendingPlanImplementation(null);
+          submissionStarted = true;
+          await handlePrompt({
+            text: implementationPrompt,
             imageUrls: [],
             planMode: false,
           });
         } catch (error) {
+          if (submissionStarted) {
+            setErrorLine(error instanceof Error ? error.message : String(error));
+            return;
+          }
+          if (derivedSessionId) {
+            sessionManager.deleteSession(derivedSessionId);
+          }
+          sessionManager.setActiveSessionId(sourceSessionId);
+          processStdoutRef.current.clear();
+          await resetStaticView(loadVisibleMessages(sessionManager, sourceSessionId), { clearScreen: true });
+          const source = sessionManager.getSession(sourceSessionId);
+          setStatusLine(source ? buildStatusLine(source, resolveCurrentSettings(projectRoot)) : "");
+          setRunningProcesses(source?.processes ?? null);
+          setActiveStatus(source?.status ?? null);
+          setActiveAskPermissions(source?.askPermissions);
+          setPlanMode(true);
           setErrorLine(error instanceof Error ? error.message : String(error));
           setPendingPlanImplementation(proposedPlan);
+          refreshSessionsList();
         }
         return;
       }
@@ -620,6 +641,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     },
     [
       handleSubmit,
+      handlePrompt,
       pendingPlanImplementation,
       sessionManager,
       resetStaticView,

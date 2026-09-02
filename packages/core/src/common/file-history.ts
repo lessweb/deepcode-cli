@@ -87,6 +87,19 @@ export class GitFileHistory {
     }
   }
 
+  deleteSession(sessionId: string): void {
+    const branchRef = this.getSessionBranchRef(sessionId);
+    if (!branchRef || !fs.existsSync(this.gitDir)) {
+      return;
+    }
+
+    try {
+      this.runGit(["update-ref", "-d", branchRef]);
+    } catch {
+      // File history is best effort and must not block session cleanup.
+    }
+  }
+
   recordCheckpoint(sessionId: string, filePaths: string[], message: string): string | undefined {
     const branchRef = this.getSessionBranchRef(sessionId);
     if (!branchRef) {

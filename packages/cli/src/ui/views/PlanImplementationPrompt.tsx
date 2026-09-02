@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
+import { extractProposedPlan } from "@vegamo/deepcode-core";
 import { useTerminalInput } from "../hooks";
 import type { InputKey } from "../hooks";
 
@@ -16,14 +17,7 @@ const CHOICES: Array<{ value: PlanImplementationChoice; label: string }> = [
   { value: "clearContext", label: "clear context and implement this plan" },
 ];
 
-/** Return only a complete proposed plan, so historical or partial tags cannot trigger the chooser. */
-export function extractProposedPlan(reply: string | null): string | null {
-  if (!reply) {
-    return null;
-  }
-  const match = reply.match(/<proposed_plan>\s*([\s\S]*?\S[\s\S]*?)\s*<\/proposed_plan>/);
-  return match?.[1] ?? null;
-}
+export { extractProposedPlan };
 
 export function getImplementationPrompt(plan: string): string {
   const fullWidthPunctuationCount = (plan.match(/[，、；。]/g) ?? []).length;

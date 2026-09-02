@@ -41,7 +41,13 @@ export type {
 } from "./settings";
 
 // Session
-export { SessionManager, getProjectCode, getCompactPromptTokenThreshold } from "./session";
+export {
+  SessionManager,
+  buildPlanImplementationHandoff,
+  extractProposedPlan,
+  getProjectCode,
+  getCompactPromptTokenThreshold,
+} from "./session";
 export type {
   SessionMessage,
   SessionEntry,
@@ -58,6 +64,7 @@ export type {
   LlmStreamProgress,
   LlmRetryEvent,
   SessionManagerOptions,
+  PlanImplementationSessionResult,
 } from "./session";
 
 // Prompt utilities

@@ -9,7 +9,13 @@ import sharp from "sharp";
 import { GitFileHistory } from "../common/file-history";
 import { clearSessionState } from "../common/state";
 import { getSystemPrompt } from "../prompt";
-import { getProjectCode, SessionManager, type SessionMessage } from "../session";
+import {
+  buildPlanImplementationHandoff,
+  extractProposedPlan,
+  getProjectCode,
+  SessionManager,
+  type SessionMessage,
+} from "../session";
 import type { MultimodalMode } from "../common/model-capabilities";
 
 const originalFetch = globalThis.fetch;
@@ -3891,10 +3897,10 @@ test("SessionManager persists session and user message before skill matching is 
 
   await manager.handleUserPrompt({ text: "please use demo" });
 
-  // Session and user message are persisted before skill matching triggers an abort.
+  // The new session is active and persisted before skill matching triggers an abort.
   assert.equal(manager.listSessions().length, 1);
   const [session] = manager.listSessions();
-  assert.equal(session?.status, "pending");
+  assert.equal(session?.status, "interrupted");
   const messages = manager.listSessionMessages(session!.id);
   const userMessage = messages.find((m) => m.role === "user");
   assert.equal(userMessage?.content, "please use demo");
@@ -4080,6 +4086,24 @@ test("SessionManager.deleteSession removes the messages file", () => {
 
   // Verify messages file is removed
   assert.equal(fs.existsSync(messagePath), false);
+});
+
+test("SessionManager.deleteSession removes the file history reference", () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-delete-history-workspace-");
+  const home = createTempDir("deepcode-delete-history-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-delete-history");
+  const sessionId = createSessionAndMessages(manager, "session-delete-history", "Test session");
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  assert.ok(fileHistory.ensureSession(sessionId));
+
+  manager.deleteSession(sessionId);
+
+  assert.equal(fileHistory.getCurrentCheckpointHash(sessionId), undefined);
 });
 
 test("sessions persist pasted images as file URLs without changing user content", async () => {
@@ -4618,7 +4642,17 @@ test("SessionManager.forkSession copies conversation state with fresh usage and 
   assert.equal(fileHistory.getCurrentCheckpointHash(sourceSessionId), sourceCheckpoint);
 });
 
-test("SessionManager.startPlanImplementationSession derives a clean context with the approved plan", () => {
+test("plan handoff helpers preserve the latest complete proposed plan", () => {
+  assert.equal(
+    extractProposedPlan("<proposed_plan>First</proposed_plan>\n<proposed_plan>\nSecond plan\n</proposed_plan>"),
+    "Second plan"
+  );
+  assert.equal(extractProposedPlan("<proposed_plan>Incomplete"), null);
+  assert.equal(extractProposedPlan("<proposed_plan>\n</proposed_plan>"), null);
+  assert.match(buildPlanImplementationHandoff("Build it"), /<proposed_plan>\nBuild it\n<\/proposed_plan>$/);
+});
+
+test("SessionManager.startPlanImplementationSession derives a trusted clean context with exact provenance", async () => {
   if (!hasGit()) {
     return;
   }
@@ -4654,11 +4688,23 @@ test("SessionManager.startPlanImplementationSession derives a clean context with
       id: "source-head-message",
       sessionId: sourceSessionId,
       role: "assistant",
-      content: "<proposed_plan>\nOld plan\n</proposed_plan>",
+      content: "<proposed_plan>\nBuild a thing\nwith two steps.\n</proposed_plan>",
       contentParams: null,
       messageParams: null,
       compacted: false,
       visible: true,
+      createTime: now,
+      updateTime: now,
+    },
+    {
+      id: "trailing-tool-message",
+      sessionId: sourceSessionId,
+      role: "system",
+      content: "Later tool output",
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: false,
       createTime: now,
       updateTime: now,
     },
@@ -4672,7 +4718,7 @@ test("SessionManager.startPlanImplementationSession derives a clean context with
   assert.ok(sourceCheckpoint);
 
   const planText = "Build a thing\nwith two steps.";
-  const sessionId = manager.startPlanImplementationSession(sourceSessionId, planText);
+  const { sessionId, implementationPrompt } = await manager.startPlanImplementationSession(sourceSessionId, planText);
   const derived = manager.getSession(sessionId);
   assert.ok(derived);
   assert.equal(derived.summary, "Plan source");
@@ -4681,28 +4727,33 @@ test("SessionManager.startPlanImplementationSession derives a clean context with
   assert.equal(derived.usagePerModel, null);
   assert.equal(derived.activeTokens, 0);
   assert.equal(derived.status, "completed");
-  assert.deepEqual(derived.forkedFrom, {
+  assert.equal(derived.forkedFrom, undefined);
+  assert.deepEqual(derived.derivedFrom, {
+    kind: "plan-implementation",
     sessionId: sourceSessionId,
     messageId: "source-head-message",
   });
 
   const messages = manager.listSessionMessages(sessionId);
-  assert.equal(messages.length, 3);
+  assert.equal(messages.length, 2);
   assert.ok(messages.every((message) => message.role === "system"));
   assert.ok(!messages.some((message) => message.id === "source-user-message" || message.id === "source-head-message"));
-  const planMessage = messages.at(-1)!;
-  assert.equal(planMessage.visible, false);
-  assert.equal(planMessage.meta?.isPlan, true);
   assert.equal(
-    planMessage.content,
+    implementationPrompt,
     `A previous agent produced the plan below to accomplish the user's task. Implement the plan in a fresh context. Treat the plan as the source of user intent, re-read files as needed, and carry the work through implementation and verification.\n\n<proposed_plan>\n${planText}\n</proposed_plan>`
   );
+  assert.equal(messages.filter((message) => message.content?.includes(planText)).length, 0);
 
   assert.equal(fileHistory.getCurrentCheckpointHash(sessionId), sourceCheckpoint);
   assert.deepEqual(manager.listSessionMessages(sourceSessionId), sourceMessages);
+
+  const repeated = await manager.startPlanImplementationSession(sourceSessionId, planText);
+  assert.notEqual(repeated.sessionId, sessionId);
+  assert.equal(manager.getSession(sourceSessionId)?.summary, "Plan source");
+  assert.deepEqual(manager.getSession(repeated.sessionId)?.derivedFrom, derived.derivedFrom);
 });
 
-test("SessionManager.startPlanImplementationSession rejects a source session that is not in Plan Mode", () => {
+test("SessionManager.startPlanImplementationSession rejects a source session that is not in Plan Mode", async () => {
   if (!hasGit()) {
     return;
   }
@@ -4713,10 +4764,13 @@ test("SessionManager.startPlanImplementationSession rejects a source session tha
   const manager = createSessionManager(workspace, "machine-id-plan-impl-nonplan");
   const sourceSessionId = createSessionAndMessages(manager, "source-session", "Not a plan session");
 
-  assert.throws(() => manager.startPlanImplementationSession(sourceSessionId, "Build a thing."), /is not in Plan Mode/);
+  await assert.rejects(
+    manager.startPlanImplementationSession(sourceSessionId, "Build a thing."),
+    /is not in Plan Mode/
+  );
 });
 
-test("SessionManager.startPlanImplementationSession rejects an empty plan text", () => {
+test("SessionManager.startPlanImplementationSession rejects an empty plan text", async () => {
   if (!hasGit()) {
     return;
   }
@@ -4733,7 +4787,212 @@ test("SessionManager.startPlanImplementationSession rejects an empty plan text",
   };
   (manager as any).saveSessionsIndex(index);
 
-  assert.throws(() => manager.startPlanImplementationSession(sourceSessionId, "   \n"), /must not be empty/);
+  await assert.rejects(manager.startPlanImplementationSession(sourceSessionId, "   \n"), /must not be empty/);
+});
+
+test("SessionManager.startPlanImplementationSession rejects incomplete sources and stale plans", async () => {
+  const workspace = createTempDir("deepcode-plan-impl-validation-workspace-");
+  const home = createTempDir("deepcode-plan-impl-validation-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-impl-validation");
+  await assert.rejects(manager.startPlanImplementationSession("missing-session", "Plan"), /No saved session/);
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Plan source");
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = { ...index.entries[0], planMode: true, status: "processing" };
+  (manager as any).saveSessionsIndex(index);
+
+  await assert.rejects(manager.startPlanImplementationSession(sourceSessionId, "Plan"), /is not completed/);
+  index.entries[0].status = "completed";
+  (manager as any).saveSessionsIndex(index);
+  await assert.rejects(manager.startPlanImplementationSession(sourceSessionId, "Plan"), /no complete proposed plan/);
+
+  const messages = manager.listSessionMessages(sourceSessionId);
+  messages.push({
+    ...messages.at(-1)!,
+    id: "approved-plan-message",
+    role: "assistant",
+    content: "<proposed_plan>Current plan</proposed_plan>",
+  });
+  (manager as any).saveSessionMessages(sourceSessionId, messages);
+  await assert.rejects(manager.startPlanImplementationSession(sourceSessionId, "Stale plan"), /no longer matches/);
+});
+
+test("SessionManager.startPlanImplementationSession rejects proposed plans without a valid message ID", async () => {
+  const workspace = createTempDir("deepcode-plan-impl-message-id-workspace-");
+  const home = createTempDir("deepcode-plan-impl-message-id-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-impl-message-id");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Plan source");
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = { ...index.entries[0], planMode: true, status: "completed" };
+  (manager as any).saveSessionsIndex(index);
+  const baseMessage = manager.listSessionMessages(sourceSessionId).at(-1)!;
+
+  for (const id of [undefined, null, "", "   ", 42]) {
+    (manager as any).saveSessionMessages(sourceSessionId, [
+      {
+        ...baseMessage,
+        id,
+        role: "assistant",
+        content: "<proposed_plan>Current plan</proposed_plan>",
+      },
+    ]);
+    await assert.rejects(
+      manager.startPlanImplementationSession(sourceSessionId, "Current plan"),
+      /without a valid message ID/
+    );
+  }
+});
+
+test("SessionManager.startPlanImplementationSession re-resolves a compact skill catalog", async () => {
+  const workspace = createTempDir("deepcode-plan-impl-skills-workspace-");
+  const home = createTempDir("deepcode-plan-impl-skills-home-");
+  setHomeDir(home);
+  const skillDir = path.join(workspace, ".agents", "skills", "deploy-skill");
+  fs.mkdirSync(skillDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(skillDir, "SKILL.md"),
+    "---\nname: renamed-deploy-skill\ndescription: Current deployment guidance\n---\n# Secret full instructions\n",
+    "utf8"
+  );
+  const manager = createSessionManager(workspace, "machine-id-plan-impl-skills");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Plan source");
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = { ...index.entries[0], planMode: true, status: "completed" };
+  (manager as any).saveSessionsIndex(index);
+  const now = "2026-01-01T00:00:00.000Z";
+  const baseMessage = {
+    sessionId: sourceSessionId,
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: false,
+    createTime: now,
+    updateTime: now,
+  };
+  const sourceMessages: SessionMessage[] = [
+    {
+      ...baseMessage,
+      id: "old-catalog",
+      role: "system",
+      content: "Old catalog",
+      meta: {
+        skillCatalog: [
+          { name: "deploy-skill", description: "Stale description" },
+          { name: "removed-skill", description: "No longer installed" },
+        ],
+      },
+    },
+    {
+      ...baseMessage,
+      id: "loaded-skill",
+      role: "tool",
+      content: "FULL SKILL BODY MUST NOT COPY",
+      meta: {
+        skill: {
+          name: "deploy-skill",
+          path: "./.agents/skills/deploy-skill/SKILL.md",
+          description: "Stale description",
+          isLoaded: true,
+        },
+      },
+    },
+    {
+      ...baseMessage,
+      id: "malformed-catalog",
+      role: "system",
+      content: "Malformed catalog",
+      meta: { skillCatalog: { name: "not-an-array" } as any },
+    },
+    {
+      ...baseMessage,
+      id: "approved-plan",
+      role: "assistant",
+      content: "<proposed_plan>Deploy with deploy-skill</proposed_plan>",
+      visible: true,
+    },
+  ];
+  (manager as any).saveSessionMessages(sourceSessionId, sourceMessages);
+
+  const result = await manager.startPlanImplementationSession(sourceSessionId, "Deploy with deploy-skill");
+  const derivedMessages = manager.listSessionMessages(result.sessionId);
+  const catalog = derivedMessages.find((message) => message.meta?.skillCatalog)?.meta?.skillCatalog;
+  assert.deepEqual(catalog, [{ name: "renamed-deploy-skill", description: "Current deployment guidance" }]);
+  assert.doesNotMatch(derivedMessages.map((message) => message.content).join("\n"), /FULL SKILL BODY|Secret full/);
+
+  let matchedPrompt = "";
+  manager.identifyMatchingSkillNames = async (_skills, prompt) => {
+    matchedPrompt = prompt;
+    return ["renamed-deploy-skill"];
+  };
+  await manager.replySession(result.sessionId, { text: result.implementationPrompt, planMode: false });
+  assert.equal(matchedPrompt, result.implementationPrompt);
+  const submittedMessages = manager.listSessionMessages(result.sessionId);
+  assert.equal(
+    submittedMessages.filter(
+      (message) => message.role === "user" && message.content === result.implementationPrompt && message.visible
+    ).length,
+    1
+  );
+});
+
+test("SessionManager.startPlanImplementationSession removes partial state when creation fails", async () => {
+  if (!hasGit()) {
+    return;
+  }
+
+  const workspace = createTempDir("deepcode-plan-impl-cleanup-workspace-");
+  const home = createTempDir("deepcode-plan-impl-cleanup-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-impl-cleanup");
+  const sourceSessionId = createSessionAndMessages(manager, "source-session", "Plan source");
+  const index = (manager as any).loadSessionsIndex();
+  index.entries[0] = { ...index.entries[0], planMode: true, status: "completed" };
+  (manager as any).saveSessionsIndex(index);
+  const sourceMessages = manager.listSessionMessages(sourceSessionId);
+  (manager as any).saveSessionMessages(sourceSessionId, [
+    ...sourceMessages,
+    {
+      ...sourceMessages.at(-1)!,
+      id: "approved-plan",
+      role: "assistant",
+      content: "<proposed_plan>Current plan</proposed_plan>",
+    },
+  ]);
+  const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
+  fileHistory.ensureSession(sourceSessionId);
+  let derivedSessionId = "";
+  (manager as any).registerSessionEntry = (entry: { id: string }) => {
+    derivedSessionId = entry.id;
+    throw new Error("index write failed");
+  };
+
+  await assert.rejects(manager.startPlanImplementationSession(sourceSessionId, "Current plan"), /index write failed/);
+
+  const projectDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace));
+  assert.ok(derivedSessionId);
+  assert.equal(manager.getSession(derivedSessionId), null);
+  assert.equal(fs.existsSync(path.join(projectDir, `${derivedSessionId}.jsonl`)), false);
+  assert.equal(fileHistory.getCurrentCheckpointHash(derivedSessionId), undefined);
+  assert.ok(fileHistory.getCurrentCheckpointHash(sourceSessionId));
+});
+
+test("SessionManager.createSession binds the active session before asynchronous skill matching", async () => {
+  const workspace = createTempDir("deepcode-create-session-active-workspace-");
+  const home = createTempDir("deepcode-create-session-active-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-create-session-active");
+  (manager as any).activateSession = async () => {};
+  let matchingSessionId: string | undefined;
+  manager.identifyMatchingSkillNames = async (_skills, _prompt, options) => {
+    matchingSessionId = options?.sessionId;
+    assert.equal(manager.getActiveSessionId(), matchingSessionId);
+    return [];
+  };
+
+  const sessionId = await manager.createSession({ text: "Use a matching skill" });
+
+  assert.equal(matchingSessionId, sessionId);
 });
 
 test("SessionManager ignores malformed fork lineage in persisted entries", () => {
@@ -4749,6 +5008,21 @@ test("SessionManager ignores malformed fork lineage in persisted entries", () =>
   fs.writeFileSync(indexPath, JSON.stringify(persisted), "utf8");
 
   assert.equal(manager.getSession(sessionId)?.forkedFrom, undefined);
+});
+
+test("SessionManager tolerates malformed plan derivation metadata in persisted entries", () => {
+  const workspace = createTempDir("deepcode-plan-lineage-workspace-");
+  const home = createTempDir("deepcode-plan-lineage-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plan-lineage");
+  const sessionId = createSessionAndMessages(manager, "lineage-session", "Lineage");
+  const projectDir = (manager as any).getProjectStorage().projectDir;
+  const indexPath = path.join(projectDir, "sessions-index.json");
+  const persisted = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  persisted.entries[0].derivedFrom = { kind: "other", sessionId };
+  fs.writeFileSync(indexPath, JSON.stringify(persisted), "utf8");
+
+  assert.equal(manager.getSession(sessionId)?.derivedFrom, undefined);
 });
 
 test("SessionManager persists plugin rate limits with UnderstandImage priority and does not copy them to forks", () => {
