@@ -312,13 +312,14 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
               const isSelected = actualIndex === safeIndex;
               const isConfirming = confirmDeleteSessionId === session.id;
               const isRenaming = renameSessionId === session.id;
+              const badges = getSessionBadges(session, sessions);
               return (
                 <Box key={session.id} height={2} marginBottom={1}>
                   <Box>
                     <Text color="#229ac3">{isSelected ? "> " : "  "}</Text>
                   </Box>
                   <Box flexDirection="column" flexGrow={1}>
-                    <Box width={"100%"}>
+                    <Box width={"100%"} flexWrap="nowrap">
                       {isRenaming ? (
                         <Text color="yellow">
                           Rename: {renameValue.slice(0, renameCursor)}
@@ -326,15 +327,30 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
                           {renameValue.slice(renameCursor)}
                         </Text>
                       ) : (
-                        <Text {...(isSelected ? { bold: true } : {})} color={isSelected ? "#229ac3" : undefined}>
-                          {formatSessionTitle(session.summary || "Untitled")}
-                        </Text>
+                        <Box flexGrow={1} flexShrink={1} overflow="hidden">
+                          <Text
+                            wrap="truncate-end"
+                            {...(isSelected ? { bold: true } : {})}
+                            color={isSelected ? "#229ac3" : undefined}
+                          >
+                            {formatSessionTitle(session.summary || "Untitled")}
+                          </Text>
+                        </Box>
                       )}
-                      {isConfirming ? (
-                        <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
-                      ) : isRenaming ? null : (
-                        <Text dimColor> ({formatSessionStatus(session.status)})</Text>
-                      )}
+                      {!isRenaming ? (
+                        <Box flexShrink={0}>
+                          {badges.map((badge) => (
+                            <Text key={badge} color={badge === "implementation" ? "cyan" : "yellow"}>
+                              {` [${badge}]`}
+                            </Text>
+                          ))}
+                          {isConfirming ? (
+                            <Text color="yellow"> [Delete? Enter=yes, Esc=no]</Text>
+                          ) : (
+                            <Text dimColor> ({formatSessionStatus(session.status)})</Text>
+                          )}
+                        </Box>
+                      ) : null}
                     </Box>
                     <Box width="100%">
                       <Text dimColor>{formatTimestamp(session.updateTime)} </Text>
@@ -411,6 +427,22 @@ function formatTimestamp(value: string): string {
 
 export function formatSessionTitle(value: string, max = 70): string {
   return truncate(value.replace(/\r?\n/g, " ").replace(/\s+/g, " ").trim(), max);
+}
+
+export function getSessionBadges(session: SessionEntry, sessions: SessionEntry[]): Array<"planned" | "implementation"> {
+  const badges: Array<"planned" | "implementation"> = [];
+  if (
+    sessions.some(
+      (candidate) =>
+        candidate.derivedFrom?.kind === "plan-implementation" && candidate.derivedFrom.sessionId === session.id
+    )
+  ) {
+    badges.push("planned");
+  }
+  if (session.derivedFrom?.kind === "plan-implementation") {
+    badges.push("implementation");
+  }
+  return badges;
 }
 
 export function formatSessionStatus(status: SessionStatus): string {

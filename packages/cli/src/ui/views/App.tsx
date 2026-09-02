@@ -10,6 +10,7 @@ import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { buildLoadingText } from "../core/loading-text";
 import { findExpandedThinkingId } from "../core/thinking-state";
+import { claimPlanImplementation, isActiveSessionEvent } from "../core/session-events";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
@@ -111,6 +112,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const resumeSessionIdRef = useRef(false);
   const startupDoneRef = useRef(false);
   const processStdoutRef = useRef<Map<number, string>>(new Map());
+  const planImplementationInFlightRef = useRef(false);
   const rawModeRef = useRef<RawMode>(mode);
   const writeRef = useRef(write);
   const lastRenderedColumnsRef = useRef<number | null>(null);
@@ -155,6 +157,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       getResolvedSettings: () => resolveCurrentSettings(projectRoot),
       renderMarkdown: (text) => text,
       onAssistantMessage: (message: SessionMessage) => {
+        if (!isActiveSessionEvent(sessionManager.getActiveSessionId(), message.sessionId)) {
+          return;
+        }
         setMessages((prev) => [...prev, message]);
         if (rawModeRef.current === RawMode.Raw) {
           writeStdoutLine("\n");
@@ -162,12 +167,19 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         }
       },
       onSessionEntryUpdated: (entry) => {
+        setSessions(sessionManager.listSessions());
+        if (!isActiveSessionEvent(sessionManager.getActiveSessionId(), entry.id)) {
+          return;
+        }
         setStatusLine(buildStatusLine(entry, resolveCurrentSettings(projectRoot)));
         setRunningProcesses(entry.processes);
         setActiveStatus(entry.status);
         setActiveAskPermissions(entry.askPermissions);
       },
       onLlmStreamProgress: (progress) => {
+        if (!isActiveSessionEvent(sessionManager.getActiveSessionId(), progress.sessionId)) {
+          return;
+        }
         setRetryEvent(null);
         if (progress.phase === "end") {
           setStreamProgress(null);
@@ -176,13 +188,19 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         setStreamProgress(progress);
       },
       onLlmRetry: (event) => {
+        if (!isActiveSessionEvent(sessionManager.getActiveSessionId(), event.sessionId)) {
+          return;
+        }
         setRetryEvent(event);
       },
       onMcpStatusChanged: () => {
         // 当 MCP 状态变更时，如果当前正在查看 MCP 状态页面，则更新显示
         setMcpStatuses(sessionManager.getMcpStatus());
       },
-      onProcessStdout: (pid, chunk) => {
+      onProcessStdout: (pid, chunk, sessionId) => {
+        if (!isActiveSessionEvent(sessionManager.getActiveSessionId(), sessionId)) {
+          return;
+        }
         const buf = processStdoutRef.current;
         const current = buf.get(pid) ?? "";
         // Cap at 1 MB per process to avoid unbounded memory growth
@@ -342,6 +360,25 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     [exit, sessionManager]
   );
 
+  const activateSessionView = useCallback(
+    async (sessionId: string): Promise<void> => {
+      sessionManager.setActiveSessionId(sessionId);
+      processStdoutRef.current.clear();
+      await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+      const session = sessionManager.getSession(sessionId);
+      setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
+      setRunningProcesses(session?.processes ?? null);
+      setActiveStatus(session?.status ?? null);
+      setActiveAskPermissions(session?.askPermissions);
+      setPlanMode(session?.planMode === true);
+      setPendingPlanImplementation(null);
+      if (pendingPermissionReply && pendingPermissionReply.sessionId !== sessionId) {
+        setPendingPermissionReply(null);
+      }
+    },
+    [pendingPermissionReply, projectRoot, resetStaticView, sessionManager]
+  );
+
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
       if (submission.command === "exit") {
@@ -370,16 +407,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         }
         try {
           const sessionId = sessionManager.forkSession(sourceSessionId);
-          sessionManager.setActiveSessionId(sessionId);
-          await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
-          const session = sessionManager.getSession(sessionId);
-          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
-          setRunningProcesses(null);
-          setActiveStatus(session?.status ?? null);
-          setActiveAskPermissions(undefined);
-          setPlanMode(session?.planMode === true);
-          setPendingPlanImplementation(null);
-          setPendingPermissionReply(null);
+          await activateSessionView(sessionId);
           setErrorLine(null);
           refreshSessionsList();
           await refreshSkills(sessionId);
@@ -489,9 +517,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       refreshSessionsList,
       navigateToSubView,
       resetToWelcome,
-      resetStaticView,
       planMode,
-      projectRoot,
+      activateSessionView,
     ]
   );
 
@@ -578,54 +605,48 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           setErrorLine("No active session to derive from.");
           return;
         }
+        if (!claimPlanImplementation(planImplementationInFlightRef)) {
+          return;
+        }
+        setPendingPlanImplementation(null);
+        setBusy(true);
+        setErrorLine(null);
         let derivedSessionId: string | null = null;
-        let submissionStarted = false;
+        let implementationPrompt = "";
         try {
-          const { sessionId, implementationPrompt } = await sessionManager.startPlanImplementationSession(
-            sourceSessionId,
-            proposedPlan
-          );
-          derivedSessionId = sessionId;
-          sessionManager.setActiveSessionId(sessionId);
-          processStdoutRef.current.clear();
-          await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
-          const session = sessionManager.getSession(sessionId);
-          setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
-          setRunningProcesses(null);
-          setActiveStatus(session?.status ?? null);
-          setActiveAskPermissions(undefined);
-          setPlanMode(false);
-          setPendingPermissionReply(null);
-          setErrorLine(null);
+          const result = await sessionManager.startPlanImplementationSession(sourceSessionId, proposedPlan);
+          derivedSessionId = result.sessionId;
+          implementationPrompt = result.implementationPrompt;
+          await activateSessionView(result.sessionId);
           refreshSessionsList();
-          await refreshSkills(sessionId);
-          setPendingPlanImplementation(null);
-          submissionStarted = true;
+        } catch (error) {
+          if (derivedSessionId) {
+            sessionManager.deleteSession(derivedSessionId);
+          }
+          try {
+            await activateSessionView(sourceSessionId);
+          } catch {
+            sessionManager.setActiveSessionId(sourceSessionId);
+          }
+          setErrorLine(error instanceof Error ? error.message : String(error));
+          setPendingPlanImplementation(proposedPlan);
+          refreshSessionsList();
+          setBusy(false);
+          planImplementationInFlightRef.current = false;
+          return;
+        }
+
+        try {
           await handlePrompt({
             text: implementationPrompt,
             imageUrls: [],
             planMode: false,
           });
         } catch (error) {
-          if (submissionStarted) {
-            setErrorLine(error instanceof Error ? error.message : String(error));
-            return;
-          }
-          if (derivedSessionId) {
-            sessionManager.deleteSession(derivedSessionId);
-          }
-          sessionManager.setActiveSessionId(sourceSessionId);
-          processStdoutRef.current.clear();
-          await resetStaticView(loadVisibleMessages(sessionManager, sourceSessionId), { clearScreen: true });
-          const source = sessionManager.getSession(sourceSessionId);
-          setStatusLine(source ? buildStatusLine(source, resolveCurrentSettings(projectRoot)) : "");
-          setRunningProcesses(source?.processes ?? null);
-          setActiveStatus(source?.status ?? null);
-          setActiveAskPermissions(source?.askPermissions);
-          setPlanMode(true);
           setErrorLine(error instanceof Error ? error.message : String(error));
-          setPendingPlanImplementation(proposedPlan);
-          refreshSessionsList();
+          setBusy(false);
+        } finally {
+          planImplementationInFlightRef.current = false;
         }
         return;
       }
@@ -639,16 +660,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         });
       }
     },
-    [
-      handleSubmit,
-      handlePrompt,
-      pendingPlanImplementation,
-      sessionManager,
-      resetStaticView,
-      refreshSessionsList,
-      refreshSkills,
-      projectRoot,
-    ]
+    [handleSubmit, handlePrompt, pendingPlanImplementation, sessionManager, activateSessionView, refreshSessionsList]
   );
 
   const handleExitShortcut = useCallback(() => {
@@ -664,22 +676,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
 
   const handleSelectSession = useCallback(
     async (sessionId: string) => {
-      sessionManager.setActiveSessionId(sessionId);
-      // Clear first so <Static> resets its index to 0.
-      await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
-      const session = sessionManager.getSession(sessionId);
-      setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot)) : "");
-      setRunningProcesses(session?.processes ?? null);
-      setActiveStatus(session?.status ?? null);
-      setActiveAskPermissions(session?.askPermissions);
-      setPlanMode(session?.planMode === true);
-      setPendingPlanImplementation(null);
-      if (pendingPermissionReply && pendingPermissionReply.sessionId !== sessionId) {
-        setPendingPermissionReply(null);
-      }
+      await activateSessionView(sessionId);
       await refreshSkills(sessionId);
     },
-    [sessionManager, resetStaticView, pendingPermissionReply, projectRoot, refreshSkills]
+    [activateSessionView, refreshSkills]
   );
 
   /**

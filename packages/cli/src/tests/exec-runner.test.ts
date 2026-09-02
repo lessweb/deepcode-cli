@@ -147,7 +147,7 @@ function createHarness(scenario: ManagerScenario = {}) {
             },
             true
           );
-          options.onProcessStdout?.(123, "process output\n");
+          options.onProcessStdout?.(123, "process output\n", activeId);
           scenario.duringPrompt?.();
           entry = createEntry(activeId, scenario.finalStatus ?? "completed", {
             assistantReply: scenario.finalReply === undefined ? "final answer" : scenario.finalReply,

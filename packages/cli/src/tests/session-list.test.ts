@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { formatSessionTitle, filterSessions, formatSessionStatus } from "../ui";
+import React from "react";
+import { renderToString } from "ink";
+import { formatSessionTitle, filterSessions, formatSessionStatus, getSessionBadges } from "../ui/views/SessionList";
+import { SessionList } from "../ui/views/SessionList";
+import { claimPlanImplementation, isActiveSessionEvent } from "../ui/core/session-events";
 import type { SessionEntry } from "@vegamo/deepcode-core";
 
 test("formatSessionTitle replaces newlines with spaces", () => {
@@ -9,6 +13,69 @@ test("formatSessionTitle replaces newlines with spaces", () => {
 
 test("formatSessionTitle truncates after normalizing whitespace", () => {
   assert.equal(formatSessionTitle("one\n two   three", 10), "one two th…");
+});
+
+test("plan derivation badges remain separate from long truncated titles", () => {
+  const [source, implementation, fork] = buildSessions([
+    { id: "source", summary: "A very long plan title that must be independently truncated" },
+    {
+      id: "implementation",
+      summary: "A very long plan title that must be independently truncated",
+      derivedFrom: { kind: "plan-implementation", sessionId: "source", messageId: "plan-message" },
+    },
+    { id: "fork", forkedFrom: { sessionId: "source", messageId: "plan-message" } },
+  ]);
+
+  assert.equal(formatSessionTitle(source!.summary!, 20), "A very long plan tit…");
+  assert.deepEqual(getSessionBadges(source!, [source!, implementation!, fork!]), ["planned"]);
+  assert.deepEqual(getSessionBadges(implementation!, [source!, implementation!, fork!]), ["implementation"]);
+  assert.deepEqual(getSessionBadges(fork!, [source!, implementation!, fork!]), []);
+});
+
+test("session callbacks ignore events from inactive sessions", () => {
+  assert.equal(isActiveSessionEvent("implementation", "source"), false);
+  assert.equal(isActiveSessionEvent("implementation", "implementation"), true);
+  assert.equal(isActiveSessionEvent("implementation", undefined), false);
+  assert.equal(isActiveSessionEvent(null, "source"), false);
+  assert.equal(isActiveSessionEvent(null, undefined), false);
+});
+
+test("plan implementation can only be claimed once while preparation is in flight", () => {
+  const inFlight = { current: false };
+
+  assert.equal(claimPlanImplementation(inFlight), true);
+  assert.equal(claimPlanImplementation(inFlight), false);
+});
+
+test("long session titles keep lineage badges and status on the first line at 80 columns", () => {
+  const sessions = buildSessions([
+    { id: "source", summary: "A very long plan title ".repeat(8) },
+    {
+      id: "implementation",
+      summary: "A very long implementation title ".repeat(8),
+      derivedFrom: { kind: "plan-implementation", sessionId: "source", messageId: "plan-message" },
+    },
+  ]);
+  const output = renderToString(
+    React.createElement(SessionList, {
+      sessions,
+      onSelect: () => {},
+      onCancel: () => {},
+    }),
+    { columns: 80 }
+  );
+  const lines = output.split("\n");
+  const titleLine = lines.find((line) => line.includes("[planned]"));
+  const implementationLine = lines.find((line) => line.includes("[implementation]"));
+
+  assert.match(titleLine ?? "", /… +\[planned\] \(done\) │$/);
+  assert.match(implementationLine ?? "", /… +\[implementation\] \(done\) │$/);
+  const plannedTimeLine = lines[lines.indexOf(titleLine ?? "") + 1] ?? "";
+  const implementationTimeLine = lines[lines.indexOf(implementationLine ?? "") + 1] ?? "";
+  assert.match(plannedTimeLine, /2026/);
+  assert.doesNotMatch(plannedTimeLine, /\[planned\]|\(done\)/);
+  assert.match(implementationTimeLine, /2026/);
+  assert.doesNotMatch(implementationTimeLine, /\[implementation\]|\(done\)/);
 });
 
 test("formatSessionStatus maps status values to display labels", () => {
@@ -101,7 +168,7 @@ test("filterSessions handles sessions with null fields", () => {
 
 function buildSessions(overrides: Array<Partial<SessionEntry>>): SessionEntry[] {
   return overrides.map((override, i) => ({
-    id: `session-${i}`,
+    id: override.id ?? `session-${i}`,
     summary: override.summary ?? null,
     assistantReply: override.assistantReply ?? null,
     assistantThinking: null,
@@ -115,5 +182,7 @@ function buildSessions(overrides: Array<Partial<SessionEntry>>): SessionEntry[] 
     createTime: new Date().toISOString(),
     updateTime: new Date().toISOString(),
     processes: null,
+    forkedFrom: override.forkedFrom,
+    derivedFrom: override.derivedFrom,
   }));
 }
