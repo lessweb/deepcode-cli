@@ -131,7 +131,7 @@ Deep Code 已支持 [DeepSeek Responses API](https://api-docs.deepseek.com/zh-cn
 
 ### 如何配置 MCP？
 
-Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览器、数据库等外部服务。在 `settings.json` 中配置 `mcpServers` 字段即可启用，启动后使用 `/mcp` 命令查看已配置的 MCP 服务器状态和可用工具。
+Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览器、数据库等外部服务。在 `settings.json` 中配置 `mcpServers` 字段即可启用，既支持本地 stdio 服务器，也支持远程 Streamable HTTP 服务器；启动后使用 `/mcp` 命令查看已配置的 MCP 服务器状态和可用工具。
 
 详细配置指南：[docs/mcp.md](docs/mcp.md)
 

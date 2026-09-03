@@ -1,5 +1,11 @@
 import { createHash } from "crypto";
-import { McpClient, type McpToolDefinition, type McpPromptDefinition, type McpResourceDefinition } from "./mcp-client";
+import type { McpClient } from "./mcp-client";
+import {
+  createMcpClient,
+  type McpToolDefinition,
+  type McpPromptDefinition,
+  type McpResourceDefinition,
+} from "./mcp-client";
 import type { McpServerConfig } from "../settings";
 
 const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
@@ -154,11 +160,9 @@ export class McpManager {
 
     let client: McpClient | null = null;
     try {
-      client = new McpClient(
+      client = createMcpClient(
         name,
-        config.command,
-        config.args ?? [],
-        config.env,
+        config,
         (method) => {
           if (method === "notifications/tools/list_changed") {
             this.refreshServerTools(name, client!).catch(() => {});
