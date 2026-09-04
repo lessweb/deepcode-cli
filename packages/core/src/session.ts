@@ -87,8 +87,10 @@ import {
   getLlmRetryDelayMs,
   getLlmRetryAfterMs,
   isRetryableLlmError,
+  LLM_STREAM_FIRST_CHUNK_TIMEOUT_MS,
   LLM_STREAM_IDLE_TIMEOUT_MS,
   LlmStreamDisconnectedError,
+  LlmStreamFirstChunkTimeoutError,
   LlmStreamIdleTimeoutError,
   MAX_LLM_RETRIES,
   waitForLlmRetry,
@@ -744,7 +746,7 @@ export class SessionManager {
 
     const outerSignal = options?.signal as AbortSignal | undefined;
     const attemptController = new AbortController();
-    let idleTimedOut = false;
+    let timeoutError: Error | null = null;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let idleTimeoutPromise: Promise<never>;
     const forwardAbort = () => attemptController.abort(outerSignal?.reason);
@@ -755,17 +757,17 @@ export class SessionManager {
       }
       outerSignal?.removeEventListener("abort", forwardAbort);
     };
-    const resetIdleTimer = () => {
+    const resetIdleTimer = (timeoutMs: number, createError: () => Error) => {
       if (idleTimer) {
         clearTimeout(idleTimer);
       }
       idleTimeoutPromise = new Promise((_, reject) => {
         idleTimer = setTimeout(() => {
-          idleTimedOut = true;
-          const error = new LlmStreamIdleTimeoutError();
+          const error = createError();
+          timeoutError = error;
           attemptController.abort(error);
           reject(error);
-        }, LLM_STREAM_IDLE_TIMEOUT_MS);
+        }, timeoutMs);
       });
     };
     if (outerSignal?.aborted) {
@@ -773,7 +775,7 @@ export class SessionManager {
     } else {
       outerSignal?.addEventListener("abort", forwardAbort, { once: true });
     }
-    resetIdleTimer();
+    resetIdleTimer(LLM_STREAM_FIRST_CHUNK_TIMEOUT_MS, () => new LlmStreamFirstChunkTimeoutError());
     const attemptOptions = { ...options, signal: attemptController.signal, maxRetries: 0 };
 
     const streamRequest = {
@@ -797,7 +799,7 @@ export class SessionManager {
         idleTimeoutPromise!,
       ]);
     } catch (error) {
-      const requestError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
+      const requestError = timeoutError ?? error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
         location: debug?.location ?? "SessionManager.createChatCompletionStream:create",
@@ -873,7 +875,7 @@ export class SessionManager {
           break;
         }
         const chunk = item.value;
-        resetIdleTimer();
+        resetIdleTimer(LLM_STREAM_IDLE_TIMEOUT_MS, () => new LlmStreamIdleTimeoutError());
         if (debug?.enabled) {
           responseChunks.push(chunk);
         }
@@ -944,7 +946,7 @@ export class SessionManager {
         throw new LlmStreamDisconnectedError();
       }
     } catch (error) {
-      const streamError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
+      const streamError = timeoutError ?? error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
         location: debug?.location ?? "SessionManager.createChatCompletionStream:stream",

@@ -22,6 +22,10 @@ test("intent narration guard rejects replayed prose-only stalls on their first t
     "I'm going to run the command now.",
     "For real now — UpdatePlan.",
     "No more loops. Actually invoke.",
+    "Let me update the plan now.",
+    "Now let me set up A1c and proceed with the implementation.",
+    "Let me fetch the policy documents next.",
+    "A1c is set up. Now let me add the state comment, then port the documents.",
   ];
 
   for (const content of replayedStalls) {
@@ -35,6 +39,11 @@ test("intent narration guard allows prose plus a real tool call unchanged", () =
 
 test("intent narration guard allows a tool-only turn", () => {
   assert.equal(findIntentNarrationPhrase("", true, settings), null);
+});
+
+test("intent narration guard allows conversational let-me phrases", () => {
+  assert.equal(findIntentNarrationPhrase("Let me know if you want more detail.", false, settings), null);
+  assert.equal(findIntentNarrationPhrase("Let me explain why the test failed.", false, settings), null);
 });
 
 test("intent narration guard honors an overridden phrase list", () => {

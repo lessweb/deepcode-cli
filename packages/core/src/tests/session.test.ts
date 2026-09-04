@@ -3942,10 +3942,11 @@ test("SessionManager treats a clean EOF without a terminal chunk as a disconnect
   assert.equal(retryError, "Model stream disconnected before completion.");
 });
 
-test("SessionManager retries a stream after sixty seconds without data", async (t) => {
+test("SessionManager retries a stream that is idle for sixty seconds after its first chunk", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const controller = new AbortController();
   let retryError = "";
+  let nextCall = 0;
   const client = {
     chat: {
       completions: {
@@ -3954,6 +3955,13 @@ test("SessionManager retries a stream after sixty seconds without data", async (
             return this;
           },
           next() {
+            nextCall += 1;
+            if (nextCall === 1) {
+              return Promise.resolve({
+                done: false,
+                value: { choices: [{ delta: { content: "partial" } }] },
+              });
+            }
             return new Promise<IteratorResult<unknown>>(() => {});
           },
         }),
@@ -3977,11 +3985,62 @@ test("SessionManager retries a stream after sixty seconds without data", async (
     { model: "test-model" },
     { signal: controller.signal }
   );
-  await Promise.resolve();
+  for (let turn = 0; turn < 10 && nextCall < 2; turn += 1) {
+    await Promise.resolve();
+  }
+  assert.equal(nextCall, 2);
   t.mock.timers.tick(60_000);
+  await Promise.resolve();
 
   await assert.rejects(responsePromise, (error: Error) => error.name === "AbortError");
   assert.equal(retryError, "Model stream was idle for 60 seconds.");
+});
+
+test("SessionManager gives first-chunk prefill five minutes and does not replay it after timeout", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let retries = 0;
+  let nextCalls = 0;
+  const client = {
+    chat: {
+      completions: {
+        create: async () => ({
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+          next() {
+            nextCalls += 1;
+            return new Promise<IteratorResult<unknown>>(() => {});
+          },
+        }),
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    onLlmRetry: () => {
+      retries += 1;
+    },
+  });
+
+  const responsePromise = (manager as any).createChatCompletionStream(client, { model: "test-model" });
+  for (let turn = 0; turn < 10 && nextCalls < 1; turn += 1) {
+    await Promise.resolve();
+  }
+  assert.equal(nextCalls, 1);
+  t.mock.timers.tick(300_000);
+  await Promise.resolve();
+
+  await assert.rejects(
+    responsePromise,
+    (error: Error) =>
+      error.name === "LlmStreamFirstChunkTimeoutError" &&
+      error.message === "Model stream produced no first chunk for 300 seconds."
+  );
+  assert.equal(retries, 0);
 });
 
 test("SessionManager persists session and user message before skill matching is cancelled", async () => {
