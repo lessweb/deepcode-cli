@@ -3424,7 +3424,8 @@ test("SessionManager accumulates response usage while active tokens track the la
   const session = manager.getSession(sessionId);
   const usage = session?.usage as Record<string, any>;
   const usagePerModel = session?.usagePerModel?.["test-model"] as Record<string, any>;
-  assert.equal(session?.activeTokens, 27);
+  // activeTokens 现在跟踪累计 total_tokens (修复: 之前是单次响应的 27)
+  assert.equal(session?.activeTokens, 42);
   assert.equal(usage.prompt_tokens, 30);
   assert.equal(usage.completion_tokens, 12);
   assert.equal(usage.total_tokens, 42);
