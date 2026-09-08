@@ -39,6 +39,23 @@
       <div class="chat-container" id="chatContainer">
         <div class="messages" id="messages"></div>
         <div class="composer">
+          <div class="plugin-rate-limit-notice" id="pluginRateLimitNotice" role="status" hidden>
+            <div class="plugin-rate-limit-text">
+              <span id="pluginRateLimitPrefix"></span>
+              <a href="https://deepcode.vegamo.cn/plus/packages" id="pluginRateLimitLink"
+                >Visit https://deepcode.vegamo.cn/plus/packages</a
+              ><span> for more details.</span>
+            </div>
+            <button
+              class="plugin-rate-limit-close"
+              id="pluginRateLimitClose"
+              type="button"
+              title="Dismiss"
+              aria-label="Dismiss rate limit notice"
+            >
+              &times;
+            </button>
+          </div>
           <!-- Skills Popup -->
           <div class="skills-popup" id="skillsPopup">
             <div class="skills-popup-header">Select Skills</div>
@@ -83,6 +100,7 @@
     </div>
 
     <script nonce="{{nonce}}" src="{{attachmentsJsUri}}"></script>
+    <script nonce="{{nonce}}" src="{{thinkingPreviewJsUri}}"></script>
     <script nonce="{{nonce}}">
       const vscode = acquireVsCodeApi();
       const workspaceRoot = {{workspaceRoot}};
@@ -109,6 +127,10 @@
       const contextMeter = document.getElementById("contextMeter");
       const contextMeterRing = document.getElementById("contextMeterRing");
       const contextMeterTooltip = document.getElementById("contextMeterTooltip");
+      const pluginRateLimitNotice = document.getElementById("pluginRateLimitNotice");
+      const pluginRateLimitPrefix = document.getElementById("pluginRateLimitPrefix");
+      const pluginRateLimitLink = document.getElementById("pluginRateLimitLink");
+      const pluginRateLimitClose = document.getElementById("pluginRateLimitClose");
 
       const attachmentManager = typeof window.createPromptAttachmentManager === "function"
         ? window.createPromptAttachmentManager({
@@ -151,6 +173,8 @@
       let currentAskPermissions = [];
       let permissionPromptState = null;
       let pendingPermissionReply = null;
+      let currentPluginRateLimitedTool = null;
+      const dismissedPluginRateLimitSessions = new Set();
 
       function isBusyStatus(status) {
         return status === "processing" || status === "pending";
@@ -159,6 +183,33 @@
       function isProcessing() {
         return isBusyStatus(currentSessionStatus);
       }
+
+      function normalizePluginRateLimitedTool(value) {
+        return value === "UnderstandImage" || value === "WebSearch" ? value : null;
+      }
+
+      function renderPluginRateLimitNotice() {
+        const dismissed = currentSessionId && dismissedPluginRateLimitSessions.has(currentSessionId);
+        if (!currentPluginRateLimitedTool || dismissed) {
+          pluginRateLimitNotice.hidden = true;
+          return;
+        }
+        pluginRateLimitPrefix.textContent =
+          `This conversation just exceeded the ${currentPluginRateLimitedTool} tool rate limit. `;
+        pluginRateLimitNotice.hidden = false;
+      }
+
+      pluginRateLimitClose?.addEventListener("click", () => {
+        if (currentSessionId) {
+          dismissedPluginRateLimitSessions.add(currentSessionId);
+        }
+        pluginRateLimitNotice.hidden = true;
+      });
+
+      pluginRateLimitLink?.addEventListener("click", (event) => {
+        event.preventDefault();
+        vscode.postMessage({ type: "openExternal", url: pluginRateLimitLink.href });
+      });
 
       function getPromptLineHeight() {
         const styles = window.getComputedStyle(promptInput);
@@ -491,7 +542,7 @@
       }
 
       function buildAskUserQuestionReply(questions, form) {
-        const lines = ["Answer to AskUserQuestion:"];
+        const lines = [`Questions ${questions.length}/${questions.length} answered`];
 
         for (let index = 0; index < questions.length; index += 1) {
           const question = questions[index];
@@ -508,14 +559,14 @@
             };
           }
 
-          lines.push("");
-          lines.push(`${index + 1}. ${question.question}`);
-          if (selectedOptions.length > 0) {
-            lines.push(`- Selected: ${selectedOptions.join(", ")}`);
-          }
+          const answers = [...selectedOptions];
           if (otherText) {
-            lines.push(`- Other: ${otherText}`);
+            answers.push(otherText);
           }
+          const questionText = String(question.question || "").replace(/\s+/g, " ").trim();
+          const answerText = answers.join(", ").replace(/\s+/g, " ").trim();
+          lines.push(` - ${questionText}`);
+          lines.push(`   answer: ${answerText}`);
         }
 
         return {
@@ -630,7 +681,7 @@
           }
           errorMessage.textContent = "";
           setAskUserQuestionFormState(form, false);
-          sendUserPromptText(reply.text);
+          sendUserPromptText(reply.text, undefined, [], { isAnswers: true });
         });
 
         wrapper.appendChild(form);
@@ -650,8 +701,13 @@
         }
 
         if (role === "user") {
-          // 普通用户气泡
-          bubble.textContent = content;
+          if (meta && meta.isAnswers) {
+            bubble.classList.add("answers");
+            bubble.innerHTML = content;
+          } else {
+            // 普通用户气泡
+            bubble.textContent = content;
+          }
         } else if (role === "assistant") {
           if (meta && meta.asThinking === true) {
             // 思考气泡（可折叠）
@@ -741,8 +797,8 @@
             bubble.appendChild(contentDiv);
             bubble.appendChild(copyBtn);
           }
-        } else if (role === "system") {
-          // system 类型气泡（可折叠，显示 Skills）
+        } else if (role === "system" || (role === "tool" && meta?.skill)) {
+          // skill 气泡（可折叠）
           const header = document.createElement("div");
           header.className = "bubble-collapsible-header";
           const dotClass = shouldConnectToPrev ? "bubble-dot connect-to-prev" : "bubble-dot";
@@ -971,8 +1027,10 @@
       function isAlwaysAllowedScope(scope) {
         return [
           "read-in-cwd",
+          "read-in-tmp",
           "read-out-cwd",
           "write-in-cwd",
+          "write-in-tmp",
           "write-out-cwd",
           "delete-in-cwd",
           "delete-out-cwd",
@@ -987,10 +1045,14 @@
         switch (scope) {
           case "read-in-cwd":
             return "reads inside this workspace";
+          case "read-in-tmp":
+            return "reads inside system temporary directories";
           case "read-out-cwd":
             return "reads outside this workspace";
           case "write-in-cwd":
             return "writes inside this workspace";
+          case "write-in-tmp":
+            return "writes inside system temporary directories";
           case "write-out-cwd":
             return "writes outside this workspace";
           case "delete-in-cwd":
@@ -1013,6 +1075,8 @@
       function getPermissionRiskClass(scope) {
         switch (scope) {
           case "read-in-cwd":
+          case "read-in-tmp":
+          case "write-in-tmp":
           case "query-git-log":
             return "risk-low";
           case "read-out-cwd":
@@ -1566,6 +1630,7 @@
       }
 
       let currentThinkingBubbleElement = null; // 当前 thinking 气泡 DOM 元素
+      let currentLlmRetry = null;
 
       function getThinkingContentText() {
         if (currentRunningProcesses && Object.keys(currentRunningProcesses).length > 0) {
@@ -1573,6 +1638,10 @@
           const process = currentRunningProcesses[firstPid];
           const elapsed = formatElapsedTime(process.startTime);
           return `(${elapsed}) ${process.command}`;
+        }
+
+        if (currentLlmRetry) {
+          return `Reconnecting... ${currentLlmRetry.attempt}/${currentLlmRetry.maxRetries} (esc to interrupt)`;
         }
 
         if (currentLlmStreamProgress && currentLlmStreamProgress.startedAt) {
@@ -1593,9 +1662,30 @@
         if (statusEl) {
           statusEl.textContent = getThinkingContentText();
         }
+        const previewEl = currentThinkingBubbleElement.querySelector(".thinking-preview");
+        const progress = currentLlmStreamProgress;
+        const showPreview = progress && progress.estimatedTokens > 1500 &&
+          Date.now() - Date.parse(progress.startedAt) >= 3000 && !currentLlmRetry &&
+          (!currentRunningProcesses || Object.keys(currentRunningProcesses).length === 0);
+        previewEl.textContent = "";
+        previewEl.hidden = !showPreview || !progress.previewText;
+        if (previewEl.hidden) return;
+        const style = getComputedStyle(previewEl);
+        thinkingPreviewContext.font = style.font;
+        const preview = window.fitThinkingPreview(
+          progress.previewText,
+          previewEl.getBoundingClientRect().width,
+          (text) => thinkingPreviewContext.measureText(text).width
+        );
+        previewEl.textContent = preview;
+        previewEl.hidden = !preview;
       }
 
+      const thinkingPreviewContext = document.createElement("canvas").getContext("2d");
+      const thinkingResizeObserver = new ResizeObserver(updateThinkingBubbleContent);
+
       function removeThinkingBubble() {
+        thinkingResizeObserver.disconnect();
         if (currentThinkingBubbleElement) {
           currentThinkingBubbleElement.remove();
           currentThinkingBubbleElement = null;
@@ -1617,7 +1707,7 @@
         header.innerHTML = `
           <span class="${dotClass}"></span>
           <span class="bubble-title">
-            <span class="bubble-title-text"><b>Thinking</b> <span class="thinking-status">${escapeHtml(statusText)}</span></span>
+            <span class="bubble-title-text"><b>Thinking</b> <span class="thinking-status">${escapeHtml(statusText)}</span><span class="thinking-preview" hidden></span></span>
           </span>
         `;
 
@@ -1626,6 +1716,8 @@
         messages.scrollTop = messages.scrollHeight;
 
         currentThinkingBubbleElement = bubble;
+        thinkingResizeObserver.observe(bubble);
+        updateThinkingBubbleContent();
 
         // 连接线
         if (shouldConnectToPrev) {
@@ -1644,6 +1736,7 @@
         }
         if (!isLoading) {
           currentLlmStreamProgress = null;
+          currentLlmRetry = null;
         }
 
         // 清除旧的计时器
@@ -1904,11 +1997,21 @@
         }
       });
 
-      // 按 Escape 关闭下拉框
+      // 按 Escape 关闭下拉框或中断当前请求
       document.addEventListener("keydown", (event) => {
-        if (event.key === "Escape" && sessionDropdown.classList.contains("show")) {
+        if (event.key !== "Escape") {
+          return;
+        }
+        if (sessionDropdown.classList.contains("show")) {
           sessionDropdown.classList.remove("show");
           sessionSelector.classList.remove("open");
+          return;
+        }
+        if (isProcessing()) {
+          event.preventDefault();
+          vscode.postMessage({ type: "interrupt" });
+          currentSessionStatus = "interrupted";
+          setLoading(false, currentSessionStatus);
         }
       });
 
@@ -1947,6 +2050,7 @@
         const normalizedImages = Array.isArray(imageUrls) ? imageUrls.filter(Boolean) : [];
         const permissions = Array.isArray(options.permissions) ? options.permissions : undefined;
         const alwaysAllows = Array.isArray(options.alwaysAllows) ? options.alwaysAllows : undefined;
+        const isAnswers = options.isAnswers === true;
         const hasPermissionPayload = Boolean(
           (permissions && permissions.length > 0) || (alwaysAllows && alwaysAllows.length > 0)
         );
@@ -1964,7 +2068,8 @@
           skills: skills && skills.length > 0 ? skills : undefined,
           images: normalizedImages.length > 0 ? normalizedImages : undefined,
           permissions,
-          alwaysAllows
+          alwaysAllows,
+          isAnswers: isAnswers || undefined
         });
         return true;
       }
@@ -2118,7 +2223,7 @@
         if (msg.role === "system") {
           addBubble(msg.content, "system", msg.meta, shouldConnect);
         } else if (msg.role === "user") {
-          addBubble(msg.content, "user", msg.meta, false);
+          addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false);
         } else if (msg.role === "assistant") {
           addBubble(msg.html || msg.content, "assistant", msg.meta, shouldConnect, msg.content || "");
         } else if (msg.role === "tool") {
@@ -2137,11 +2242,13 @@
           currentSessionId = null;
           currentSessionStatus = message.status || null;
           currentAskPermissions = [];
+          currentPluginRateLimitedTool = null;
           permissionPromptState = null;
           pendingPermissionReply = null;
           updateContextMeter(message.tokenTelemetry);
           attachmentManager?.clear();
           setLoading(false, currentSessionStatus);
+          renderPluginRateLimitNotice();
 
           // Reset history for new conversation
           inputHistory = [];
@@ -2158,6 +2265,7 @@
           // 加载已有对话
           currentSessionId = message.sessionId;
           currentSessionStatus = message.status || null;
+          currentPluginRateLimitedTool = normalizePluginRateLimitedTool(message.pluginRateLimitedTool);
           currentAskPermissions = normalizeAskPermissions(message.askPermissions);
           permissionPromptState = null;
           pendingPermissionReply = null;
@@ -2220,6 +2328,7 @@
           const isCurrentlyProcessing = isBusyStatus(currentSessionStatus);
           setLoading(isCurrentlyProcessing, currentSessionStatus);
           renderPermissionPrompt();
+          renderPluginRateLimitNotice();
 
           // 如果消息中包含sessions，更新下拉框
           if (message.sessions && Array.isArray(message.sessions)) {
@@ -2235,6 +2344,12 @@
             return;
           }
           const nextStatus = message.status || null;
+          if (!currentSessionId && message.sessionId) {
+            currentSessionId = message.sessionId;
+          }
+          if ('pluginRateLimitedTool' in message) {
+            currentPluginRateLimitedTool = normalizePluginRateLimitedTool(message.pluginRateLimitedTool);
+          }
           if ('askPermissions' in message) {
             currentAskPermissions = normalizeAskPermissions(message.askPermissions);
             if (nextStatus !== "ask_permission") {
@@ -2249,6 +2364,7 @@
           }
           setLoading(isBusyStatus(nextStatus), nextStatus);
           renderPermissionPrompt();
+          renderPluginRateLimitNotice();
         } else if (message.type === "llmStreamProgress") {
           const progress = message.progress || null;
           if (!progress || !progress.requestId) {
@@ -2262,12 +2378,27 @@
               currentLlmStreamProgress = null;
             }
           } else {
+            currentLlmRetry = null;
             currentLlmStreamProgress = progress;
           }
           updateThinkingBubbleContent();
+        } else if (message.type === "llmRetry") {
+          const event = message.event || null;
+          if (!event || !event.attempt || !event.maxRetries) {
+            return;
+          }
+          if (event.sessionId && currentSessionId && event.sessionId !== currentSessionId) {
+            return;
+          }
+          currentLlmRetry = event;
+          updateThinkingBubbleContent();
         } else if (message.type === "userMessage") {
-          // 显示用户消息（纯文本）
-          addBubble(message.content || "", "user", message.meta, false);
+          addBubble(
+            message.meta?.isAnswers ? message.html || message.content || "" : message.content || "",
+            "user",
+            message.meta,
+            false
+          );
 
           // Record user message into history
           if (typeof message.content === "string") {

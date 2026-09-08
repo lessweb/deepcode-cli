@@ -150,3 +150,15 @@ export function buildResumeHintText(sessionId?: string): string | null {
   }
   return chalk.dim(`To continue this session, run `) + chalk.hex("#229ac3")(`deepcode --resume ${sessionId}`);
 }
+
+export function buildPluginRateLimitHintText(session: SessionEntry | null): string | null {
+  const tool = session?.pluginRateLimitedTool;
+  if (!tool) {
+    return null;
+  }
+  return (
+    chalk.dim(`This conversation just exceeded the ${tool} tool rate limit. Visit `) +
+    chalk.hex("#229ac3")("https://deepcode.vegamo.cn/plus/packages") +
+    chalk.dim(" for more details.")
+  );
+}

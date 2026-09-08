@@ -1,9 +1,12 @@
 import * as fs from "fs";
 import * as path from "path";
 import type { DeepcodingSettings, PermissionScope, PermissionSettings } from "../settings";
+import type { ToolExecutionFollowUpMessage } from "./tool-types";
 import { isAbsoluteFilePath, normalizeFilePath } from "./state";
 
 export type BashPermissionScope = Exclude<PermissionScope, "mcp"> | "unknown";
+type PermissionPolicySettings = Required<Omit<PermissionSettings, "addWorkingDirs">> &
+  Pick<PermissionSettings, "addWorkingDirs">;
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 
@@ -46,7 +49,7 @@ export type PermissionToolExecution = {
     error?: string;
     metadata?: Record<string, unknown>;
     awaitUserResponse?: boolean;
-    followUpMessages?: Array<{ role: "system"; content: string; contentParams?: unknown | null }>;
+    followUpMessages?: ToolExecutionFollowUpMessage[];
   };
 };
 
@@ -59,7 +62,7 @@ export type ComputeToolCallPermissionsOptions = {
   sessionId: string;
   projectRoot: string;
   toolCalls: unknown[];
-  settings?: Required<PermissionSettings>;
+  settings?: PermissionPolicySettings;
   forceAskScopes?: readonly PermissionScope[];
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
@@ -160,6 +163,7 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
     const request = describeToolPermissionRequest({
       sessionId: options.sessionId,
       projectRoot: options.projectRoot,
+      addWorkingDirs: options.settings?.addWorkingDirs,
       toolCall,
       readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
@@ -191,7 +195,7 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
 
 function getAllowedForcedAskScopes(
   scopes: AskPermissionScope[],
-  settings: Required<PermissionSettings> | undefined,
+  settings: PermissionPolicySettings | undefined,
   forceAskScopes: readonly PermissionScope[] | undefined
 ): PermissionScope[] {
   if (!forceAskScopes?.length) {
@@ -211,6 +215,7 @@ function mergeAskScopes(existing: AskPermissionScope[], forced: PermissionScope[
 export function describeToolPermissionRequest(options: {
   sessionId: string;
   projectRoot: string;
+  addWorkingDirs?: string[];
   toolCall: PermissionToolCall;
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
@@ -218,15 +223,15 @@ export function describeToolPermissionRequest(options: {
   const name = options.toolCall.function.name;
   const args = parseToolArgumentsForPermissions(options.toolCall.function.arguments);
 
-  if (name === "read" || name === "Read") {
+  if (name === "read" || name === "Read" || name === "ReadImage") {
     const filePath = typeof args.file_path === "string" ? args.file_path : "";
     return {
       toolCallId: options.toolCall.id,
       name,
-      command: formatToolPathCommand("read", filePath),
+      command: formatToolPathCommand(name === "ReadImage" ? "read-image" : "read", filePath),
       scopes:
         filePath && !isPathInAnyDirectory(options.projectRoot, filePath, options.readPermissionExemptPaths)
-          ? [isPathInProject(options.projectRoot, filePath) ? "read-in-cwd" : "read-out-cwd"]
+          ? [classifyFilePermissionScope(options.projectRoot, filePath, "read", options.addWorkingDirs)]
           : [],
     };
   }
@@ -237,7 +242,9 @@ export function describeToolPermissionRequest(options: {
       toolCallId: options.toolCall.id,
       name,
       command: formatToolPathCommand("write", filePath),
-      scopes: filePath ? [isPathInProject(options.projectRoot, filePath) ? "write-in-cwd" : "write-out-cwd"] : [],
+      scopes: filePath
+        ? [classifyFilePermissionScope(options.projectRoot, filePath, "write", options.addWorkingDirs)]
+        : [],
     };
   }
 
@@ -248,7 +255,7 @@ export function describeToolPermissionRequest(options: {
       name,
       command: formatToolPathCommand("edit", filePath),
       scopes: filePath
-        ? [isPathInProject(options.projectRoot, filePath) ? "write-in-cwd" : "write-out-cwd"]
+        ? [classifyFilePermissionScope(options.projectRoot, filePath, "write", options.addWorkingDirs)]
         : ["write-out-cwd"],
     };
   }
@@ -279,7 +286,7 @@ export function describeToolPermissionRequest(options: {
     const imagePath = typeof args.image_path === "string" ? args.image_path : "";
     const scopes: AskPermissionScope[] = ["network"];
     if (imagePath && !isPathInAnyDirectory(options.projectRoot, imagePath, options.readPermissionExemptPaths)) {
-      scopes.unshift(isPathInProject(options.projectRoot, imagePath) ? "read-in-cwd" : "read-out-cwd");
+      scopes.unshift(classifyFilePermissionScope(options.projectRoot, imagePath, "read", options.addWorkingDirs));
     }
     return {
       toolCallId: options.toolCall.id,
@@ -308,11 +315,12 @@ export function describeToolPermissionRequest(options: {
 
 export function evaluatePermissionScopes(
   scopes: AskPermissionScope[],
-  settings: Required<PermissionSettings> = {
+  settings: PermissionPolicySettings = {
     allow: [],
     deny: [],
     ask: [],
     defaultMode: "allowAll",
+    addWorkingDirs: [],
   }
 ): PermissionDecision {
   if (scopes.includes("unknown") && settings.defaultMode !== "allowAll") {
@@ -336,11 +344,12 @@ export function evaluatePermissionScopes(
 
 export function getPermissionScopesRequiringAsk(
   scopes: AskPermissionScope[],
-  settings: Required<PermissionSettings> = {
+  settings: PermissionPolicySettings = {
     allow: [],
     deny: [],
     ask: [],
     defaultMode: "allowAll",
+    addWorkingDirs: [],
   }
 ): AskPermissionScope[] {
   const result: AskPermissionScope[] = [];
@@ -371,8 +380,10 @@ export function getPermissionScopesRequiringAsk(
 export function parseBashSideEffects(value: unknown): AskPermissionScope[] {
   const validScopes = new Set<AskPermissionScope>([
     "read-in-cwd",
+    "read-in-tmp",
     "read-out-cwd",
     "write-in-cwd",
+    "write-in-tmp",
     "write-out-cwd",
     "delete-in-cwd",
     "delete-out-cwd",
@@ -430,9 +441,32 @@ export function formatToolPathCommand(toolName: string, filePath: string): strin
 }
 
 export function isPathInProject(projectRoot: string, filePath: string): boolean {
+  return isPathInDirectory(projectRoot, filePath, projectRoot);
+}
+
+export function classifyFilePermissionScope(
+  projectRoot: string,
+  filePath: string,
+  operation: "read" | "write",
+  addWorkingDirs: string[] = []
+): PermissionScope {
+  if (isPathInProject(projectRoot, filePath) || isPathInAnyDirectory(projectRoot, filePath, addWorkingDirs)) {
+    return operation === "read" ? "read-in-cwd" : "write-in-cwd";
+  }
+  if (isPathInAnyDirectory(projectRoot, filePath, ["/tmp", "/private/tmp"])) {
+    return operation === "read" ? "read-in-tmp" : "write-in-tmp";
+  }
+  return operation === "read" ? "read-out-cwd" : "write-out-cwd";
+}
+
+function isPathInDirectory(projectRoot: string, filePath: string, directory: string): boolean {
   const normalized = normalizeFilePath(filePath);
   const absolutePath = isAbsoluteFilePath(normalized) ? normalized : path.resolve(projectRoot, normalized);
-  const relative = path.relative(path.resolve(projectRoot), path.resolve(absolutePath));
+  const normalizedDirectory = normalizeFilePath(directory);
+  const absoluteDirectory = isAbsoluteFilePath(normalizedDirectory)
+    ? normalizedDirectory
+    : path.resolve(projectRoot, normalizedDirectory);
+  const relative = path.relative(path.resolve(absoluteDirectory), path.resolve(absolutePath));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 }
 
@@ -448,12 +482,7 @@ export function isPathInAnyDirectory(
   const normalized = normalizeFilePath(filePath);
   const absolutePath = isAbsoluteFilePath(normalized) ? normalized : path.resolve(projectRoot, normalized);
   for (const directory of directories) {
-    const normalizedDirectory = normalizeFilePath(directory);
-    const absoluteDirectory = isAbsoluteFilePath(normalizedDirectory)
-      ? normalizedDirectory
-      : path.resolve(projectRoot, normalizedDirectory);
-    const relative = path.relative(path.resolve(absoluteDirectory), path.resolve(absolutePath));
-    if (relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative))) {
+    if (isPathInDirectory(projectRoot, absolutePath, directory)) {
       return true;
     }
   }
@@ -470,15 +499,17 @@ export function hasUserPermissionReplies(value: { permissions?: unknown; alwaysA
 export function appendProjectPermissionAllows(
   projectRoot: string,
   scopes: PermissionScope[] | undefined,
-  options: { inheritedPermissions?: Required<PermissionSettings> } = {}
+  options: { inheritedPermissions?: PermissionPolicySettings } = {}
 ): void {
   if (!Array.isArray(scopes) || scopes.length === 0) {
     return;
   }
   const validScopes = new Set<PermissionScope>([
     "read-in-cwd",
+    "read-in-tmp",
     "read-out-cwd",
     "write-in-cwd",
+    "write-in-tmp",
     "write-out-cwd",
     "delete-in-cwd",
     "delete-out-cwd",
@@ -513,6 +544,9 @@ export function appendProjectPermissionAllows(
           deny: [...options.inheritedPermissions.deny],
           ask: [...options.inheritedPermissions.ask],
           defaultMode: options.inheritedPermissions.defaultMode,
+          ...((options.inheritedPermissions.addWorkingDirs?.length ?? 0) > 0
+            ? { addWorkingDirs: [...(options.inheritedPermissions.addWorkingDirs ?? [])] }
+            : {}),
         }
       : {};
 
@@ -584,8 +618,10 @@ export function normalizeAskPermissions(value: unknown): AskPermissionRequest[] 
 export function isAskPermissionScope(value: unknown): value is AskPermissionScope {
   return (
     value === "read-in-cwd" ||
+    value === "read-in-tmp" ||
     value === "read-out-cwd" ||
     value === "write-in-cwd" ||
+    value === "write-in-tmp" ||
     value === "write-out-cwd" ||
     value === "delete-in-cwd" ||
     value === "delete-out-cwd" ||

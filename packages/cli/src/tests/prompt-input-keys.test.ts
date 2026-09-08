@@ -23,6 +23,7 @@ import {
   buildInitPromptSubmission,
   buildPromptDraftFromSessionMessage,
   extractProposedPlan,
+  getClearContextImplementationPrompt,
   getImplementationPrompt,
   getPlanImplementationChoice,
   disableTerminalExtendedKeys,
@@ -80,6 +81,26 @@ test("parseTerminalInput recognizes word navigation modifiers", () => {
   assert.equal(metaRight.input, "f");
   assert.equal(metaRight.key.rightArrow, true);
   assert.equal(metaRight.key.meta, true);
+});
+
+test("parseTerminalInput recognizes application cursor mode arrows", () => {
+  const left = parseTerminalInput("\u001BOD");
+  const right = parseTerminalInput("\u001BOC");
+  assert.equal(left.key.leftArrow, true);
+  assert.equal(left.key.meta, false);
+  assert.equal(right.key.rightArrow, true);
+  assert.equal(right.key.meta, false);
+});
+
+test("parseTerminalInput recognizes ctrl+home and ctrl+end", () => {
+  const home = parseTerminalInput("\u001B[1;5H");
+  const end = parseTerminalInput("\u001B[1;5F");
+  assert.equal(home.key.home, true);
+  assert.equal(home.key.ctrl, true);
+  assert.equal(home.key.meta, false);
+  assert.equal(end.key.end, true);
+  assert.equal(end.key.ctrl, true);
+  assert.equal(end.key.meta, false);
 });
 
 test("parseTerminalInput keeps DEL payload for meta+backspace", () => {
@@ -161,6 +182,27 @@ test("getImplementationPrompt uses Chinese only above five full-width punctuatio
   assert.equal(getImplementationPrompt("，、；。；。"), "实现此方案。");
 });
 
+test("getClearContextImplementationPrompt carries the complete plan into a fresh context", () => {
+  const plan = "# 方案\n\n- 保留 `Markdown`\n- Verify tests";
+  const prompt = getClearContextImplementationPrompt(plan);
+
+  assert.equal(
+    prompt,
+    "A previous agent produced the plan below to accomplish the user's task. " +
+      "Implement the plan in a fresh context. Treat the plan as the source of " +
+      "user intent, re-read files as needed, and carry the work through " +
+      `implementation and verification.\n\n${plan}`
+  );
+});
+
+test("getPlanImplementationChoice maps all four number shortcuts", () => {
+  const key = { escape: false, return: false };
+  assert.equal(getPlanImplementationChoice("1", key, 0), "implement");
+  assert.equal(getPlanImplementationChoice("2", key, 0), "clear-context");
+  assert.equal(getPlanImplementationChoice("3", key, 0), "stay");
+  assert.equal(getPlanImplementationChoice("4", key, 0), "default");
+});
+
 test("getPlanImplementationChoice treats escape as staying in Plan Mode", () => {
   assert.equal(getPlanImplementationChoice("", { escape: true, return: false }, 0), "stay");
 });
@@ -213,6 +255,33 @@ test("buildPromptDraftFromSessionMessage restores text and image urls", () => {
     nonce: 7,
     text: "revise this prompt",
     imageUrls: ["data:image/png;base64,abc", "data:image/jpeg;base64,def"],
+  });
+});
+
+test("buildPromptDraftFromSessionMessage prefers stored prompt image urls", () => {
+  const message: SessionMessage = {
+    id: "user-with-stored-images",
+    sessionId: "session-1",
+    role: "user",
+    content: "revise this prompt",
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: "2026-01-01T00:00:00.000Z",
+    updateTime: "2026-01-01T00:00:00.000Z",
+    meta: {
+      userPrompt: {
+        text: "revise this prompt",
+        imageUrls: ["file:///tmp/image.png"],
+      },
+    },
+  };
+
+  assert.deepEqual(buildPromptDraftFromSessionMessage(message, 8), {
+    nonce: 8,
+    text: "revise this prompt",
+    imageUrls: ["file:///tmp/image.png"],
   });
 });
 

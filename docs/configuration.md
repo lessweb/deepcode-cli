@@ -31,13 +31,21 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `autoCompactWindow` | number/string | 自动压缩阈值，默认取最终上下文窗口的 50%                           |
 | `model`              | string    | 模型名称。优先级高于 `env.MODEL`                                    |
 | `thinkingEnabled`    | boolean   | 是否启用思考模式（DeepSeek V4 系列默认启用）                         |
-| `reasoningEffort`    | string    | 推理强度，可选 `"high"` 或 `"max"`（默认 `"max"`）                  |
+| `reasoningEffort`    | string    | 推理强度，可选 `"low"`、`"high"` 或 `"max"`（默认 `"max"`）        |
+| `multimodal`         | string    | 多模态（图片）能力开关，可选 `"default"`、`"on"` 或 `"off"`（默认 `"default"`） |
+| `filesApiEnabled`    | boolean   | 是否通过 DeepSeek Files API 发送图片（默认 `false`）                       |
+| `filesApiTimeoutMs`  | number    | 单张图片 Files API 处理超时，默认 `60000`，最大 `600000` 毫秒              |
+| `fileExpiresAfterSeconds` | number | 远端文件有效期，默认 `604800` 秒                                      |
+| `fileRefreshMarginSeconds` | number | 剩余有效期低于该值时刷新缓存，默认 `3600` 秒                         |
+| `fileQuotaCleanupBatch` | number | 配额不足时清理的最旧 Deep Code 文件数，默认 `100`                         |
+| `maxRequestFilesBytes` | number | 单次请求内图片原始字节总上限，默认 `134217728`（128 MiB）                    |
 | `debugLogEnabled`    | boolean   | 是否启用调试日志输出（默认 `false`）                                 |
 | `telemetryEnabled`   | boolean   | 是否启用匿名使用数据上报（默认 `true`）                              |
 | `notify`             | string    | 任务完成通知脚本的完整路径（如 Slack 通知脚本）                      |
 | `webSearchTool`      | string    | 自定义联网搜索脚本的完整路径                                         |
 | `mcpServers`         | object    | MCP 服务器配置（键为服务名，值为 McpServerConfig 对象）              |
 | `temperature`        | number    | 模型采样温度，范围 `0` 到 `2`                           |
+| `permissions`        | object    | 权限策略及 `addWorkingDirs` 额外工作目录配置（参见 [permission.md](./permission.md)） |
 | `enabledSkills`      | object    | 按 skill 名称启用或禁用 skill 的配置                                 |
 | `statusline`         | object    | 状态栏插件配置(参见 [statusline.md](./statusline.md))               |
 
@@ -51,6 +59,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `TEMPERATURE`  | string | Chat Completions 采样温度，范围 `"0"` 到 `"2"`              |
 | `THINKING_ENABLED`  | string | 是否启用思考模式                                         |
 | `REASONING_EFFORT`  | string | 推理强度                                                |
+| `MULTIMODAL`  | string | 多模态（图片）能力开关，可选 `"default"`、`"on"` 或 `"off"`         |
 | `DEBUG_LOG_ENABLED`  | string | 是否启用调试日志输出                                     |
 | `TELEMETRY_ENABLED`  | string | 是否启用匿名使用数据上报                                   |
 | `<其他任意KEY>` | string | 自定义环境变量 |
@@ -83,6 +92,36 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | ------ | --------------------------------- |
 | `max`  | 最大推理深度（默认值）              |
 | `high` | 较高推理深度，token消耗相对较小      |
+| `low`  | 较低推理深度，token消耗更少          |
+
+#### `multimodal` — 多模态（图片）能力
+
+控制是否将当前模型视为支持图片输入的多模态模型：
+
+| 值         | 说明                                                         |
+| ---------- | ------------------------------------------------------------ |
+| `default`  | 按内置模型列表自动判定（默认值）                              |
+| `on`       | 强制视为多模态模型，图片以 `image_url` 形式直接内联发送        |
+| `off`      | 强制视为非多模态模型，由模型通过识图工具按需读取      |
+
+当使用的模型未内置在已知模型列表中、或其实际能力与默认判定不符时，可通过该配置覆盖。
+
+#### DeepSeek Files API
+
+当 `BASE_URL` 为 `https://api.deepseek.com` 时，设置 `filesApiEnabled: true` 后，Deep Code 会将图片上传到固定的 `https://api.deepseek.com/files`，并在聊天请求中使用 `file_id`。其他 API 地址不会启用该功能。上传或缓存刷新失败时，本次请求直接失败；关闭开关时图片处理逻辑保持不变。
+
+```json
+{
+  "filesApiEnabled": true,
+  "filesApiTimeoutMs": 60000,
+  "fileExpiresAfterSeconds": 604800,
+  "fileRefreshMarginSeconds": 3600,
+  "fileQuotaCleanupBatch": 100,
+  "maxRequestFilesBytes": 134217728
+}
+```
+
+单个文件最大 64 MiB，上传超时不能超过 DeepSeek 规定的 10 分钟。远端文件 ID 会缓存在 `~/.deepcode/files-api-cache.json`；缓存不保存明文 API Key。遇到远端存储配额错误时，只会清理文件名以 `deepcode-` 开头的最旧文件，然后重试一次。
 
 #### `notify` — 任务完成通知
 
@@ -108,7 +147,9 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 
 #### `webSearchTool` — 自定义联网搜索
 
-Deep Code 内置免费可用的 Web Search 工具。如果需要自定义搜索逻辑，可将 `webSearchTool` 设为一个可执行脚本的完整路径：
+未配置 `webSearchTool` 时，如果 `BASE_URL` 是 `https://api.deepseek.com`，Deep Code 会调用 DeepSeek Responses API 的 `web_search` 工具，并固定使用 `deepseek-v4-flash`，不受 `MODEL` 配置影响。其他 API 地址仍使用 Deep Code Web Search API。
+
+如果需要自定义搜索逻辑，可将 `webSearchTool` 设为一个可执行脚本的完整路径。自定义脚本始终优先于内置搜索：
 
 ```json
 {

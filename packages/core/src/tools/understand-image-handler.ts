@@ -59,10 +59,18 @@ export async function handleUnderstandImageTool(
     form.append("prompt", prompt);
     form.append("image", new Blob([new Uint8Array(image)], { type: mimeType }), path.basename(imagePath));
 
-    const machineId = context.createOpenAIClient?.().machineId;
+    const clientContext = context.createOpenAIClient?.();
+    const machineId = clientContext?.machineId;
+    const plusApiKey = clientContext?.plusApiKey;
     const response = await fetch(DEFAULT_UNDERSTAND_IMAGE_API_URL, {
       method: "POST",
-      headers: machineId ? { Token: machineId } : undefined,
+      headers:
+        machineId || plusApiKey
+          ? {
+              ...(machineId ? { Token: machineId } : {}),
+              ...(plusApiKey ? { "PLUS-API-KEY": plusApiKey } : {}),
+            }
+          : undefined,
       body: form,
     });
     if (!response.ok) {
@@ -74,6 +82,9 @@ export async function handleUnderstandImageTool(
     if (payload.success !== true) {
       const reason =
         typeof payload.reason === "string" && payload.reason.trim() ? payload.reason.trim() : "Unknown error";
+      if (reason.includes("rate limit exceeded")) {
+        context.onPluginRateLimitExceeded?.("UnderstandImage");
+      }
       return toolError(`UnderstandImage API failed: ${reason}`);
     }
     if (typeof payload.result !== "string" || !payload.result.trim()) {

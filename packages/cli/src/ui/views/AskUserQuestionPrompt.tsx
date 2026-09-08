@@ -1,7 +1,25 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Box, Text } from "ink";
 import type { AskUserQuestionAnswers, AskUserQuestionItem } from "../core/ask-user-question";
+import {
+  EMPTY_BUFFER,
+  backspace,
+  deleteForward,
+  deleteWordAfter,
+  deleteWordBefore,
+  insertText,
+  killLine,
+  moveLeft,
+  moveLineEnd,
+  moveLineStart,
+  moveRight,
+  moveWordLeft,
+  moveWordRight,
+} from "../core/prompt-buffer";
+import type { PromptBufferState } from "../core/prompt-buffer";
 import { useTerminalInput } from "../hooks";
+import type { InputKey } from "../hooks";
+import { renderBufferWithCursor } from "./PromptInput";
 
 type Props = {
   questions: AskUserQuestionItem[];
@@ -23,13 +41,14 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
   const [cursorIndex, setCursorIndex] = useState(0);
   const [answers, setAnswers] = useState<AskUserQuestionAnswers>({});
   const [selectedValues, setSelectedValues] = useState<Record<number, string[]>>({});
-  const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
+  const [otherTexts, setOtherTexts] = useState<Record<number, PromptBufferState>>({});
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const question = questions[questionIndex];
   const options = useMemo(() => buildOptions(question), [question]);
   const selectedForQuestion = selectedValues[questionIndex] ?? [];
-  const otherText = otherTexts[questionIndex] ?? "";
+  const otherState = otherTexts[questionIndex] ?? EMPTY_BUFFER;
+  const otherText = otherState.text;
   const isCurrentOther = options[cursorIndex]?.isOther === true;
 
   useEffect(() => {
@@ -80,28 +99,36 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
       return;
     }
 
-    if (key.backspace && isCurrentOther) {
-      setOtherTexts((prev) => ({
-        ...prev,
-        [questionIndex]: (prev[questionIndex] ?? "").slice(0, -1),
-      }));
-      return;
-    }
-
     if (key.return) {
       commitCurrentQuestion();
       return;
     }
 
-    if (isCurrentOther && input && !key.ctrl && !key.meta && !input.startsWith("\u001B")) {
-      const sanitized = input.replace(/\r/g, "");
-      if (sanitized) {
-        setOtherTexts((prev) => ({
-          ...prev,
-          [questionIndex]: `${prev[questionIndex] ?? ""}${sanitized}`,
-        }));
+    if (isCurrentOther) {
+      const next = applyOtherAnswerEdit(otherTexts[questionIndex] ?? EMPTY_BUFFER, input, key);
+      if (next) {
+        setOtherTexts((prev) => ({ ...prev, [questionIndex]: next }));
+        return;
       }
-      return;
+      // Consume unhandled control/escape sequences so they are never typed.
+      if (
+        key.ctrl ||
+        key.meta ||
+        key.tab ||
+        key.backspace ||
+        key.delete ||
+        key.leftArrow ||
+        key.rightArrow ||
+        key.home ||
+        key.end ||
+        key.pageUp ||
+        key.pageDown ||
+        key.focusIn ||
+        key.focusOut ||
+        input.startsWith("\u001B")
+      ) {
+        return;
+      }
     }
 
     if (question.multiSelect && input === " " && !key.ctrl && !key.meta) {
@@ -197,10 +224,7 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
                   width={64}
                 >
                   {otherText ? (
-                    <Text color="white">
-                      {otherText}
-                      {isCursor ? <Text color="cyanBright">▌</Text> : null}
-                    </Text>
+                    <Text color="white">{renderBufferWithCursor(otherState, isCursor)}</Text>
                   ) : (
                     <Text dimColor>{isCursor ? "type your answer here" : "type a custom answer"}</Text>
                   )}
@@ -219,14 +243,106 @@ export function AskUserQuestionPrompt({ questions, onSubmit, onCancel }: Props):
         <Text dimColor>
           {statusMessage ??
             (isCurrentOther
-              ? "Type your answer · Backspace edit · Enter submit/next · ↑ choose presets · Esc type manually"
+              ? "Type your answer · ←/→ move · Alt+←/→ word · Home/End · Enter submit/next · ↑ choose presets · Esc cancel"
               : question.multiSelect
-                ? "↑/↓ move · Space toggle · Enter submit/next · Esc type manually"
-                : "↑/↓ move · Enter select/next · Esc type manually")}
+                ? "↑/↓ move · Space toggle · Enter submit/next · Esc cancel"
+                : "↑/↓ move · Enter select/next · Esc cancel")}
         </Text>
       </Box>
     </Box>
   );
+}
+
+/**
+ * Apply one keystroke to the single-line "Other" answer buffer.
+ * Returns the next state, or `null` when the keystroke is not an edit
+ * (e.g. option navigation or an unhandled escape sequence).
+ */
+export function applyOtherAnswerEdit(state: PromptBufferState, input: string, key: InputKey): PromptBufferState | null {
+  if ((key.ctrl || key.meta) && key.leftArrow) {
+    return moveWordLeft(state);
+  }
+  if ((key.ctrl || key.meta) && key.rightArrow) {
+    return moveWordRight(state);
+  }
+  if (key.leftArrow) {
+    return moveLeft(state);
+  }
+  if (key.rightArrow) {
+    return moveRight(state);
+  }
+  if (key.home) {
+    return moveLineStart(state);
+  }
+  if (key.end) {
+    return moveLineEnd(state);
+  }
+  if (key.ctrl && (input === "a" || input === "A")) {
+    return moveLineStart(state);
+  }
+  if (key.ctrl && (input === "e" || input === "E")) {
+    return moveLineEnd(state);
+  }
+  if (key.ctrl && (input === "b" || input === "B")) {
+    return moveLeft(state);
+  }
+  if (key.ctrl && (input === "f" || input === "F")) {
+    return moveRight(state);
+  }
+  if (key.meta && (input === "b" || input === "B")) {
+    return moveWordLeft(state);
+  }
+  if (key.meta && (input === "f" || input === "F")) {
+    return moveWordRight(state);
+  }
+  if (key.delete) {
+    return deleteForward(state);
+  }
+  if (key.backspace) {
+    return backspace(state);
+  }
+  if (key.ctrl && (input === "w" || input === "W")) {
+    return deleteWordBefore(state);
+  }
+  if (key.ctrl && (input === "u" || input === "U")) {
+    return { ...EMPTY_BUFFER };
+  }
+  if (key.ctrl && (input === "k" || input === "K")) {
+    return killLine(state);
+  }
+  if (key.meta && (input === "d" || input === "D")) {
+    return deleteWordAfter(state);
+  }
+  if (key.meta && (input === "\u007F" || input === "\b")) {
+    return deleteWordBefore(state);
+  }
+
+  const isPlainText =
+    input.length > 0 &&
+    !key.ctrl &&
+    !key.meta &&
+    !key.tab &&
+    !key.backspace &&
+    !key.delete &&
+    !key.return &&
+    !key.escape &&
+    !key.upArrow &&
+    !key.downArrow &&
+    !key.leftArrow &&
+    !key.rightArrow &&
+    !key.home &&
+    !key.end &&
+    !key.pageUp &&
+    !key.pageDown &&
+    !key.focusIn &&
+    !key.focusOut &&
+    !input.startsWith("\u001B");
+
+  if (isPlainText) {
+    return insertText(state, input.replace(/\r/g, ""));
+  }
+
+  return null;
 }
 
 function buildOptions(question: AskUserQuestionItem | undefined): OptionEntry[] {

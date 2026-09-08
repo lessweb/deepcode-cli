@@ -5,8 +5,8 @@ import * as os from "os";
 import * as path from "path";
 import { fileURLToPath } from "url";
 import {
+  buildSkillCatalogPrompt,
   buildSkillDocumentsPrompt,
-  getDefaultSkillPrompt,
   getPlanModePrompt,
   getRuntimeContext,
   getSystemPrompt,
@@ -33,14 +33,46 @@ test("getTools always includes WebSearch", () => {
   assert.equal(names.includes("WebSearch"), true);
 });
 
-test("UnderstandImage is available only to non-multimodal models", () => {
-  const nonMultimodalTools = getTools({ model: "deepseek-chat" }).map((tool) => tool.function.name);
-  const multimodalTools = getTools({ model: "gpt-4o" }).map((tool) => tool.function.name);
+test("image tools match the current model's multimodal capability", () => {
+  const nonMultimodalTools = getTools({ model: "gpt-4o" }).map((tool) => tool.function.name);
+  const multimodalTools = getTools({ model: "deepseek-v4-flash-vision-exp" }).map((tool) => tool.function.name);
 
   assert.equal(nonMultimodalTools.includes("UnderstandImage"), true);
+  assert.equal(nonMultimodalTools.includes("ReadImage"), false);
   assert.equal(multimodalTools.includes("UnderstandImage"), false);
-  assert.equal(getSystemPrompt("/tmp/project", { model: "deepseek-chat" }).includes("## UnderstandImage"), true);
-  assert.equal(getSystemPrompt("/tmp/project", { model: "gpt-4o" }).includes("## UnderstandImage"), false);
+  assert.equal(multimodalTools.includes("ReadImage"), true);
+  assert.equal(getSystemPrompt("/tmp/project", { model: "gpt-4o" }).includes("## UnderstandImage"), true);
+  assert.equal(getSystemPrompt("/tmp/project", { model: "gpt-4o" }).includes("## ReadImage"), false);
+  assert.equal(
+    getSystemPrompt("/tmp/project", { model: "deepseek-v4-flash-vision-exp" }).includes("## UnderstandImage"),
+    false
+  );
+  assert.equal(
+    getSystemPrompt("/tmp/project", { model: "deepseek-v4-flash-vision-exp" }).includes("## ReadImage"),
+    true
+  );
+});
+
+test("multimodal config overrides model-based multimodal detection", () => {
+  // "off" forces non-multimodal behavior even for a multimodal model.
+  const forcedOffTools = getTools({ model: "custom-vision-model", multimodal: "off" }).map(
+    (tool) => tool.function.name
+  );
+  assert.equal(forcedOffTools.includes("UnderstandImage"), true);
+  assert.equal(forcedOffTools.includes("ReadImage"), false);
+  assert.equal(
+    getSystemPrompt("/tmp/project", { model: "custom-vision-model", multimodal: "off" }).includes("## UnderstandImage"),
+    true
+  );
+
+  // "on" forces multimodal behavior even for a non-multimodal model.
+  const forcedOnTools = getTools({ model: "deepseek-chat", multimodal: "on" }).map((tool) => tool.function.name);
+  assert.equal(forcedOnTools.includes("UnderstandImage"), false);
+  assert.equal(forcedOnTools.includes("ReadImage"), true);
+  assert.equal(
+    getSystemPrompt("/tmp/project", { model: "deepseek-chat", multimodal: "on" }).includes("## UnderstandImage"),
+    false
+  );
 });
 
 test("interactive prompt and tools include AskUserQuestion", () => {
@@ -77,6 +109,34 @@ test("getTools includes UpdatePlan with string plan schema", () => {
   assert.equal((tool.function.parameters.properties.plan as { type?: unknown }).type, "string");
 });
 
+test("getTools includes skill with the exact load-skill schema", () => {
+  const tool = getTools().find((candidate) => candidate.function.name === "skill");
+  assert.ok(tool);
+  assert.equal(
+    tool.function.description,
+    "Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill."
+  );
+  assert.deepEqual(tool.function.parameters.required, ["name"]);
+  assert.equal((tool.function.parameters.properties.name as { type?: unknown }).type, "string");
+  assert.equal(
+    (tool.function.parameters.properties.name as { description?: unknown }).description,
+    "The exact skill name from the available skills list."
+  );
+});
+
+test("buildSkillCatalogPrompt renders previous and new preloaded skills", () => {
+  const prompt = buildSkillCatalogPrompt([
+    { name: "skill-writer", description: "Write a SKILL.md" },
+    { name: "code-review", description: "Review code" },
+  ]);
+
+  assert.match(prompt, /<available_skills>/);
+  assert.match(prompt, /- `skill-writer`: Write a SKILL\.md/);
+  assert.match(prompt, /- `code-review`: Review code/);
+  assert.match(prompt, /call the `skill` tool with the exact skill name/);
+  assert.match(prompt, /A user may also invoke a skill directly/);
+});
+
 test("getTools requires bash sideEffects permission scopes", () => {
   const tool = getTools().find((candidate) => candidate.function.name === "bash");
   assert.ok(tool);
@@ -86,6 +146,8 @@ test("getTools requires bash sideEffects permission scopes", () => {
     items?: { enum?: unknown[] };
   };
   assert.equal(sideEffects.type, "array");
+  assert.equal(sideEffects.items?.enum?.includes("read-in-tmp"), true);
+  assert.equal(sideEffects.items?.enum?.includes("write-in-tmp"), true);
   assert.equal(sideEffects.items?.enum?.includes("write-out-cwd"), true);
   assert.equal(sideEffects.items?.enum?.includes("unknown"), true);
   const runInBackground = tool.function.parameters.properties.run_in_background as { type?: unknown };
@@ -121,21 +183,6 @@ test("getSystemPrompt does not include runtime context", () => {
   const prompt = getSystemPrompt("/tmp/project");
   assert.equal(prompt.includes("# Local Workspace Environment"), false);
   assert.equal(prompt.includes('"root path": "/tmp/project"'), false);
-});
-
-test("getDefaultSkillPrompt loads the default skill template", () => {
-  const prompt = getDefaultSkillPrompt();
-
-  assert.equal(prompt.includes("<karpathy-guidelines-skill>"), true);
-  assert.equal(prompt.includes("# Karpathy Guidelines"), true);
-  assert.equal(prompt.includes("Use the skill documents below to assist the user:"), true);
-  assert.equal(prompt.includes('path="templates/skills/'), false);
-});
-
-test("getDefaultSkillPrompt skips disabled default skills", () => {
-  const prompt = getDefaultSkillPrompt({ enabledSkills: { "karpathy-guidelines": false } });
-
-  assert.equal(prompt, "");
 });
 
 test("getPlanModePrompt loads the dedicated Plan Mode template", () => {
@@ -179,7 +226,7 @@ test("buildSkillDocumentsPrompt lists skill resources", () => {
     { name: "pdf", content: "# PDF Skill", path: skillPath, skillFilePath: skillPath },
   ]);
 
-  assert.equal(prompt.includes(`<pdf-skill path="${skillPath}">`), true);
+  assert.equal(prompt.includes(`<skill_content name="pdf" path="${skillPath}">`), true);
   assert.equal(prompt.includes("<skill_resources>"), true);
   assert.equal(prompt.includes("<file>scripts/extract.py</file>"), true);
   assert.equal(prompt.includes("<file>scripts/merge.py</file>"), true);
@@ -236,27 +283,29 @@ test("getSystemPrompt does not include current date guidance", () => {
   assert.equal(prompt.includes(expected), false);
 });
 
-test("getRuntimeContext includes current date and model guidance", () => {
+test("getRuntimeContext includes current date, model guidance, and additional working directories", () => {
   const now = new Date();
   const expectedDate = `今天是${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日。随着对话的进行，时间在流逝。`;
-  const prompt = getRuntimeContext("/tmp/project", "deepseek-v4-pro");
+  const prompt = getRuntimeContext("/tmp/project", "deepseek-v4-pro", ["../shared", "/opt/project"]);
   assert.equal(prompt.includes(expectedDate), true);
   assert.equal(prompt.includes("当前LLM模型为deepseek-v4-pro，对话中可通过/model命令切换模型。"), true);
   assert.equal(prompt.includes("# Local Workspace Environment"), true);
   assert.equal(prompt.includes('"root path": "/tmp/project"'), true);
+  assert.equal(prompt.includes(JSON.stringify(path.resolve("/tmp/project", "../shared"))), true);
+  assert.equal(prompt.includes(JSON.stringify(path.resolve("/tmp/project", "/opt/project"))), true);
 });
 
 test("getSystemPrompt renders Read docs for non-multimodal models", () => {
   const prompt = getSystemPrompt("/tmp/project", { model: "deepseek-chat" });
-  assert.equal(prompt.includes("the current model is not multimodal"), true);
+  assert.equal(prompt.includes("This tool does not read image files"), true);
   assert.equal(prompt.includes("the contents are presented visually"), false);
 });
 
 test("runtime prompt assets live under templates", () => {
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "web-search.md")), true);
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "read.md.ejs")), true);
+  assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "read-image.md.ejs")), true);
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "prompts", "init_command.md.ejs")), true);
-  assert.equal(fs.existsSync(path.join(repoRoot, "templates", "skills", "karpathy-guidelines.md")), true);
   assert.equal(fs.existsSync(path.join(repoRoot, "templates", "tools", "read.md")), false);
   assert.equal(fs.existsSync(path.join(repoRoot, "docs", "tools")), false);
   assert.equal(fs.existsSync(path.join(repoRoot, "docs", "prompts")), false);

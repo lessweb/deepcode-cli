@@ -1,6 +1,6 @@
 {
   "name": "deepcode-vscode",
-  "version": "0.1.23",
+  "version": "0.3.1",
   "publisher": "vegamo",
   "displayName": "Deep Code",
   "description": "Deep Code VSCode companion — AI-assisted development in your editor",
@@ -32,7 +32,7 @@
   "icon": "resources/deepcoding_icon.png",
   "activationEvents": [],
   "files": [
-    "out/extension.js",
+    "out/**",
     "resources/**",
     "templates/**",
     "README.md",
@@ -83,7 +83,7 @@
     "typecheck": "tsc -p ./ --noEmit",
     "build": "node ../../scripts/esbuild-vscode.config.js",
     "prepublishOnly": "npm run build",
-    "package": "vsce package --no-dependencies",
+    "package": "node ../../scripts/package-vscode.js",
     "test": "node src/tests/run-tests.mjs"
   },
   "dependencies": {

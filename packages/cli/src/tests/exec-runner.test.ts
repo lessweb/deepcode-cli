@@ -8,7 +8,7 @@ import type {
   SessionStatus,
   UserPromptContent,
 } from "@vegamo/deepcode-core";
-import { runExecMode, type ExecRunnerDependencies } from "../exec-runner";
+import { formatPermissionConfirmationError, runExecMode, type ExecRunnerDependencies } from "../exec-runner";
 import type { ExecInputStream } from "../exec-input";
 
 const RESUME_ID = "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6";
@@ -19,6 +19,7 @@ function createSettings(
     deny: [],
     ask: [],
     defaultMode: "allowAll",
+    addWorkingDirs: [],
   }
 ): ResolvedDeepcodingSettings {
   return {
@@ -31,6 +32,13 @@ function createSettings(
     reasoningEffort: "high",
     debugLogEnabled: false,
     telemetryEnabled: false,
+    multimodal: "default",
+    filesApiEnabled: false,
+    filesApiTimeoutMs: 60_000,
+    fileExpiresAfterSeconds: 604_800,
+    fileRefreshMarginSeconds: 3_600,
+    fileQuotaCleanupBatch: 100,
+    maxRequestFilesBytes: 128 * 1024 * 1024,
     permissions,
     enabledSkills: {},
     statusline: { enabled: false, refreshMs: 1000, separator: " | ", providers: [] },
@@ -271,7 +279,7 @@ test("runExecMode rejects a missing fork source and disposes resources", async (
 test("runExecMode reports the tool, action, scope, and reason for required permission", async () => {
   const harness = createHarness({
     finalStatus: "ask_permission",
-    permissions: { allow: [], deny: [], ask: ["network"], defaultMode: "allowAll" },
+    permissions: { allow: [], deny: [], ask: ["network"], defaultMode: "allowAll", addWorkingDirs: [] },
     askPermissions: [
       {
         toolCallId: "weather-search",
@@ -294,6 +302,29 @@ test("runExecMode reports the tool, action, scope, and reason for required permi
   assert.match(harness.stderr[0], /network: network access/);
   assert.match(harness.stderr[0], /"network" is configured in permissions\.ask/);
   assert.equal(harness.disposed, 1);
+});
+
+test("formatPermissionConfirmationError describes temporary directory scopes", () => {
+  const message = formatPermissionConfirmationError(
+    [
+      {
+        toolCallId: "write-tmp",
+        name: "write",
+        command: "write /tmp/output.txt",
+        scopes: ["write-in-tmp"],
+      },
+    ],
+    {
+      allow: [],
+      deny: [],
+      ask: ["write-in-tmp"],
+      defaultMode: "allowAll",
+      addWorkingDirs: [],
+    }
+  );
+
+  assert.match(message, /write-in-tmp: write files inside system temporary directories/);
+  assert.match(message, /"write-in-tmp" is configured in permissions\.ask/);
 });
 
 test("runExecMode treats unexpected user-input states as failures", async () => {

@@ -90,10 +90,11 @@ After the plan is output, Deep Code automatically shows a choice dialog—no ext
 | Option | Effect |
 | ------ | ------ |
 | **1. implement this plan** | Leave Plan Mode and automatically send an implementation prompt so the AI starts coding |
-| **2. stay in Plan mode** | Stay in Plan Mode to continue refining the plan |
-| **3. switch to Default mode** | Leave Plan Mode and return to Default mode without starting implementation |
+| **2. clear context and implement** | Preserve the current session, create a new session carrying only the approved plan, and start implementing in Default mode |
+| **3. stay in Plan mode** | Stay in Plan Mode to continue refining the plan |
+| **4. switch to Default mode** | Leave Plan Mode and return to Default mode without starting implementation |
 
-You can press `1-3` to select directly, or use `↑/↓` to move the cursor and `Enter` to confirm. Pressing `Esc` is equivalent to choosing "stay in Plan mode."
+You can press `1-4` to select directly, or use `↑/↓` to move the cursor and `Enter` to confirm. Pressing `Esc` is equivalent to choosing "stay in Plan mode." After clearing context, the original Plan session remains available through `/resume`. The new session does not inherit its conversation messages.
 
 ## Plan Mode vs. UpdatePlan Tool
 

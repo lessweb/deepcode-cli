@@ -1,6 +1,9 @@
 import type { ChatCompletionMessageParam, ChatCompletionContentPart } from "openai/resources/chat/completions";
-import { supportsMultimodal } from "./model-capabilities";
+import { supportsMultimodal, type MultimodalMode } from "./model-capabilities";
 import type { SessionMessage } from "../session";
+
+const ANSWERS_SYSTEM_MESSAGE =
+  "User has answered your questions. You can now continue with the user's answers in mind.";
 
 export type OpenAIMessageConverterOptions = {
   /** Optional callback to render the /init command prompt template. */
@@ -23,7 +26,12 @@ export class OpenAIMessageConverter {
    * Build the OpenAI messages array from session messages, applying compaction
    * filtering, tool pairing, and format conversion.
    */
-  buildMessages(messages: SessionMessage[], thinkingEnabled: boolean, model: string): ChatCompletionMessageParam[] {
+  buildMessages(
+    messages: SessionMessage[],
+    thinkingEnabled: boolean,
+    model: string,
+    multimodal: MultimodalMode = "default"
+  ): ChatCompletionMessageParam[] {
     const activeMessages = messages.filter((message) => !message.compacted);
     const toolPairings = this.pairToolMessages(activeMessages);
     const openAIMessages: ChatCompletionMessageParam[] = [];
@@ -34,7 +42,12 @@ export class OpenAIMessageConverter {
         continue;
       }
 
-      openAIMessages.push(this.convertMessage(message, thinkingEnabled, model));
+      openAIMessages.push(this.convertMessage(message, thinkingEnabled, model, multimodal));
+      if (message.role === "user" && message.meta?.isAnswers) {
+        openAIMessages.push(
+          this.convertMessage(this.buildAnswersSystemMessage(message), thinkingEnabled, model, multimodal)
+        );
+      }
 
       const toolCalls = this.getAssistantToolCalls(message);
       if (toolCalls.length === 0) {
@@ -49,7 +62,7 @@ export class OpenAIMessageConverter {
 
         const pairedToolIndex = toolPairings.get(this.buildToolPairingKey(index, toolCallIndex));
         if (pairedToolIndex != null) {
-          openAIMessages.push(this.convertMessage(activeMessages[pairedToolIndex], thinkingEnabled, model));
+          openAIMessages.push(this.convertMessage(activeMessages[pairedToolIndex], thinkingEnabled, model, multimodal));
           continue;
         }
 
@@ -87,7 +100,12 @@ export class OpenAIMessageConverter {
   // Private helpers
   // ---------------------------------------------------------------------------
 
-  private convertMessage(message: SessionMessage, thinkingEnabled: boolean, model: string): ChatCompletionMessageParam {
+  private convertMessage(
+    message: SessionMessage,
+    thinkingEnabled: boolean,
+    model: string,
+    multimodal: MultimodalMode = "default"
+  ): ChatCompletionMessageParam {
     const content = this.renderContent(message);
     const base: ChatCompletionMessageParam = {
       role: message.role,
@@ -120,7 +138,7 @@ export class OpenAIMessageConverter {
       const params = Array.isArray(message.contentParams) ? message.contentParams : [message.contentParams];
       for (const param of params) {
         const part = param as ChatCompletionContentPart;
-        if (part && (part.type !== "image_url" || supportsMultimodal(model))) {
+        if (part && (part.type !== "image_url" || supportsMultimodal(model, multimodal))) {
           contentParts.push(part);
         }
       }
@@ -136,6 +154,21 @@ export class OpenAIMessageConverter {
       return this.options.renderInitPrompt?.() ?? "";
     }
     return message.content ?? "";
+  }
+
+  private buildAnswersSystemMessage(message: SessionMessage): SessionMessage {
+    return {
+      id: `${message.id}:answers`,
+      sessionId: message.sessionId,
+      role: "system",
+      content: ANSWERS_SYSTEM_MESSAGE,
+      contentParams: null,
+      messageParams: null,
+      compacted: false,
+      visible: false,
+      createTime: message.createTime,
+      updateTime: message.updateTime,
+    };
   }
 
   private pairToolMessages(messages: SessionMessage[]): Map<string, number> {

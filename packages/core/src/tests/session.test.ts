@@ -4,10 +4,13 @@ import { execFileSync } from "node:child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import sharp from "sharp";
 import { GitFileHistory } from "../common/file-history";
 import { clearSessionState } from "../common/state";
 import { getSystemPrompt } from "../prompt";
 import { getProjectCode, SessionManager, type SessionMessage } from "../session";
+import type { MultimodalMode } from "../common/model-capabilities";
 
 const originalFetch = globalThis.fetch;
 const originalConsoleWarn = console.warn;
@@ -62,24 +65,24 @@ test("getProjectCode shortens long project roots for Windows-compatible storage 
   assert.notEqual(projectCode, longRoot.replace(/[\\/]/g, "-").replace(/:/g, ""));
 });
 
-test("SessionManager preserves structured system content when building OpenAI messages", () => {
+test("SessionManager preserves structured user content when building OpenAI messages", () => {
   const manager = new SessionManager({
     projectRoot: process.cwd(),
     createOpenAIClient: () => ({
       client: null,
-      model: "test-model",
+      model: "test-vision-model",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-vision-model" }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
 
   const messages: SessionMessage[] = [
     {
-      id: "system-image",
+      id: "user-image",
       sessionId: "session-1",
-      role: "system",
+      role: "user",
       content: "The read tool has loaded `pixel.png`.",
       contentParams: [
         {
@@ -95,13 +98,13 @@ test("SessionManager preserves structured system content when building OpenAI me
     },
   ];
 
-  const openAIMessages = (manager as any).buildOpenAIMessages(messages, false, "test-model") as Array<{
+  const openAIMessages = (manager as any).buildOpenAIMessages(messages, false, "test-vision-model") as Array<{
     role: string;
     content: unknown;
   }>;
 
   assert.equal(openAIMessages.length, 1);
-  assert.equal(openAIMessages[0]?.role, "system");
+  assert.equal(openAIMessages[0]?.role, "user");
   assert.deepEqual(openAIMessages[0]?.content, [
     { type: "text", text: "The read tool has loaded `pixel.png`." },
     {
@@ -109,6 +112,32 @@ test("SessionManager preserves structured system content when building OpenAI me
       image_url: { url: "data:image/png;base64,abc123" },
     },
   ]);
+});
+
+test("SessionManager builds hidden user messages for image follow-ups", () => {
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({
+      client: null,
+      model: "test-model",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+
+  const message = (manager as any).buildFollowUpMessage("session-1", {
+    role: "user",
+    content: "The read tool has loaded `pixel.png`.",
+    contentParams: [{ type: "image_url", image_url: { url: "data:image/png;base64,abc123" } }],
+    visible: false,
+  });
+
+  assert.equal(message.role, "user");
+  assert.equal(message.visible, false);
+  assert.equal(message.meta, undefined);
+  assert.equal(message.checkpointHash, undefined);
 });
 
 test("non-interactive SessionManager removes AskUserQuestion docs from restored requests", () => {
@@ -561,7 +590,7 @@ test("SessionManager resolves bundled skill prompts", () => {
     description: "Write skills",
   });
 
-  assert.match(prompt, /<skill-writer-skill/);
+  assert.match(prompt, /<skill_content name="skill-writer"/);
   assert.match(prompt, /# Skill Writer/);
 });
 
@@ -593,6 +622,24 @@ test("SessionManager persists Plan Mode and appends prompts only on mode transit
   messages = manager.listSessionMessages(sessionId);
   assert.equal(manager.getSession(sessionId)?.planMode, false);
   assert.equal(messages.filter((message) => message.content === PLAN_MODE_OFF_STATUS_MESSAGE).length, 1);
+});
+
+test("SessionManager tags AskUserQuestion answer messages", async () => {
+  const workspace = createTempDir("deepcode-answers-workspace-");
+  const home = createTempDir("deepcode-answers-home-");
+  setHomeDir(home);
+
+  const manager = createMockedClientSessionManager(workspace, [
+    createChatResponse("continued", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+  ]);
+  const sessionId = await manager.createSession({
+    text: "Questions 1/1 answered\n - Continue?\n   answer: Yes",
+    isAnswers: true,
+  });
+  const message = manager.listSessionMessages(sessionId).find((item) => item.role === "user");
+
+  assert.equal(message?.meta?.isAnswers, true);
+  assert.equal(message?.meta?.userPrompt?.isAnswers, true);
 });
 
 test("SessionManager excludes the former bundled plan skill and defaults legacy sessions to Default mode", async () => {
@@ -671,6 +718,7 @@ test("SessionManager excludes disabled skills by resolved skill name", async () 
         "skill-writer": false,
         "renamed-disabled": false,
         "deepcode-self-refer": false,
+        "image-generator": false,
         "skill-digester": false,
         plan: false,
         "enabled-skill": true,
@@ -711,7 +759,7 @@ test("SessionManager keeps implicit opt-out skills available for manual invocati
     .filter((message) => message.role === "system" && message.meta?.skill?.name === "manual-only");
 
   assert.equal(skillMessages.length, 1);
-  assert.match(skillMessages[0]?.content ?? "", /<manual-only-skill/);
+  assert.match(skillMessages[0]?.content ?? "", /<skill_content name="manual-only"/);
   assert.doesNotMatch(skillMessages[0]?.content ?? "", /allow-implicit-invocation/);
 });
 
@@ -755,8 +803,243 @@ test("SessionManager excludes implicit opt-out skills from automatic matching ca
 
   assert.match(matchingPrompt, /"name": "auto-skill"/);
   assert.doesNotMatch(matchingPrompt, /"name": "manual-only"/);
-  assert.equal(countLoadedSkillMessages(manager.listSessionMessages(sessionId), "auto-skill"), 1);
+  assert.equal(countLoadedSkillMessages(manager.listSessionMessages(sessionId), "auto-skill"), 0);
   assert.equal(countLoadedSkillMessages(manager.listSessionMessages(sessionId), "manual-only"), 0);
+  const catalogMessages = manager
+    .listSessionMessages(sessionId)
+    .filter((message) => message.role === "system" && Array.isArray(message.meta?.skillCatalog));
+  assert.equal(catalogMessages.length, 1);
+  const catalogNames = catalogMessages[0]?.meta?.skillCatalog?.map((entry) => entry.name) ?? [];
+  assert.deepEqual(catalogNames, ["auto-skill"]);
+  assert.equal(catalogMessages[0]?.visible, false);
+  assert.match(catalogMessages[0]?.content ?? "", /<available_skills>/);
+  assert.match(catalogMessages[0]?.content ?? "", /`auto-skill`/);
+});
+
+test("replySession appends the skill catalog only when content changes", async () => {
+  const workspace = createTempDir("deepcode-skill-catalog-change-workspace-");
+  const home = createTempDir("deepcode-skill-catalog-change-home-");
+  setHomeDir(home);
+  globalThis.fetch = (async () => ({ ok: true, text: async () => "" }) as Response) as typeof fetch;
+
+  const matchingNames: string[][] = [["skill-writer"], [], ["image-generator"]];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: any) => {
+          if (isSkillMatchingRequest(request)) {
+            return createSkillMatchingResponse(matchingNames.shift() ?? []);
+          }
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
+  const manager = createMockedClientSessionManagerWithClient(workspace, client);
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "first turn" });
+  const listCatalogMessages = () =>
+    manager
+      .listSessionMessages(sessionId)
+      .filter((message) => message.role === "system" && Array.isArray(message.meta?.skillCatalog));
+
+  assert.equal(listCatalogMessages().length, 1);
+
+  await manager.replySession(sessionId, { text: "second turn with no new skill" });
+  assert.equal(listCatalogMessages().length, 1);
+
+  await manager.replySession(sessionId, { text: "third turn matches another skill" });
+  const catalogs = listCatalogMessages();
+  assert.equal(catalogs.length, 2);
+  assert.deepEqual(catalogs[1]?.meta?.skillCatalog?.map((entry) => entry.name) ?? [], [
+    "skill-writer",
+    "image-generator",
+  ]);
+  assert.match(catalogs[1]?.content ?? "", /`skill-writer`/);
+  assert.match(catalogs[1]?.content ?? "", /`image-generator`/);
+});
+
+test("skill tool stores the full document and metadata in its tool message", async () => {
+  const workspace = createTempDir("deepcode-skill-load-by-name-workspace-");
+  const home = createTempDir("deepcode-skill-load-by-name-home-");
+  setHomeDir(home);
+
+  const assistantMessages: SessionMessage[] = [];
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: null,
+      model: "test-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+      machineId: "machine-id-skill-load-by-name",
+    }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: (message) => {
+      assistantMessages.push(message);
+    },
+  });
+
+  const sessionId = await manager.createSession({ text: "" });
+  (manager as any).sessionControllers.set(sessionId, new AbortController());
+  await (manager as any).appendToolMessages(sessionId, [
+    {
+      id: "call-skill",
+      type: "function",
+      function: { name: "skill", arguments: JSON.stringify({ name: "skill-writer" }) },
+    },
+  ]);
+  (manager as any).sessionControllers.delete(sessionId);
+
+  const toolMessage = manager
+    .listSessionMessages(sessionId)
+    .find((message) => message.role === "tool" && message.meta?.skill?.name === "skill-writer");
+  assert.ok(toolMessage);
+  const result = JSON.parse(toolMessage.content ?? "{}");
+  assert.equal(result.ok, true);
+  assert.equal(result.name, "skill");
+  assert.match(result.output ?? "", /<skill_content name="skill-writer"/);
+  assert.equal(result.metadata?.skill?.isLoaded, true);
+  assert.equal(toolMessage.meta?.skill?.isLoaded, true);
+  assert.equal(
+    manager
+      .listSessionMessages(sessionId)
+      .some((message) => message.role === "system" && message.meta?.skill?.name === "skill-writer"),
+    false
+  );
+  assert.equal(
+    assistantMessages.some((message) => message.id === toolMessage.id),
+    true
+  );
+  assert.equal((await manager.listSkills(sessionId)).find((skill) => skill.name === "skill-writer")?.isLoaded, true);
+  assert.equal(
+    assistantMessages.some((message) => message.role === "system" && message.meta?.skillCatalog),
+    false
+  );
+
+  const missing = await (manager as any).loadSkillByName(sessionId, "not-a-real-skill");
+  assert.equal(missing.ok, false);
+  assert.match(missing.error ?? "", /Unknown skill: not-a-real-skill/);
+});
+
+test("skill tool avoids duplicate loads within the same tool call batch", async () => {
+  const workspace = createTempDir("deepcode-skill-batch-dedupe-workspace-");
+  const home = createTempDir("deepcode-skill-batch-dedupe-home-");
+  setHomeDir(home);
+
+  const manager = createSessionManager(workspace, "machine-id-skill-batch-dedupe");
+  const sessionId = await manager.createSession({ text: "" });
+  (manager as any).sessionControllers.set(sessionId, new AbortController());
+  await (manager as any).appendToolMessages(
+    sessionId,
+    ["first", "second"].map((id) => ({
+      id,
+      type: "function",
+      function: { name: "skill", arguments: JSON.stringify({ name: "skill-writer" }) },
+    }))
+  );
+  (manager as any).sessionControllers.delete(sessionId);
+
+  const results = manager
+    .listSessionMessages(sessionId)
+    .filter((message) => message.role === "tool")
+    .map((message) => JSON.parse(message.content ?? "{}"));
+  assert.equal(results.length, 2);
+  assert.match(results[0]?.output ?? "", /<skill_content name="skill-writer"/);
+  assert.equal(results[1]?.output, "Skill already loaded: skill-writer.");
+  assert.equal(countLoadedSkillMessages(manager.listSessionMessages(sessionId), "skill-writer"), 1);
+});
+
+test("compactSession does not mark skill catalog messages compacted", async () => {
+  const workspace = createTempDir("deepcode-skill-catalog-compact-workspace-");
+  const home = createTempDir("deepcode-skill-catalog-compact-home-");
+  setHomeDir(home);
+  globalThis.fetch = (async () => ({ ok: true, text: async () => "" }) as Response) as typeof fetch;
+
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: any) => {
+          if (isSkillMatchingRequest(request)) {
+            return createSkillMatchingResponse([]);
+          }
+          return createChatResponse("<analysis>x</analysis>\ncompact summary", {
+            prompt_tokens: 1,
+            completion_tokens: 1,
+            total_tokens: 2,
+          });
+        },
+      },
+    },
+  };
+  const manager = createMockedClientSessionManagerWithClient(workspace, client);
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ text: "hello" });
+  const now = new Date().toISOString();
+  const append = (message: Record<string, unknown>) => (manager as any).appendSessionMessage(sessionId, message);
+  append({
+    id: "catalog",
+    sessionId,
+    role: "system",
+    content: "catalog content",
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: false,
+    createTime: now,
+    updateTime: now,
+    meta: { skillCatalog: [{ name: "skill-writer", description: "Write skills" }] },
+  });
+  append({
+    id: "assistant-1",
+    sessionId,
+    role: "assistant",
+    content: "first reply",
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  });
+  append({
+    id: "tool-1",
+    sessionId,
+    role: "tool",
+    content: "tool result",
+    contentParams: null,
+    messageParams: { tool_call_id: "call-1" },
+    compacted: false,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  });
+  append({
+    id: "assistant-2",
+    sessionId,
+    role: "assistant",
+    content: "final reply",
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: now,
+    updateTime: now,
+  });
+
+  await (manager as any).compactSession(sessionId);
+
+  const messages = manager.listSessionMessages(sessionId);
+  const catalogMessage = messages.find((message) => message.id === "catalog");
+  const assistantMessage = messages.find((message) => message.id === "assistant-1");
+  const toolMessage = messages.find((message) => message.id === "tool-1");
+
+  assert.equal(catalogMessage?.compacted, false);
+  assert.equal(assistantMessage?.compacted, true);
+  assert.equal(toolMessage?.compacted, true);
 });
 
 test("SessionManager dispose disconnects MCP servers", async () => {
@@ -1164,55 +1447,17 @@ test("createSession appends default system prompts in prefix-cache-friendly orde
     .filter((message) => message.role === "system")
     .map((message) => message.content ?? "");
 
-  assert.equal(systemContents.length >= 4, true);
+  assert.equal(systemContents.length >= 3, true);
   assert.match(systemContents[0] ?? "", /# Available Tools/);
   assert.doesNotMatch(systemContents[0] ?? "", /# Local Workspace Environment/);
   assert.doesNotMatch(systemContents[0] ?? "", /当前LLM模型为test-model/);
-  assert.match(systemContents[1] ?? "", /<karpathy-guidelines-skill>/);
-  assert.match(systemContents[1] ?? "", /# Karpathy Guidelines/);
-  assert.doesNotMatch(systemContents[1] ?? "", /path="templates\/skills\//);
-  assert.doesNotMatch(systemContents[1] ?? "", /当前LLM模型为test-model/);
-  assert.match(systemContents[2] ?? "", /# Local Workspace Environment/);
-  assert.match(systemContents[2] ?? "", /当前LLM模型为test-model/);
-  const environmentJsonMatch = (systemContents[2] ?? "").match(/```json\n([\s\S]+?)\n```/);
+  assert.match(systemContents[1] ?? "", /# Local Workspace Environment/);
+  assert.match(systemContents[1] ?? "", /当前LLM模型为test-model/);
+  const environmentJsonMatch = (systemContents[1] ?? "").match(/```json\n([\s\S]+?)\n```/);
   assert.ok(environmentJsonMatch);
   const environmentInfo = JSON.parse(environmentJsonMatch[1] ?? "{}") as { "root path"?: string };
   assert.equal(environmentInfo["root path"], workspace);
-  assert.equal(systemContents[3], "root project instructions");
-});
-
-test("createSession skips disabled default skills", async () => {
-  const workspace = createTempDir("deepcode-disabled-default-skill-workspace-");
-  const home = createTempDir("deepcode-disabled-default-skill-home-");
-  setHomeDir(home);
-
-  const manager = new SessionManager({
-    projectRoot: workspace,
-    createOpenAIClient: () => ({
-      client: null,
-      model: "test-model",
-      baseURL: "https://api.deepseek.com",
-      thinkingEnabled: false,
-      machineId: "machine-id-disabled-default-skill",
-    }),
-    getResolvedSettings: () => ({
-      model: "test-model",
-      enabledSkills: { "karpathy-guidelines": false },
-    }),
-    renderMarkdown: (text) => text,
-    onAssistantMessage: () => {},
-  });
-
-  const sessionId = await manager.createSession({ text: "hello" });
-  const systemContents = manager
-    .listSessionMessages(sessionId)
-    .filter((message) => message.role === "system")
-    .map((message) => message.content ?? "");
-
-  assert.equal(systemContents.length, 2);
-  assert.match(systemContents[0] ?? "", /# Available Tools/);
-  assert.doesNotMatch(systemContents.join("\n"), /<karpathy-guidelines-skill>/);
-  assert.match(systemContents[1] ?? "", /# Local Workspace Environment/);
+  assert.equal(systemContents[2], "root project instructions");
 });
 
 test("createSession includes agent instructions in the skill matching system prompt", async () => {
@@ -2383,6 +2628,61 @@ test("activateSession temporarily asks before allowed writes in Plan Mode", asyn
   assert.deepEqual(assistant?.meta?.permissions, [{ toolCallId: "call-write", permission: "ask" }]);
 });
 
+test(
+  "activateSession does not force allowed temporary writes to ask in Plan Mode",
+  { skip: process.platform === "win32" },
+  async () => {
+    const workspace = createTempDir("deepcode-plan-tmp-permission-workspace-");
+    const home = createTempDir("deepcode-plan-tmp-permission-home-");
+    const targetPath = path.join("/tmp", `deepcode-plan-${crypto.randomUUID()}.txt`);
+    tempDirs.push(targetPath);
+    setHomeDir(home);
+
+    const manager = createPermissionSessionManager(
+      workspace,
+      [
+        {
+          choices: [
+            {
+              message: {
+                content: "",
+                tool_calls: [
+                  {
+                    id: "call-write-tmp",
+                    type: "function",
+                    function: {
+                      name: "write",
+                      arguments: JSON.stringify({ file_path: targetPath, content: "planned" }),
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        },
+        createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
+      ],
+      {
+        allow: ["write-in-tmp"],
+        deny: [],
+        ask: [],
+        defaultMode: "allowAll",
+      }
+    );
+
+    const sessionId = await manager.createSession({ text: "Plan this change", planMode: true });
+    const session = manager.getSession(sessionId);
+    const assistant = manager
+      .listSessionMessages(sessionId)
+      .find((message) => message.role === "assistant" && (message.messageParams as any)?.tool_calls);
+
+    assert.equal(session?.status, "completed");
+    assert.deepEqual(assistant?.meta?.permissions, [{ toolCallId: "call-write-tmp", permission: "allow" }]);
+    assert.equal(fs.readFileSync(targetPath, "utf8"), "planned");
+  }
+);
+
 test("SessionManager preserves permission_denied status when sessions are reloaded", async () => {
   const workspace = createTempDir("deepcode-permission-denied-workspace-");
   const home = createTempDir("deepcode-permission-denied-home-");
@@ -2908,6 +3208,23 @@ test("UnderstandImage tool params show image_path instead of prompt", () => {
   assert.equal(toolMessage.meta?.paramsMd, imagePath);
 });
 
+test("ReadImage tool params show a workspace-relative file path", () => {
+  const manager = createSessionManager(process.cwd(), "machine-id-read-image-params");
+  const imagePath = path.join(process.cwd(), "images", "screenshot.png");
+
+  const toolMessage = (manager as any).buildToolMessage(
+    "session-1",
+    "call-read-image-1",
+    JSON.stringify({ ok: true, name: "ReadImage", output: "Image loaded." }),
+    {
+      name: "ReadImage",
+      arguments: JSON.stringify({ file_path: imagePath }),
+    }
+  ) as SessionMessage;
+
+  assert.equal(toolMessage.meta?.paramsMd, path.join("images", "screenshot.png"));
+});
+
 test("LLM tool calls without ids receive generated 32 character ids", async () => {
   const workspace = createTempDir("deepcode-tool-call-id-workspace-");
   const home = createTempDir("deepcode-tool-call-id-home-");
@@ -3263,10 +3580,11 @@ test("SessionManager streams chat completions and counts reasoning progress", as
   const client = {
     chat: {
       completions: {
-        create: async (request: Record<string, unknown>) => {
+        create: async (request: Record<string, unknown>, options?: Record<string, unknown>) => {
           assert.equal(request.stream, true);
           assert.deepEqual(request.stream_options, { include_usage: true });
           assert.equal(request.temperature, 0.25);
+          assert.equal(options?.maxRetries, 0);
           return createChatStreamResponse([
             { choices: [{ delta: { reasoning_content: "思考" } }] },
             { choices: [{ delta: { content: "hello" } }] },
@@ -3317,6 +3635,234 @@ test("SessionManager streams chat completions and counts reasoning progress", as
   );
   assert.equal(progressEvents[1]?.estimatedTokens, 1);
   assert.equal(progressEvents[2]?.formattedTokens, "3");
+});
+
+test("SessionManager retries a disconnected stream and discards the partial response", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(Math, "random", () => 0.5);
+  let calls = 0;
+  let notifyRetry!: () => void;
+  const retryNotified = new Promise<void>((resolve) => {
+    notifyRetry = resolve;
+  });
+  const retryEvents: Array<{ attempt: number; error: string }> = [];
+  const assistantMessages: SessionMessage[] = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async () => {
+          calls += 1;
+          if (calls === 1) {
+            return (async function* () {
+              yield { choices: [{ delta: { content: "partial" } }] };
+              throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+            })();
+          }
+          return createChatStreamResponse([
+            { choices: [{ delta: { content: "complete" }, finish_reason: "stop" }] },
+            { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+          ]);
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: (message) => assistantMessages.push(message),
+    onLlmRetry: (event) => {
+      retryEvents.push({ attempt: event.attempt, error: event.error });
+      notifyRetry();
+    },
+  });
+
+  const responsePromise = (manager as any).createChatCompletionStream(
+    client,
+    { model: "test-model" },
+    undefined,
+    "retry-session"
+  );
+  await retryNotified;
+  t.mock.timers.tick(800);
+  const response = await responsePromise;
+
+  assert.equal(calls, 2);
+  assert.deepEqual(retryEvents, [{ attempt: 1, error: "read ECONNRESET" }]);
+  assert.equal(assistantMessages[0]?.content, "Request failed: read ECONNRESET");
+  assert.equal(assistantMessages[0]?.sessionId, "retry-session");
+  assert.equal(response.choices[0].message.content, "complete");
+});
+
+test("SessionManager stops after five retries", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  t.mock.method(Math, "random", () => 0.5);
+  let calls = 0;
+  let notifyRetry!: () => void;
+  let retryNotified = new Promise<void>((resolve) => {
+    notifyRetry = resolve;
+  });
+  const retryEvents: Array<{ attempt: number; delayMs: number }> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async () => {
+          calls += 1;
+          throw Object.assign(new Error("Bad Gateway"), { status: 502 });
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    onLlmRetry: (event) => {
+      retryEvents.push({ attempt: event.attempt, delayMs: event.delayMs });
+      notifyRetry();
+    },
+  });
+
+  const responsePromise = (manager as any).createChatCompletionStream(client, { model: "test-model" });
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    await retryNotified;
+    const event = retryEvents.at(-1)!;
+    assert.equal(event.attempt, attempt);
+    retryNotified = new Promise<void>((resolve) => {
+      notifyRetry = resolve;
+    });
+    t.mock.timers.tick(event.delayMs);
+  }
+
+  await assert.rejects(responsePromise, (error: Error & { status?: number }) => error.status === 502);
+  assert.equal(calls, 6);
+  assert.deepEqual(
+    retryEvents.map((event) => event.attempt),
+    [1, 2, 3, 4, 5]
+  );
+});
+
+test("SessionManager honors Retry-After when scheduling a retry", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  let calls = 0;
+  let retryDelayMs = 0;
+  let notifyRetry!: () => void;
+  const retryNotified = new Promise<void>((resolve) => {
+    notifyRetry = resolve;
+  });
+  const client = {
+    chat: {
+      completions: {
+        create: async () => {
+          calls += 1;
+          if (calls === 1) {
+            throw Object.assign(new Error("Rate limited"), {
+              status: 429,
+              headers: new Headers({ "retry-after": "60" }),
+            });
+          }
+          return createChatStreamResponse([
+            { choices: [{ delta: { content: "complete" }, finish_reason: "stop" }] },
+            { choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } },
+          ]);
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    onLlmRetry: (event) => {
+      retryDelayMs = event.delayMs;
+      notifyRetry();
+    },
+  });
+
+  const responsePromise = (manager as any).createChatCompletionStream(client, { model: "test-model" });
+  await retryNotified;
+  assert.equal(retryDelayMs, 60_000);
+  t.mock.timers.tick(retryDelayMs);
+  const response = await responsePromise;
+
+  assert.equal(calls, 2);
+  assert.equal(response.choices[0].message.content, "complete");
+});
+
+test("SessionManager treats a clean EOF without a terminal chunk as a disconnected stream", async () => {
+  const controller = new AbortController();
+  let retryError = "";
+  const client = {
+    chat: {
+      completions: {
+        create: async () => createChatStreamResponse([{ choices: [{ delta: { content: "partial" } }] }]),
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    onLlmRetry: (event) => {
+      retryError = event.error;
+      controller.abort();
+    },
+  });
+
+  await assert.rejects(
+    (manager as any).createChatCompletionStream(client, { model: "test-model" }, { signal: controller.signal }),
+    (error: Error) => error.name === "AbortError"
+  );
+  assert.equal(retryError, "Model stream disconnected before completion.");
+});
+
+test("SessionManager retries a stream after sixty seconds without data", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const controller = new AbortController();
+  let retryError = "";
+  const client = {
+    chat: {
+      completions: {
+        create: async () => ({
+          [Symbol.asyncIterator]() {
+            return this;
+          },
+          next() {
+            return new Promise<IteratorResult<unknown>>(() => {});
+          },
+        }),
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    onLlmRetry: (event) => {
+      retryError = event.error;
+      controller.abort();
+    },
+  });
+
+  const responsePromise = (manager as any).createChatCompletionStream(
+    client,
+    { model: "test-model" },
+    { signal: controller.signal }
+  );
+  await Promise.resolve();
+  t.mock.timers.tick(60_000);
+
+  await assert.rejects(responsePromise, (error: Error) => error.name === "AbortError");
+  assert.equal(retryError, "Model stream was idle for 60 seconds.");
 });
 
 test("SessionManager persists session and user message before skill matching is cancelled", async () => {
@@ -3540,7 +4086,7 @@ test("SessionManager.deleteSession removes the messages file", () => {
   assert.equal(fs.existsSync(messagePath), false);
 });
 
-test("non-multimodal sessions persist pasted images, append paths, and clean them on delete", async () => {
+test("sessions persist pasted images as file URLs without changing user content", async () => {
   const workspace = createTempDir("deepcode-session-image-workspace-");
   const home = createTempDir("deepcode-session-image-home-");
   setHomeDir(home);
@@ -3548,6 +4094,7 @@ test("non-multimodal sessions persist pasted images, append paths, and clean the
   (manager as any).activateSession = async () => {};
 
   const sessionId = await manager.createSession({
+    text: "Inspect these images",
     imageUrls: ["data:image/png;base64,aGVsbG8=", "data:image/webp;base64,d29ybGQ="],
   });
   const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
@@ -3556,32 +4103,350 @@ test("non-multimodal sessions persist pasted images, append paths, and clean the
 
   assert.equal(imageFiles.length, 2);
   assert.deepEqual(imageFiles.map((file) => path.extname(file)).sort(), [".png", ".webp"]);
-  assert.match(userMessage?.content ?? "", /<images>/);
-  assert.match(userMessage?.content ?? "", /name="\[Image #1\]"/);
-  assert.match(userMessage?.content ?? "", new RegExp(escapeRegExp(imagesDir)));
-  assert.equal(Array.isArray(userMessage?.contentParams), true);
+  assert.equal(userMessage?.content, "Inspect these images");
+  assert.equal(userMessage?.contentParams, null);
+  const storedImageUrls = userMessage?.meta?.userPrompt?.imageUrls ?? [];
+  assert.equal(storedImageUrls.length, 2);
+  assert.deepEqual(
+    storedImageUrls.map((url) => path.dirname(fileURLToPath(url))),
+    [imagesDir, imagesDir]
+  );
 
   manager.deleteSession(sessionId);
   assert.equal(fs.existsSync(imagesDir), false);
 });
 
-test("native multimodal sessions keep pasted images inline without persisting them", async () => {
+test("native multimodal sessions persist pasted images without storing inline content", async () => {
   const workspace = createTempDir("deepcode-native-image-workspace-");
   const home = createTempDir("deepcode-native-image-home-");
   setHomeDir(home);
-  const manager = createSessionManagerForModel(workspace, "gpt-4o");
+  const manager = createSessionManagerForModel(workspace, "custom-vision-model");
   (manager as any).activateSession = async () => {};
 
   const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
   const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
   const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
 
-  assert.equal(fs.existsSync(imagesDir), false);
+  assert.equal(fs.existsSync(imagesDir), true);
   assert.equal(userMessage?.content, "");
-  assert.equal(Array.isArray(userMessage?.contentParams), true);
+  assert.equal(userMessage?.contentParams, null);
+  assert.equal(userMessage?.meta?.userPrompt?.imageUrls?.[0]?.startsWith("file://"), true);
 });
 
-test("non-multimodal sessions reject unsupported pasted images before creating a session", async () => {
+test("multimodal off forces non-multimodal image handling for a multimodal model", async () => {
+  const workspace = createTempDir("deepcode-multimodal-off-workspace-");
+  const home = createTempDir("deepcode-multimodal-off-home-");
+  setHomeDir(home);
+  const manager = createSessionManagerForModel(workspace, "custom-vision-model", "off");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
+  const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+
+  assert.equal(fs.existsSync(imagesDir), true);
+  assert.equal(userMessage?.content, "");
+  assert.equal(userMessage?.contentParams, null);
+});
+
+test("multimodal on persists images for a non-multimodal model", async () => {
+  const workspace = createTempDir("deepcode-multimodal-on-workspace-");
+  const home = createTempDir("deepcode-multimodal-on-home-");
+  setHomeDir(home);
+  const manager = createSessionManagerForModel(workspace, "deepseek-chat", "on");
+  (manager as any).activateSession = async () => {};
+
+  const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
+  const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+
+  assert.equal(fs.existsSync(imagesDir), true);
+  assert.equal(userMessage?.content, "");
+  assert.equal(userMessage?.contentParams, null);
+});
+
+test("multimodal requests send normalized image content without path metadata", async () => {
+  const workspace = createTempDir("deepcode-multimodal-payload-workspace-");
+  const home = createTempDir("deepcode-multimodal-payload-home-");
+  setHomeDir(home);
+  let request: any;
+  const client = {
+    chat: {
+      completions: {
+        create: async (body: any) => {
+          if (isSkillMatchingRequest(body)) {
+            return createSkillMatchingResponse();
+          }
+          request = body;
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({ client: client as any, model: "custom-vision-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "custom-vision-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    loadSharp: async () => sharp,
+  });
+
+  const sessionId = await manager.createSession({
+    text: "Describe this image",
+    imageUrls: [await createOnePixelPngDataUrl()],
+  });
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  const requestUserMessage = request.messages.find((message: any) => message.role === "user");
+
+  assert.equal(userMessage?.contentParams, null);
+  assert.deepEqual(requestUserMessage.content[0], { type: "text", text: "Describe this image" });
+  assert.match(requestUserMessage.content[1].image_url.url, /^data:image\/(?:png|jpeg|webp);base64,/);
+  assert.equal(requestUserMessage.content.length, 2);
+});
+
+test("non-multimodal requests send text and image metadata without loading Sharp", async () => {
+  const workspace = createTempDir("deepcode-non-multimodal-payload-workspace-");
+  const home = createTempDir("deepcode-non-multimodal-payload-home-");
+  setHomeDir(home);
+  const imagePath = path.join(workspace, "local image.png");
+  fs.writeFileSync(imagePath, "not decoded for non-multimodal requests");
+  let request: any;
+  let sharpLoads = 0;
+  const client = {
+    chat: {
+      completions: {
+        create: async (body: any) => {
+          if (isSkillMatchingRequest(body)) {
+            return createSkillMatchingResponse();
+          }
+          request = body;
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      apiKey: "sk-files-test",
+      model: "deepseek-chat",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "deepseek-chat", filesApiEnabled: true }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    loadSharp: async () => {
+      sharpLoads += 1;
+      return sharp;
+    },
+  });
+  (manager as any).deepSeekFiles = {
+    ensureUploaded: async () => assert.fail("non-multimodal images must not be uploaded"),
+    invalidate: () => {},
+  };
+
+  const sessionId = await manager.createSession({
+    text: "Describe this image",
+    imageUrls: [pathToFileURL(imagePath).href],
+  });
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  const requestUserMessage = request.messages.find((message: any) => message.role === "user");
+
+  assert.equal(sharpLoads, 0);
+  assert.equal(userMessage?.contentParams, null);
+  assert.deepEqual(userMessage?.meta?.userPrompt?.imageUrls, [pathToFileURL(imagePath).href]);
+  assert.deepEqual(requestUserMessage.content, [
+    { type: "text", text: "Describe this image" },
+    {
+      type: "text",
+      text: `<message_meta>\n${JSON.stringify({ images: [imagePath] }, null, 2)}\n</message_meta>`,
+    },
+  ]);
+});
+
+test("Files API mode reuses one upload for duplicate images without path metadata", async () => {
+  const workspace = createTempDir("deepcode-files-session-workspace-");
+  const home = createTempDir("deepcode-files-session-home-");
+  setHomeDir(home);
+  let request: any;
+  const client = {
+    chat: {
+      completions: {
+        create: async (body: any) => {
+          if (isSkillMatchingRequest(body)) {
+            return createSkillMatchingResponse();
+          }
+          request = body;
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      apiKey: "sk-files-test",
+      model: "custom-vision-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "custom-vision-model", filesApiEnabled: true }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    loadSharp: async () => sharp,
+  });
+  let uploads = 0;
+  (manager as any).deepSeekFiles = {
+    ensureUploaded: async () => {
+      uploads += 1;
+      return { fileId: "file-image-1", imageHash: "a".repeat(64), bytes: 5 };
+    },
+    invalidate: () => {},
+  };
+
+  const imageDataUrl = await createOnePixelPngDataUrl();
+  const sessionId = await manager.createSession({
+    text: "Describe this image",
+    imageUrls: [imageDataUrl, imageDataUrl],
+  });
+  const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
+  const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
+  const requestUserMessage = request.messages.find((message: any) => message.role === "user");
+
+  assert.equal(fs.existsSync(imagesDir), true);
+  assert.equal(userMessage?.contentParams, null);
+  assert.equal(uploads, 1);
+  assert.deepEqual(requestUserMessage.content, [
+    { type: "text", text: "Describe this image" },
+    { type: "file", file_id: "file-image-1" },
+    { type: "file", file_id: "file-image-1" },
+  ]);
+});
+
+test("Files API mode fails the session when image upload fails", async () => {
+  const workspace = createTempDir("deepcode-files-failure-workspace-");
+  const home = createTempDir("deepcode-files-failure-home-");
+  setHomeDir(home);
+  const client = { chat: { completions: { create: async () => assert.fail("chat request must not start") } } };
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      apiKey: "sk-files-test",
+      model: "custom-vision-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "custom-vision-model", filesApiEnabled: true }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    loadSharp: async () => sharp,
+  });
+  (manager as any).deepSeekFiles = {
+    ensureUploaded: async () => {
+      throw new Error("upload unavailable");
+    },
+    invalidate: () => {},
+  };
+
+  const sessionId = await manager.createSession({ imageUrls: [await createOnePixelPngDataUrl()] });
+
+  assert.equal(manager.getSession(sessionId)?.status, "failed");
+  assert.match(manager.getSession(sessionId)?.failReason ?? "", /upload unavailable/);
+});
+
+test("Files API mode invalidates a rejected file ID and uploads it once more", async () => {
+  const workspace = createTempDir("deepcode-files-stale-workspace-");
+  const home = createTempDir("deepcode-files-stale-home-");
+  setHomeDir(home);
+  const requests: any[] = [];
+  const rejected = Object.assign(new Error("file_id expired"), { status: 400 });
+  const client = {
+    chat: {
+      completions: {
+        create: async (body: any) => {
+          requests.push(body);
+          if (requests.length === 1) {
+            throw rejected;
+          }
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      apiKey: "sk-files-test",
+      model: "custom-vision-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "custom-vision-model", filesApiEnabled: true }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    loadSharp: async () => sharp,
+  });
+  let uploads = 0;
+  let invalidations = 0;
+  (manager as any).deepSeekFiles = {
+    ensureUploaded: async () => {
+      uploads += 1;
+      return { fileId: `file-image-${uploads}`, imageHash: "a".repeat(64), bytes: 5 };
+    },
+    invalidate: () => {
+      invalidations += 1;
+    },
+  };
+
+  const sessionId = await manager.createSession({ imageUrls: [await createOnePixelPngDataUrl()] });
+
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+  assert.equal(invalidations, 1);
+  assert.equal(uploads, 2);
+  const retriedUserMessage = requests[1].messages.find((message: any) => message.role === "user");
+  assert.deepEqual(retriedUserMessage.content, [{ type: "file", file_id: "file-image-2" }]);
+});
+
+test("Files API mode checks the aggregate request limit before uploading", async () => {
+  const workspace = createTempDir("deepcode-files-limit-workspace-");
+  const home = createTempDir("deepcode-files-limit-home-");
+  setHomeDir(home);
+  const client = { chat: { completions: { create: async () => assert.fail("chat request must not start") } } };
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: client as any,
+      apiKey: "sk-files-test",
+      model: "custom-vision-model",
+      baseURL: "https://api.deepseek.com",
+      thinkingEnabled: false,
+    }),
+    getResolvedSettings: () => ({
+      model: "custom-vision-model",
+      filesApiEnabled: true,
+      maxRequestFilesBytes: 4,
+    }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    loadSharp: async () => sharp,
+  });
+  (manager as any).deepSeekFiles = {
+    ensureUploaded: async () => assert.fail("upload must not start"),
+    invalidate: () => {},
+  };
+
+  const sessionId = await manager.createSession({ imageUrls: [await createOnePixelPngDataUrl()] });
+
+  assert.equal(manager.getSession(sessionId)?.status, "failed");
+  assert.match(manager.getSession(sessionId)?.failReason ?? "", /configured 4-byte/);
+});
+
+test("sessions reject unsupported pasted image data before creating a session", async () => {
   const workspace = createTempDir("deepcode-invalid-image-workspace-");
   const home = createTempDir("deepcode-invalid-image-home-");
   setHomeDir(home);
@@ -3589,8 +4454,8 @@ test("non-multimodal sessions reject unsupported pasted images before creating a
   (manager as any).activateSession = async () => {};
 
   await assert.rejects(
-    manager.createSession({ imageUrls: ["data:image/gif;base64,aGVsbG8="] }),
-    /Only JPEG, PNG, and WebP/
+    manager.createSession({ imageUrls: ["data:image/bmp;base64,aGVsbG8="] }),
+    /Only GIF, JPEG, PNG, and WebP/
   );
   assert.equal(manager.listSessions().length, 0);
 });
@@ -3612,8 +4477,9 @@ test("forkSession copies image resources and rewrites stored paths", async () =>
   const forkedUserMessage = manager.listSessionMessages(forkedSessionId).find((message) => message.role === "user");
 
   assert.equal(fs.readdirSync(forkedDir).length, 1);
-  assert.equal(forkedUserMessage?.content?.includes(forkedDir), true);
-  assert.equal(forkedUserMessage?.content?.includes(sourceDir), false);
+  const forkedImageUrl = forkedUserMessage?.meta?.userPrompt?.imageUrls?.[0] ?? "";
+  assert.equal(fileURLToPath(forkedImageUrl).startsWith(forkedDir), true);
+  assert.equal(fileURLToPath(forkedImageUrl).startsWith(sourceDir), false);
 
   manager.deleteSession(sourceSessionId);
   assert.equal(fs.existsSync(sourceDir), false);
@@ -3771,6 +4637,42 @@ test("SessionManager ignores malformed fork lineage in persisted entries", () =>
   assert.equal(manager.getSession(sessionId)?.forkedFrom, undefined);
 });
 
+test("SessionManager persists plugin rate limits with UnderstandImage priority and does not copy them to forks", () => {
+  const workspace = createTempDir("deepcode-plugin-rate-limit-workspace-");
+  const home = createTempDir("deepcode-plugin-rate-limit-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plugin-rate-limit");
+  const sessionId = createSessionAndMessages(manager, "plugin-rate-limit-session", "Rate limited");
+
+  (manager as any).recordPluginRateLimitExceeded(sessionId, "WebSearch");
+  assert.equal(manager.getSession(sessionId)?.pluginRateLimitedTool, "WebSearch");
+
+  (manager as any).recordPluginRateLimitExceeded(sessionId, "UnderstandImage");
+  (manager as any).recordPluginRateLimitExceeded(sessionId, "WebSearch");
+  assert.equal(manager.getSession(sessionId)?.pluginRateLimitedTool, "UnderstandImage");
+
+  const reloaded = createSessionManager(workspace, "machine-id-plugin-rate-limit");
+  assert.equal(reloaded.getSession(sessionId)?.pluginRateLimitedTool, "UnderstandImage");
+
+  const forkedSessionId = reloaded.forkSession(sessionId);
+  assert.equal(reloaded.getSession(forkedSessionId)?.pluginRateLimitedTool, undefined);
+});
+
+test("SessionManager ignores malformed plugin rate limit tools in persisted entries", () => {
+  const workspace = createTempDir("deepcode-plugin-rate-limit-malformed-workspace-");
+  const home = createTempDir("deepcode-plugin-rate-limit-malformed-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-plugin-rate-limit-malformed");
+  const sessionId = createSessionAndMessages(manager, "plugin-rate-limit-malformed", "Malformed");
+  const projectDir = (manager as any).getProjectStorage().projectDir;
+  const indexPath = path.join(projectDir, "sessions-index.json");
+  const persisted = JSON.parse(fs.readFileSync(indexPath, "utf8"));
+  persisted.entries[0].pluginRateLimitedTool = "UnknownTool";
+  fs.writeFileSync(indexPath, JSON.stringify(persisted), "utf8");
+
+  assert.equal(manager.getSession(sessionId)?.pluginRateLimitedTool, undefined);
+});
+
 /**
  * Helper: creates a session and writes a few messages to it so we can test
  * that deleteSession removes both the index entry and the messages file.
@@ -3892,7 +4794,11 @@ function createSessionManager(projectRoot: string, machineId: string): SessionMa
   });
 }
 
-function createSessionManagerForModel(projectRoot: string, model: string): SessionManager {
+function createSessionManagerForModel(
+  projectRoot: string,
+  model: string,
+  multimodal: MultimodalMode = "default"
+): SessionManager {
   return new SessionManager({
     projectRoot,
     createOpenAIClient: () => ({
@@ -3901,14 +4807,16 @@ function createSessionManagerForModel(projectRoot: string, model: string): Sessi
       thinkingEnabled: false,
       machineId: "machine-id-image-test",
     }),
-    getResolvedSettings: () => ({ model }),
+    getResolvedSettings: () => ({ model, multimodal }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
 }
 
 function countLoadedSkillMessages(messages: SessionMessage[], skillName: string): number {
-  return messages.filter((message) => message.role === "system" && message.meta?.skill?.name === skillName).length;
+  return messages.filter(
+    (message) => ["system", "tool"].includes(message.role) && message.meta?.skill?.name === skillName
+  ).length;
 }
 
 function createNotifyingSessionManager(
@@ -3999,6 +4907,7 @@ function createPermissionSessionManager(
     deny: any[];
     ask: any[];
     defaultMode: "allowAll" | "askAll";
+    addWorkingDirs?: string[];
   }
 ): SessionManager {
   const client = {
@@ -4024,7 +4933,10 @@ function createPermissionSessionManager(
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
     }),
-    getResolvedSettings: () => ({ model: "test-model", permissions }),
+    getResolvedSettings: () => ({
+      model: "test-model",
+      permissions: { ...permissions, addWorkingDirs: permissions.addWorkingDirs ?? [] },
+    }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
   });
@@ -4101,6 +5013,13 @@ function createTempDir(prefix: string): string {
   return dir;
 }
 
+async function createOnePixelPngDataUrl(): Promise<string> {
+  const image = await sharp({ create: { width: 1, height: 1, channels: 3, background: "red" } })
+    .png()
+    .toBuffer();
+  return `data:image/png;base64,${image.toString("base64")}`;
+}
+
 function createNotifyRecorderScript(dir: string): string {
   const scriptPath = path.join(dir, "notify-recorder.cjs");
   fs.writeFileSync(
@@ -4157,3 +5076,60 @@ function escapeRegExp(value: string): string {
 async function flushPromises(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
 }
+
+test("stream previews combine only reasoning and content, sanitize text, and reset per request", async () => {
+  const events: Array<{ phase: string; previewText?: string; estimatedTokens: number }> = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async () =>
+          createChatStreamResponse([
+            { choices: [{ delta: { reasoning_content: "think\r" } }] },
+            { choices: [{ delta: { reasoning: "\nnext\t" } }] },
+            { choices: [{ delta: { content: "\u001b[31m中文👋\u001b[0m\nanswer\r!\u0007" } }] },
+            {
+              choices: [
+                {
+                  delta: {
+                    refusal: "excluded",
+                    tool_calls: [
+                      { index: 0, id: "tool", type: "function", function: { name: "bash", arguments: "{}" } },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            },
+          ]),
+      },
+    },
+  };
+  const manager = new SessionManager({
+    projectRoot: process.cwd(),
+    createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+    onLlmStreamProgress: (event) => events.push(event),
+  });
+  for (let i = 0; i < 2; i++) {
+    events.length = 0;
+    const response = await (manager as any).createChatCompletionStream(
+      client,
+      { model: "test-model" },
+      undefined,
+      "preview-session"
+    );
+    assert.equal(events[0]?.phase, "start");
+    assert.equal(events[0]?.previewText, undefined);
+    assert.equal(events[1]?.previewText, "think ");
+    assert.equal(events[2]?.previewText, "think next ");
+    assert.equal(events[3]?.previewText, "think next 中文👋 answer !");
+    const updates = events.filter((event) => event.phase === "update");
+    assert.equal(updates.at(-1)?.previewText, "think next 中文👋 answer !");
+    assert.ok(updates.at(-1)!.estimatedTokens > updates[2]!.estimatedTokens);
+    assert.equal(events.at(-1)?.phase, "end");
+    assert.equal(events.at(-1)?.previewText, undefined);
+    assert.equal(response.choices[0].message.content, "\u001b[31m中文👋\u001b[0m\nanswer\r!\u0007");
+  }
+});

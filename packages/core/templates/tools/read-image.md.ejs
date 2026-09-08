@@ -1,0 +1,25 @@
+<% if (supportsMultimodal) { -%>
+## ReadImage
+
+Read a local image and present it visually to the current multimodal model.
+
+JSON schema:
+
+```json
+{
+  "type": "object",
+  "properties": {
+    "file_path": {
+      "type": "string",
+      "description": "The absolute path of the PNG, JPEG, WebP, or GIF image to read."
+    }
+  },
+  "required": ["file_path"],
+  "additionalProperties": false
+}
+```
+
+Usage:
+
+- PNG, JPEG, WebP, and GIF are supported. Large supported images are validated and downscaled automatically.
+<% } -%>

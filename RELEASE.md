@@ -2,11 +2,11 @@
 
 Deep Code 使用三个脚本管理 monorepo 的版本发布流程：
 
-| 脚本 | 命令 | 用途 |
-|------|------|------|
-| `scripts/version.js` | `npm run release:version` | 升级所有 workspace 包的版本号 + 重新生成 lockfile |
-| `scripts/prepare-package.js` | `npm run prepare:package` | 构建 CLI + 质量检查 + 发布到 npm + git commit & tag |
-| `scripts/prepare-vscode.js` | `npm run prepare:vscode` | 构建 VSCode 扩展 + 质量检查 + 发布到 VS Code 市场 + git commit & tag |
+| 脚本                         | 命令                      | 用途                                                                 |
+| ---------------------------- | ------------------------- | -------------------------------------------------------------------- |
+| `scripts/version.js`         | `npm run release:version` | 同步根包和所有 workspace 包的版本号 + 更新 lockfile                  |
+| `scripts/prepare-package.js` | `npm run prepare:package` | 构建 CLI + 质量检查 + 发布到 npm + git commit & tag                  |
+| `scripts/prepare-vscode.js`  | `npm run prepare:vscode`  | 构建 VSCode 扩展 + 质量检查 + 发布到 VS Code 市场 + git commit & tag |
 
 发布流程：先升版本号，再分别发布 CLI 和 VSCode 扩展。
 
@@ -26,16 +26,16 @@ npm run release:version -- <bump-type | version> [options]
 
 ### 支持的 bump 类型
 
-| 类型 | 当前版本 | 结果 | 说明 |
-|------|---------|------|------|
-| `patch` | `0.1.31` | `0.1.32` | 补丁版本 +1 |
-| `minor` | `0.1.31` | `0.2.0` | 次版本 +1，patch 归零 |
-| `major` | `0.1.31` | `1.0.0` | 主版本 +1，minor/patch 归零 |
-| `prepatch` | `0.1.31` | `0.1.32-0` | 预发布补丁 |
-| `preminor` | `0.1.31` | `0.2.0-0` | 预发布次版本 |
-| `premajor` | `0.1.31` | `1.0.0-0` | 预发布主版本 |
-| `prerelease` | `0.1.31` | `0.1.32-0` | 递增预发布号 |
-| `from-git` | — | 从最新 git tag 读取 | 适用于已有 tag 但未更新 package.json 的情况 |
+| 类型         | 当前版本 | 结果                | 说明                                        |
+| ------------ | -------- | ------------------- | ------------------------------------------- |
+| `patch`      | `0.1.31` | `0.1.32`            | 补丁版本 +1                                 |
+| `minor`      | `0.1.31` | `0.2.0`             | 次版本 +1，patch 归零                       |
+| `major`      | `0.1.31` | `1.0.0`             | 主版本 +1，minor/patch 归零                 |
+| `prepatch`   | `0.1.31` | `0.1.32-0`          | 预发布补丁                                  |
+| `preminor`   | `0.1.31` | `0.2.0-0`           | 预发布次版本                                |
+| `premajor`   | `0.1.31` | `1.0.0-0`           | 预发布主版本                                |
+| `prerelease` | `0.1.31` | `0.1.32-0`          | 递增预发布号                                |
+| `from-git`   | —        | 从最新 git tag 读取 | 适用于已有 tag 但未更新 package.json 的情况 |
 
 也可以直接指定版本号：
 
@@ -71,8 +71,8 @@ npm run release:version -- premajor --preid alpha
 
 1. 读取 `packages/core/package.json` 中的当前版本
 2. 根据 bump 类型计算目标版本
-3. 更新 **所有** `packages/*/package.json` 的 `version` 字段（core、cli、vscode-ide-companion）
-4. 删除旧的 `package-lock.json`，执行 `npm install --package-lock-only` 重新生成
+3. 更新根 `package.json` 和 **所有** `packages/*/package.json` 的 `version` 字段（core、cli、vscode-ide-companion）
+4. 同步更新 `package-lock.json` 中根包和各工作区包的版本条目
 
 ### 完整示例
 
@@ -116,25 +116,25 @@ npm run prepare:package -- <version> [options]
 
 ### 参数
 
-| 参数 | 说明 |
-|------|------|
-| `<version>` | **必填**，要发布的 semver 版本号 |
+| 参数               | 说明                                                 |
+| ------------------ | ---------------------------------------------------- |
+| `<version>`        | **必填**，要发布的 semver 版本号                     |
 | `--tag <dist-tag>` | npm dist-tag，默认 `"latest`"，常用于 `beta`、`next` |
-| `--dry-run` | 预演模式，不实际执行任何写操作 |
-| `--force` | 跳过 main 分支检查，允许从其他分支发布 |
+| `--dry-run`        | 预演模式，不实际执行任何写操作                       |
+| `--force`          | 跳过 main 分支检查，允许从其他分支发布               |
 
 ### 执行流程（8 步）
 
-| 步骤 | 操作 | 说明 |
-|------|------|------|
-| 1 | Git 检查 | 工作区必须 clean，必须在 main 分支（`--force` 可跳过分支检查） |
-| 2 | npm 认证 | 检查 `npm whoami`，未登录则中止 |
-| 3 | 更新版本号 | 同时更新 `packages/core` 和 `packages/cli` 的 version |
-| 4 | 质量检查 | `npm run check`（typecheck + eslint + prettier） |
-| 5 | 测试 | `npm run test --workspaces` |
-| 6 | 构建 | `npm run build`（core tsc + esbuild 将 core 及所有依赖内联到 `dist/cli.js`） |
-| 7 | 发布 CLI | 往 `dist/` 写入 `dependencies: {}` 的 package.json，从 `dist/` 目录执行 `npm publish` |
-| 8 | Git commit & tag | `chore(release): v<version>` + `git tag v<version>` |
+| 步骤 | 操作             | 说明                                                                                  |
+| ---- | ---------------- | ------------------------------------------------------------------------------------- |
+| 1    | Git 检查         | 工作区必须 clean，必须在 main 分支（`--force` 可跳过分支检查）                        |
+| 2    | npm 认证         | 检查 `npm whoami`，未登录则中止                                                       |
+| 3    | 更新版本号       | 同时更新 `packages/core` 和 `packages/cli` 的 version                                 |
+| 4    | 质量检查         | `npm run check`（typecheck + eslint + prettier）                                      |
+| 5    | 测试             | `npm run test --workspaces`                                                           |
+| 6    | 构建             | `npm run build`（core tsc + esbuild 将 core 及所有依赖内联到 `dist/cli.js`）          |
+| 7    | 发布 CLI         | 往 `dist/` 写入 `dependencies: {}` 的 package.json，从 `dist/` 目录执行 `npm publish` |
+| 8    | Git commit & tag | `chore(release): v<version>` + `git tag v<version>`                                   |
 
 ### 完整示例
 
@@ -192,23 +192,23 @@ VSCE_PAT=<token> npm run prepare:vscode -- <version> [options]
 
 ### 参数
 
-| 参数 | 说明 |
-|------|------|
-| `<version>` | **必填**，要发布的 semver 版本号 |
-| `--dry-run` | 预演模式，不实际执行任何写操作 |
-| `--force` | 跳过 main 分支检查，允许从其他分支发布 |
+| 参数        | 说明                                   |
+| ----------- | -------------------------------------- |
+| `<version>` | **必填**，要发布的 semver 版本号       |
+| `--dry-run` | 预演模式，不实际执行任何写操作         |
+| `--force`   | 跳过 main 分支检查，允许从其他分支发布 |
 
 ### 执行流程（7 步）
 
-| 步骤 | 操作 | 说明 |
-|------|------|------|
-| 1 | Git 检查 | 工作区必须 clean，必须在 main 分支 |
-| 2 | VSCE_PAT 检查 | 环境变量必须已设置 |
-| 3 | 更新版本号 | 同时更新 `packages/core`、`packages/cli`、`packages/vscode-ide-companion` 的 version |
-| 4 | 质量检查 | `npm run check`（typecheck + eslint + prettier） |
-| 5 | 测试 | `npm run test --workspaces` |
-| 6 | 构建 | `npm run build:vscode`（core tsc + esbuild 打包扩展 + 拷贝模板 + vsce package） |
-| 7 | 发布 | `vsce publish <version> --no-dependencies` 发布到 VS Code Marketplace |
+| 步骤 | 操作          | 说明                                                                                 |
+| ---- | ------------- | ------------------------------------------------------------------------------------ |
+| 1    | Git 检查      | 工作区必须 clean，必须在 main 分支                                                   |
+| 2    | VSCE_PAT 检查 | 环境变量必须已设置                                                                   |
+| 3    | 更新版本号    | 同时更新 `packages/core`、`packages/cli`、`packages/vscode-ide-companion` 的 version |
+| 4    | 质量检查      | `npm run check`（typecheck + eslint + prettier）                                     |
+| 5    | 测试          | `npm run test --workspaces`                                                          |
+| 6    | 构建          | `npm run build:vscode`（core tsc + esbuild 打包扩展 + 拷贝模板 + vsce package）      |
+| 7    | 发布          | `vsce publish <version> --no-dependencies` 发布到 VS Code Marketplace                |
 
 ### 完整示例
 

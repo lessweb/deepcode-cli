@@ -189,10 +189,14 @@ function describePermissionScope(scope: AskPermissionScope): string {
   switch (scope) {
     case "read-in-cwd":
       return "read files inside the workspace";
+    case "read-in-tmp":
+      return "read files inside system temporary directories";
     case "read-out-cwd":
       return "read files outside the workspace";
     case "write-in-cwd":
       return "write files inside the workspace";
+    case "write-in-tmp":
+      return "write files inside system temporary directories";
     case "write-out-cwd":
       return "write files outside the workspace";
     case "delete-in-cwd":

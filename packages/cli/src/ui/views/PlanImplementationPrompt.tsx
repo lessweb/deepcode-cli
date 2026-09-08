@@ -3,7 +3,7 @@ import { Box, Text } from "ink";
 import { useTerminalInput } from "../hooks";
 import type { InputKey } from "../hooks";
 
-type PlanImplementationChoice = "implement" | "stay" | "default";
+export type PlanImplementationChoice = "implement" | "clear-context" | "stay" | "default";
 
 type Props = {
   onSelect: (choice: PlanImplementationChoice) => void;
@@ -11,9 +11,16 @@ type Props = {
 
 const CHOICES: Array<{ value: PlanImplementationChoice; label: string }> = [
   { value: "implement", label: "implement this plan" },
+  { value: "clear-context", label: "clear context and implement" },
   { value: "stay", label: "stay in Plan mode" },
   { value: "default", label: "switch to Default mode" },
 ];
+
+const CLEAR_CONTEXT_IMPLEMENTATION_PREFIX =
+  "A previous agent produced the plan below to accomplish the user's task. " +
+  "Implement the plan in a fresh context. Treat the plan as the source of " +
+  "user intent, re-read files as needed, and carry the work through " +
+  "implementation and verification.";
 
 /** Return only a complete proposed plan, so historical or partial tags cannot trigger the chooser. */
 export function extractProposedPlan(reply: string | null): string | null {
@@ -29,6 +36,10 @@ export function getImplementationPrompt(plan: string): string {
   return fullWidthPunctuationCount > 5 ? "实现此方案。" : "Implement the plan.";
 }
 
+export function getClearContextImplementationPrompt(plan: string): string {
+  return `${CLEAR_CONTEXT_IMPLEMENTATION_PREFIX}\n\n${plan}`;
+}
+
 export function getPlanImplementationChoice(
   input: string,
   key: Pick<InputKey, "escape" | "return">,
@@ -37,7 +48,7 @@ export function getPlanImplementationChoice(
   if (key.escape) {
     return "stay";
   }
-  if (input && /^[1-3]$/.test(input)) {
+  if (input && /^[1-4]$/.test(input)) {
     return CHOICES[Number(input) - 1]!.value;
   }
   return key.return ? CHOICES[cursor]!.value : null;
@@ -81,7 +92,7 @@ export function PlanImplementationPrompt({ onSelect }: Props): React.ReactElemen
         ))}
       </Box>
       <Box marginTop={1}>
-        <Text dimColor>1-3 select · ↑/↓ move · Enter select</Text>
+        <Text dimColor>1-4 select · ↑/↓ move · Enter select</Text>
       </Box>
     </Box>
   );

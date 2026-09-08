@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import {
   buildNotifyEnv,
   formatDurationSeconds,
@@ -7,9 +10,41 @@ import {
   type NotifyContext,
   type NotifySpawn,
 } from "../common/notify";
-import { applyModelConfigSelection, resolveSettings, resolveSettingsSources } from "../settings";
+import {
+  DEFAULT_FILE_EXPIRES_AFTER_SECONDS,
+  DEFAULT_FILE_QUOTA_CLEANUP_BATCH,
+  DEFAULT_FILE_REFRESH_MARGIN_SECONDS,
+  DEFAULT_FILES_API_TIMEOUT_MS,
+  DEFAULT_MAX_REQUEST_FILES_BYTES,
+  DEFAULT_MODEL,
+  applyModelConfigSelection,
+  readDeepcodePlusApiKey,
+  resolveSettings,
+  resolveSettingsSources,
+} from "../settings";
 
 const TEST_PROCESS_ENV = {};
+
+test("readDeepcodePlusApiKey reads only a non-empty env key", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-plus-settings-"));
+  const settingsPath = path.join(tempDir, "settings.json");
+
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify({ env: { PLUS_API_KEY: "  sk-plus-test  " } }));
+    assert.equal(readDeepcodePlusApiKey(settingsPath), "sk-plus-test");
+
+    for (const settings of [{}, { env: {} }, { env: { PLUS_API_KEY: "   " } }, { env: { PLUS_API_KEY: 123 } }]) {
+      fs.writeFileSync(settingsPath, JSON.stringify(settings));
+      assert.equal(readDeepcodePlusApiKey(settingsPath), undefined);
+    }
+
+    fs.writeFileSync(settingsPath, "not json");
+    assert.equal(readDeepcodePlusApiKey(settingsPath), undefined);
+    assert.equal(readDeepcodePlusApiKey(path.join(tempDir, "missing.json")), undefined);
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
 
 test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool", () => {
   const resolved = resolveSettings(
@@ -42,6 +77,141 @@ test("resolveSettings reads top-level thinkingEnabled, notify, and webSearchTool
   assert.equal(resolved.debugLogEnabled, true);
   assert.equal(resolved.notify, "/tmp/notify.sh");
   assert.equal(resolved.webSearchTool, "/tmp/web-search.sh");
+});
+
+test("resolveSettings defaults multimodal to default", () => {
+  const resolved = resolveSettings(
+    {},
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.multimodal, "default");
+});
+
+test("resolveSettings applies Files API defaults", () => {
+  const resolved = resolveSettings(
+    {},
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.filesApiEnabled, false);
+  assert.equal(resolved.filesApiTimeoutMs, DEFAULT_FILES_API_TIMEOUT_MS);
+  assert.equal(resolved.fileExpiresAfterSeconds, DEFAULT_FILE_EXPIRES_AFTER_SECONDS);
+  assert.equal(resolved.fileRefreshMarginSeconds, DEFAULT_FILE_REFRESH_MARGIN_SECONDS);
+  assert.equal(resolved.fileQuotaCleanupBatch, DEFAULT_FILE_QUOTA_CLEANUP_BATCH);
+  assert.equal(resolved.maxRequestFilesBytes, DEFAULT_MAX_REQUEST_FILES_BYTES);
+});
+
+test("resolveSettings enables Files API only for the DeepSeek API base URL", () => {
+  const deepSeek = resolveSettings(
+    { filesApiEnabled: true },
+    { model: "default-model", baseURL: "https://api.deepseek.com" },
+    TEST_PROCESS_ENV
+  );
+  const custom = resolveSettings(
+    { env: { BASE_URL: "https://example.com/v1" }, filesApiEnabled: true },
+    { model: "default-model", baseURL: "https://api.deepseek.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(deepSeek.filesApiEnabled, true);
+  assert.equal(custom.filesApiEnabled, false);
+});
+
+test("resolveSettingsSources validates Files API settings and uses project precedence", () => {
+  const resolved = resolveSettingsSources(
+    {
+      filesApiEnabled: true,
+      filesApiTimeoutMs: 120_000,
+      fileExpiresAfterSeconds: 86_400,
+      fileRefreshMarginSeconds: 7_200,
+      fileQuotaCleanupBatch: 50,
+      maxRequestFilesBytes: 10_000,
+    },
+    {
+      filesApiEnabled: false,
+      filesApiTimeoutMs: 600_001,
+      fileExpiresAfterSeconds: 7_200,
+      fileRefreshMarginSeconds: 7_200,
+      fileQuotaCleanupBatch: 200,
+      maxRequestFilesBytes: 20_000,
+    },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.filesApiEnabled, false);
+  assert.equal(resolved.filesApiTimeoutMs, 120_000);
+  assert.equal(resolved.fileExpiresAfterSeconds, 7_200);
+  assert.equal(resolved.fileRefreshMarginSeconds, DEFAULT_FILE_REFRESH_MARGIN_SECONDS);
+  assert.equal(resolved.fileQuotaCleanupBatch, 200);
+  assert.equal(resolved.maxRequestFilesBytes, 20_000);
+});
+
+test("resolveSettings reads top-level multimodal and ignores invalid values", () => {
+  const on = resolveSettings(
+    { multimodal: "on" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  const off = resolveSettings(
+    { multimodal: "off" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  const invalid = resolveSettings(
+    { multimodal: "sometimes" as never },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(on.multimodal, "on");
+  assert.equal(off.multimodal, "off");
+  assert.equal(invalid.multimodal, "default");
+});
+
+test("resolveSettings reads MULTIMODAL from env", () => {
+  const resolved = resolveSettings(
+    { env: { MULTIMODAL: "off" } },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.multimodal, "off");
+});
+
+test("resolveSettings gives top-level multimodal priority over env MULTIMODAL", () => {
+  const resolved = resolveSettings(
+    {
+      multimodal: "off",
+      env: { MULTIMODAL: "on" },
+    },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.multimodal, "off");
+});
+
+test("resolveSettingsSources applies multimodal source precedence", () => {
+  const resolved = resolveSettingsSources(
+    {
+      env: { MULTIMODAL: "on" },
+      multimodal: "off",
+    },
+    {
+      env: { MULTIMODAL: "on" },
+      multimodal: "off",
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    {
+      DEEPCODE_MULTIMODAL: "on",
+    }
+  );
+
+  assert.equal(resolved.multimodal, "on");
 });
 
 test("resolveSettings gives top-level model priority over env MODEL", () => {
@@ -110,7 +280,7 @@ test("resolveSettings derives model-specific context window defaults", () => {
     TEST_PROCESS_ENV
   );
   const deepseekV4 = resolveSettings(
-    { model: "deepseek-v4-pro" },
+    { model: "deepseek-v4-flash-vision-exp" },
     { model: "default-model", baseURL: "https://default.example.com" },
     TEST_PROCESS_ENV
   );
@@ -300,6 +470,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
       baseURL: "https://default.example.com",
     },
     {
+      DEEPCODE_API_KEY: "system-key",
       DEEPCODE_MODEL: "system-model",
       DEEPCODE_THINKING_ENABLED: "false",
       DEEPCODE_REASONING_EFFORT: "high",
@@ -311,7 +482,7 @@ test("resolveSettingsSources applies user, project, and DEEPCODE environment pre
   );
 
   assert.equal(resolved.model, "system-model");
-  assert.equal(resolved.apiKey, "project-key");
+  assert.equal(resolved.apiKey, "system-key");
   assert.equal(resolved.thinkingEnabled, false);
   assert.equal(resolved.reasoningEffort, "high");
   assert.equal(resolved.temperature, 1.2);
@@ -327,6 +498,7 @@ test("resolveSettingsSources merges permission settings", () => {
         allow: ["read-in-cwd", "network"],
         ask: ["write-out-cwd"],
         defaultMode: "askAll",
+        addWorkingDirs: ["../shared", "/opt/user-project", "", 42 as never],
       },
     },
     {
@@ -334,6 +506,7 @@ test("resolveSettingsSources merges permission settings", () => {
         allow: ["write-in-cwd", "read-in-cwd"],
         deny: ["delete-out-cwd"],
         defaultMode: "allowAll",
+        addWorkingDirs: ["../shared", " /opt/project "],
       },
     },
     {
@@ -347,6 +520,7 @@ test("resolveSettingsSources merges permission settings", () => {
   assert.deepEqual(resolved.permissions.ask, ["write-out-cwd"]);
   assert.deepEqual(resolved.permissions.deny, ["delete-out-cwd"]);
   assert.equal(resolved.permissions.defaultMode, "allowAll");
+  assert.deepEqual(resolved.permissions.addWorkingDirs, ["../shared", "/opt/user-project", "/opt/project"]);
 });
 
 test("resolveSettingsSources merges enabledSkills with project precedence", () => {
@@ -436,7 +610,7 @@ test("resolveSettings defaults DeepSeek v4 models to thinking mode", () => {
   const resolved = resolveSettings(
     {
       env: {
-        MODEL: "deepseek-v4-flash",
+        MODEL: "deepseek-v4-flash-vision-exp",
       },
     },
     {
@@ -449,17 +623,18 @@ test("resolveSettings defaults DeepSeek v4 models to thinking mode", () => {
   assert.equal(resolved.thinkingEnabled, true);
 });
 
-test("resolveSettings applies thinking defaults to the fallback model", () => {
+test("resolveSettings applies thinking defaults to the default model", () => {
   const resolved = resolveSettings(
     {},
     {
-      model: "deepseek-v4-pro",
+      model: DEFAULT_MODEL,
       baseURL: "https://default.example.com",
     },
     TEST_PROCESS_ENV
   );
 
-  assert.equal(resolved.model, "deepseek-v4-pro");
+  assert.equal(DEFAULT_MODEL, "deepseek-v4-flash");
+  assert.equal(resolved.model, DEFAULT_MODEL);
   assert.equal(resolved.thinkingEnabled, true);
 });
 
@@ -511,6 +686,21 @@ test("resolveSettings defaults invalid reasoning effort to max", () => {
   );
 
   assert.equal(resolved.reasoningEffort, "max");
+});
+
+test("resolveSettings accepts low reasoning effort", () => {
+  const resolved = resolveSettings(
+    {
+      reasoningEffort: "low",
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(resolved.reasoningEffort, "low");
 });
 
 test("resolveSettings ignores invalid temperature values", () => {

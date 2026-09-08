@@ -7,7 +7,7 @@ import matter from "gray-matter";
 import { fileURLToPath } from "url";
 import type { SessionMessage } from "./session";
 import { findGitBashPath, resolveShellPath } from "./common/shell-utils";
-import { supportsMultimodal } from "./common/model-capabilities";
+import { supportsMultimodal, type MultimodalMode } from "./common/model-capabilities";
 
 const COMPACT_PROMPT_BASE = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
 This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
@@ -91,21 +91,15 @@ Here's an example of how your output should be structured:
 
 </summary>`;
 
-const SYSTEM_PROMPT_BASE = `你是名叫Deep Code的交互式CLI工具，帮助用户完成软件工程任务。 Use the instructions below and the tools available to you to assist the user.
-
-重要：严禁编造任何非编程相关的 URL。对于编程链接，仅限使用：1) 用户提供的上下文；2) 你确定的官方文档主域名。在输出前，必须自查该链接是否存在于你的上下文记忆中；若不存在，请明确说明无法提供。`;
+const SYSTEM_PROMPT_BASE = `You are a helpful software engineer assistant.`;
 
 export type PromptToolOptions = {
   model?: string;
+  multimodal?: MultimodalMode;
   webSearchEnabled?: boolean;
   nonInteractive?: boolean;
 };
 
-type DefaultSkillPromptOptions = {
-  enabledSkills?: Record<string, boolean>;
-};
-
-const DEFAULT_SKILL_TEMPLATES = ["karpathy-guidelines.md"];
 const DEFAULT_SKILL_RESOURCE_FILE_LIMIT = 50;
 const SKILL_RESOURCE_EXCLUDED_DIRS = new Set([
   ".cache",
@@ -147,7 +141,7 @@ function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): s
       try {
         const template = fs.readFileSync(fullPath, "utf8");
         const content = entry.endsWith(".ejs")
-          ? ejs.render(template, { supportsMultimodal: supportsMultimodal(options.model ?? "") })
+          ? ejs.render(template, { supportsMultimodal: supportsMultimodal(options.model ?? "", options.multimodal) })
           : template;
         return content.trim();
       } catch {
@@ -157,37 +151,6 @@ function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): s
     .filter((content) => content.length > 0);
 
   return docs.join("\n\n");
-}
-
-function readDefaultSkillDocs(
-  extensionRoot: string,
-  enabledSkills: Record<string, boolean> = {}
-): Array<{ name: string; content: string }> {
-  const skillsDir = path.join(extensionRoot, "templates", "skills");
-  return DEFAULT_SKILL_TEMPLATES.map((entry) => {
-    const fullPath = path.join(skillsDir, entry);
-    const name = path.basename(entry, ".md");
-    if (enabledSkills[name] === false) {
-      return null;
-    }
-    try {
-      return {
-        name,
-        content: fs.readFileSync(fullPath, "utf8").trim(),
-      };
-    } catch {
-      return null;
-    }
-  }).filter((skill): skill is { name: string; content: string } => Boolean(skill?.content));
-}
-
-export function getDefaultSkillPrompt(options: DefaultSkillPromptOptions = {}): string {
-  const skillDocs = readDefaultSkillDocs(getExtensionRoot(), options.enabledSkills);
-  if (skillDocs.length === 0) {
-    return "";
-  }
-
-  return buildSkillDocumentsPrompt(skillDocs);
 }
 
 /** Read the dedicated prompt used when a submitted turn enters Plan Mode. */
@@ -205,13 +168,25 @@ export function buildSkillDocumentsPrompt(skills: SkillPromptDocument[]): string
   return `Use the skill documents below to assist the user:\n${blocks.join("\n\n")}`;
 }
 
+export function buildSkillCatalogPrompt(skills: Array<{ name: string; description: string }>): string {
+  const entries = skills.map((skill) => `- \`${skill.name}\`: ${skill.description}`).join("\n");
+  return `A skill is a reusable set of task-specific instructions. The following skills are available in this session:
+
+<available_skills>
+${entries}
+</available_skills>
+
+If the user names a skill, or the task clearly matches a skill's description, call the \`skill\` tool with the exact skill name before taking task actions. Load all applicable skills, then follow their full instructions. This catalog contains summaries only; do not infer or follow a skill's instructions until it has been loaded.
+A user may also invoke a skill directly; its <skill_content> block then appears in this conversation. Follow it, and do not call the \`skill\` tool again for that skill.`;
+}
+
 function renderSkillDocumentBlock(skill: SkillPromptDocument): string {
   const pathAttribute = skill.path ? ` path="${escapeXml(skill.path)}"` : "";
   const resources = renderSkillResources(skill.skillFilePath);
   const content = stripSkillPromptMetadata(skill.content);
-  return `<${skill.name}-skill${pathAttribute}>
+  return `<skill_content name="${skill.name}"${pathAttribute}>
 ${content}${resources}
-</${skill.name}-skill>`;
+</skill_content>`;
 }
 
 function stripSkillPromptMetadata(content: string): string {
@@ -334,7 +309,7 @@ export function getCompactPrompt(sessionMessages: SessionMessage[]): string {
   return `${COMPACT_PROMPT_BASE}\n\nconversation below:\n\n\`\`\`jsonl\n${jsonl}\n\`\`\``;
 }
 
-export function getRuntimeContext(projectRoot: string, model?: string): string {
+export function getRuntimeContext(projectRoot: string, model?: string, addWorkingDirs: string[] = []): string {
   const uname = getUnameInfo();
   const shellPath = getShellPathInfo();
   const shellModeOpts = process.platform === "win32" ? { "shell mode": "git-bash" } : {};
@@ -342,6 +317,9 @@ export function getRuntimeContext(projectRoot: string, model?: string): string {
   const env = {
     "root path": projectRoot,
     pwd: projectRoot,
+    "additional working dirs": addWorkingDirs.map((directory) =>
+      path.isAbsolute(directory) ? path.resolve(directory) : path.resolve(projectRoot, directory)
+    ),
     homedir: os.homedir(),
     "system info": uname,
     "shell path": shellPath,
@@ -481,14 +459,16 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
             },
             sideEffects: {
               description:
-                'Permission scopes required by this bash command. Use [] only for commands that do not read, write, delete, or access the network. Use ["unknown"] when the effects cannot be classified safely.',
+                'Permission scopes required by this bash command. Treat the root path and additional working dirs from the runtime context as cwd; use read-in-tmp or write-in-tmp for /tmp and /private/tmp outside those directories. Use [] only for commands that do not read, write, delete, or access the network. Use ["unknown"] when the effects cannot be classified safely.',
               type: "array",
               items: {
                 type: "string",
                 enum: [
                   "read-in-cwd",
+                  "read-in-tmp",
                   "read-out-cwd",
                   "write-in-cwd",
+                  "write-in-tmp",
                   "write-out-cwd",
                   "delete-in-cwd",
                   "delete-out-cwd",
@@ -590,8 +570,26 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
     {
       type: "function",
       function: {
+        name: "skill",
+        description:
+          "Load the full instructions for an available skill. Call this with the exact skill name from the session skill catalog before acting on a task that names or clearly matches that skill.",
+        parameters: {
+          type: "object",
+          properties: {
+            name: {
+              type: "string",
+              description: "The exact skill name from the available skills list.",
+            },
+          },
+          required: ["name"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
         name: "read",
-        description: "Read files from the filesystem (text, images, notebooks).",
+        description: "Read text files and notebooks from the filesystem. Image files require a dedicated image tool.",
         parameters: {
           type: "object",
           properties: {
@@ -703,7 +701,27 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
     },
   });
 
-  if (!supportsMultimodal(_options.model ?? "")) {
+  if (supportsMultimodal(_options.model ?? "", _options.multimodal)) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "ReadImage",
+        description:
+          "Read a PNG, JPEG, WebP, or GIF file and return the image itself. Large images are validated and downscaled before the next model request.",
+        parameters: {
+          type: "object",
+          properties: {
+            file_path: {
+              type: "string",
+              description: "The absolute path of the PNG, JPEG, WebP, or GIF image to read.",
+            },
+          },
+          required: ["file_path"],
+          additionalProperties: false,
+        },
+      },
+    });
+  } else {
     tools.push({
       type: "function",
       function: {

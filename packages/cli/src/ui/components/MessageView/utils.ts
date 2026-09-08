@@ -2,6 +2,7 @@ import type { DiffPreviewLine, ToolSummary } from "./types";
 import type { SessionMessage } from "@vegamo/deepcode-core";
 import { RawMode } from "../../contexts";
 import chalk from "chalk";
+import { renderMarkdown } from "./markdown";
 
 /** Type guard that checks whether a value is a plain object (not null, not an array). */
 export function isPlainRecord(value: unknown): value is Record<string, unknown> {
@@ -227,7 +228,8 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   }
 
   if (message.role === "user") {
-    const text = message.content || "(no content)";
+    const content = message.content || "(no content)";
+    const text = message.meta?.isAnswers ? renderMarkdown(content) : content;
     return chalk(`> ${text}`);
   }
 
@@ -241,6 +243,10 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     }
 
     return `${chalk("✦")} ${content}`;
+  }
+
+  if ((message.role === "system" || message.role === "tool") && message.meta?.skill) {
+    return chalk(`⚡ Loaded skill: ${message.meta.skill.name}`);
   }
 
   if (message.role === "tool") {
@@ -263,10 +269,6 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   if (message.role === "system") {
     if (message.meta?.isModelChange) {
       return chalk(`> ${message.content}`);
-    }
-    if (message.meta?.skill && typeof message.meta.skill === "object") {
-      const skillName = (message.meta.skill as { name?: unknown }).name;
-      return chalk(`⚡ Loaded skill: ${typeof skillName === "string" ? skillName : ""}`);
     }
     if (message.meta?.isSummary) {
       return chalk.dim.italic("(conversation summary inserted)");

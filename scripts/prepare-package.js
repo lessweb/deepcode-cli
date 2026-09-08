@@ -53,6 +53,22 @@ function writeJson(filePath, data) {
   writeFileSync(filePath, JSON.stringify(data, null, 2) + "\n", "utf-8");
 }
 
+function updateLockfileVersions(packageVersions, dryRun) {
+  const lockPath = join(root, "package-lock.json");
+  const lockfile = readJson(lockPath);
+  const missing = packageVersions.filter(({ path }) => !lockfile.packages?.[path]).map(({ path }) => path);
+  if (missing.length > 0) {
+    fail(`package-lock.json is missing workspace entries:\n  - ${missing.join("\n  - ")}`);
+  }
+
+  if (dryRun) return;
+
+  for (const { path, version } of packageVersions) {
+    lockfile.packages[path].version = version;
+  }
+  writeJson(lockPath, lockfile);
+}
+
 function isValidSemver(v) {
   return /^\d+\.\d+\.\d+(-[\w.]+)?(\+[\w.]+)?$/.test(v);
 }
@@ -119,6 +135,36 @@ function gitTagExists(tagName) {
     stdio: "ignore",
   });
   return result.status === 0;
+}
+
+function gitRefCommit(ref) {
+  const result = spawnSync("git", ["rev-parse", "--verify", `${ref}^{}`], {
+    cwd: root,
+    encoding: "utf-8",
+    shell: false,
+  });
+  if (result.status !== 0) {
+    fail(`Unable to resolve git ref: ${ref}`);
+  }
+  return result.stdout.trim();
+}
+
+function canReuseExistingTag(tagName) {
+  if (gitRefCommit(tagName) === gitRefCommit("HEAD")) {
+    return true;
+  }
+
+  const result = spawnSync("git", ["diff", "--name-only", `${tagName}^{}`, "HEAD"], {
+    cwd: root,
+    encoding: "utf-8",
+    shell: false,
+  });
+  if (result.status !== 0) {
+    fail(`Unable to compare existing tag ${tagName} with HEAD.`);
+  }
+
+  const changedPaths = result.stdout.split("\n").filter(Boolean);
+  return changedPaths.length > 0 && changedPaths.every((filePath) => filePath === "scripts/prepare-package.js");
 }
 
 // ── Parse args ───────────────────────────────────────────────────────────────
@@ -252,11 +298,14 @@ if (!dryRun) {
   log(`  (dry-run) packages/cli:  ${oldVersion} → ${version}`);
 }
 
-run("npm", ["install", "--package-lock-only", "--ignore-scripts"], {
-  dryRun,
-  label: "npm install --package-lock-only --ignore-scripts",
-});
-ok("package-lock.json is up to date");
+updateLockfileVersions(
+  [
+    { path: "packages/core", version },
+    { path: "packages/cli", version },
+  ],
+  dryRun
+);
+ok(dryRun ? "package-lock.json workspace versions would be updated" : "package-lock.json workspace versions updated");
 
 // ── 4. Quality checks ────────────────────────────────────────────────────────
 
@@ -326,9 +375,7 @@ for (const file of ["README.md", "LICENSE"]) {
   }
 }
 
-// Write a new package.json for publishing with empty dependencies.
-// All runtime code (including @vegamo/deepcode-core and its deps) is already
-// bundled into dist/cli.js by esbuild with packages: "bundle".
+// Native modules stay external so npm can install the correct binary for the host platform.
 const distPackageJson = {
   name: cliPkg.name,
   version: version,
@@ -341,13 +388,15 @@ const distPackageJson = {
   },
   files: ["cli.js", "chunks/**", "templates/**", "bundled/**", "README.md", "LICENSE"],
   engines: cliPkg.engines,
-  dependencies: {},
+  dependencies: {
+    sharp: corePkg.dependencies.sharp,
+  },
 };
 
 if (!dryRun) {
   writeJson(join(distDir, "package.json"), distPackageJson);
 }
-log("  Written dist/package.json with dependencies: {}");
+log(`  Written dist/package.json with sharp dependency: ${corePkg.dependencies.sharp}`);
 
 if (!dryRun) {
   validatePacklist(
@@ -385,12 +434,16 @@ if (!dryRun) {
   }
 
   if (gitTagExists(tagName)) {
-    fail(`Git tag already exists: ${tagName}`);
+    if (!canReuseExistingTag(tagName)) {
+      fail(`Git tag already exists and does not match the current release contents: ${tagName}`);
+    }
+    log(`  Reusing existing tag ${tagName}`);
+  } else {
+    run("git", ["tag", tagName], {
+      label: `git tag ${tagName}`,
+    });
+    ok(`Created tag ${tagName}`);
   }
-  run("git", ["tag", tagName], {
-    label: `git tag ${tagName}`,
-  });
-  ok(`Created tag ${tagName}`);
 } else {
   log("\n  (dry-run) git add + commit + tag");
 }

@@ -73,6 +73,7 @@ export type PromptSubmission = {
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
+  isAnswers?: boolean;
   command?: "new" | "resume" | "fork" | "continue" | "undo" | "mcp" | "exit";
 };
 
@@ -870,7 +871,9 @@ export const PromptInput = React.memo(function PromptInput({
       <SlashCommandMenu width={screenWidth} items={slashMenu} activeIndex={menuIndex} />
       {!showFooterText && (
         <Box>
-          <Text dimColor>{footerText}</Text>
+          <Text dimColor wrap="truncate-end">
+            {footerText}
+          </Text>
         </Box>
       )}
       {statusLineSegments && statusLineSegments.length > 0 && (

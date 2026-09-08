@@ -1,8 +1,10 @@
 import type OpenAI from "openai";
+import type sharp from "sharp";
 import type { ReasoningEffort } from "../settings";
 
 export type CreateOpenAIClient = () => {
   client: OpenAI | null;
+  apiKey?: string;
   model: string;
   baseURL?: string;
   temperature?: number;
@@ -14,6 +16,7 @@ export type CreateOpenAIClient = () => {
   webSearchTool?: string;
   env?: Record<string, string>;
   machineId?: string;
+  plusApiKey?: string;
 };
 
 export type ToolCall = {
@@ -25,11 +28,16 @@ export type ToolCall = {
   };
 };
 
+export type PluginRateLimitedTool = "UnderstandImage" | "WebSearch";
+
+export type SharpLoader = () => Promise<typeof sharp>;
+
 export type ToolExecutionContext = {
   sessionId: string;
   projectRoot: string;
   toolCall: ToolCall;
   createOpenAIClient?: CreateOpenAIClient;
+  loadSharp?: SharpLoader;
   onProcessStart?: (processId: string | number, command: string) => void;
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;
@@ -37,6 +45,8 @@ export type ToolExecutionContext = {
   onBackgroundProcessComplete?: (completion: BackgroundProcessCompletion) => void;
   onBeforeFileMutation?: (filePath: string) => void;
   onAfterFileMutation?: (filePath: string) => void;
+  onPluginRateLimitExceeded?: (tool: PluginRateLimitedTool) => void;
+  onLoadSkill?: (skillName: string) => Promise<ToolExecutionResult>;
   bashTimeoutMs?: number;
   bashMinTimeoutMs?: number;
 };
@@ -49,6 +59,8 @@ export type ToolExecutionHooks = {
   onBackgroundProcessComplete?: (completion: BackgroundProcessCompletion) => void;
   onBeforeFileMutation?: (filePath: string) => void;
   onAfterFileMutation?: (filePath: string) => void;
+  onPluginRateLimitExceeded?: (tool: PluginRateLimitedTool) => void;
+  onLoadSkill?: (skillName: string) => Promise<ToolExecutionResult>;
   shouldStop?: () => boolean;
 };
 
@@ -90,9 +102,10 @@ export type ToolExecutionResult = {
 };
 
 export type ToolExecutionFollowUpMessage = {
-  role: "system";
+  role: "system" | "user";
   content: string;
   contentParams?: unknown | null;
+  visible?: boolean;
 };
 
 export type ToolHandler = (

@@ -1,4 +1,4 @@
-import { DEEPSEEK_V4_MODELS, defaultsToThinkingMode } from "./common/model-capabilities";
+import { DEEPSEEK_V4_MODELS, defaultsToThinkingMode, type MultimodalMode } from "./common/model-capabilities";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -12,9 +12,10 @@ export type DeepcodingEnv = Record<string, string | undefined> & {
   REASONING_EFFORT?: string;
   DEBUG_LOG_ENABLED?: string;
   TELEMETRY_ENABLED?: string;
+  MULTIMODAL?: string;
 };
 
-export type ReasoningEffort = "high" | "max";
+export type ReasoningEffort = "low" | "high" | "max";
 
 export type McpServerConfig = {
   command: string;
@@ -24,8 +25,10 @@ export type McpServerConfig = {
 
 export type PermissionScope =
   | "read-in-cwd"
+  | "read-in-tmp"
   | "read-out-cwd"
   | "write-in-cwd"
+  | "write-in-tmp"
   | "write-out-cwd"
   | "delete-in-cwd"
   | "delete-out-cwd"
@@ -41,6 +44,7 @@ export type PermissionSettings = {
   deny?: PermissionScope[];
   ask?: PermissionScope[];
   defaultMode?: PermissionDefaultMode;
+  addWorkingDirs?: string[];
 };
 
 export type EnabledSkillsSettings = Record<string, boolean>;
@@ -92,6 +96,13 @@ export type DeepcodingSettings = {
   telemetryEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  multimodal?: MultimodalMode;
+  filesApiEnabled?: boolean;
+  filesApiTimeoutMs?: number;
+  fileExpiresAfterSeconds?: number;
+  fileRefreshMarginSeconds?: number;
+  fileQuotaCleanupBatch?: number;
+  maxRequestFilesBytes?: number;
   mcpServers?: Record<string, McpServerConfig>;
   permissions?: PermissionSettings;
   enabledSkills?: EnabledSkillsSettings;
@@ -112,6 +123,13 @@ export type ResolvedDeepcodingSettings = {
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  multimodal: MultimodalMode;
+  filesApiEnabled: boolean;
+  filesApiTimeoutMs: number;
+  fileExpiresAfterSeconds: number;
+  fileRefreshMarginSeconds: number;
+  fileQuotaCleanupBatch: number;
+  maxRequestFilesBytes: number;
   mcpServers?: Record<string, McpServerConfig>;
   permissions: Required<PermissionSettings>;
   enabledSkills: EnabledSkillsSettings;
@@ -128,6 +146,12 @@ export type SettingsProcessEnv = Record<string, string | undefined>;
 
 const DEFAULT_CONTEXT_WINDOW = 256 * 1024;
 const DEEPSEEK_V4_CONTEXT_WINDOW = 1024 * 1024;
+export const DEFAULT_FILES_API_TIMEOUT_MS = 60_000;
+export const DEFAULT_FILE_EXPIRES_AFTER_SECONDS = 7 * 24 * 60 * 60;
+export const DEFAULT_FILE_REFRESH_MARGIN_SECONDS = 60 * 60;
+export const DEFAULT_FILE_QUOTA_CLEANUP_BATCH = 100;
+export const DEFAULT_MAX_REQUEST_FILES_BYTES = 128 * 1024 * 1024;
+export const MAX_FILES_API_TIMEOUT_MS = 10 * 60 * 1000;
 
 export function getDefaultContextWindow(model: string): number {
   return DEEPSEEK_V4_MODELS.has(model) ? DEEPSEEK_V4_CONTEXT_WINDOW : DEFAULT_CONTEXT_WINDOW;
@@ -166,7 +190,18 @@ function firstTokenWindow(...values: unknown[]): number | undefined {
 }
 
 function resolveReasoningEffort(value: unknown): ReasoningEffort | undefined {
-  return value === "high" || value === "max" ? value : undefined;
+  return value === "low" || value === "high" || value === "max" ? value : undefined;
+}
+
+function resolveMultimodalMode(value: unknown): MultimodalMode | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "default" || normalized === "on" || normalized === "off") {
+    return normalized;
+  }
+  return undefined;
 }
 
 function parseBoolean(value: unknown): boolean | undefined {
@@ -195,14 +230,32 @@ function parseTemperature(value: unknown): number | undefined {
   return raw;
 }
 
+function parseIntegerInRange(value: unknown, minimum: number, maximum: number): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= minimum && value <= maximum
+    ? value
+    : undefined;
+}
+
+function firstIntegerInRange(minimum: number, maximum: number, ...values: unknown[]): number | undefined {
+  for (const value of values) {
+    const parsed = parseIntegerInRange(value, minimum, maximum);
+    if (parsed !== undefined) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
 function trimString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
 const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
   "read-in-cwd",
+  "read-in-tmp",
   "read-out-cwd",
   "write-in-cwd",
+  "write-in-tmp",
   "write-out-cwd",
   "delete-in-cwd",
   "delete-out-cwd",
@@ -241,6 +294,20 @@ function mergePermissionLists(...lists: Array<PermissionScope[] | undefined>): P
   return result;
 }
 
+function normalizeWorkingDirectories(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: string[] = [];
+  for (const item of value) {
+    const directory = trimString(item);
+    if (directory && !result.includes(directory)) {
+      result.push(directory);
+    }
+  }
+  return result;
+}
+
 function normalizePermissionDefaultMode(value: unknown): PermissionDefaultMode | undefined {
   return value === "allowAll" || value === "askAll" ? value : undefined;
 }
@@ -251,6 +318,7 @@ function normalizePermissions(settings: PermissionSettings | null | undefined): 
     deny: normalizePermissionList(settings?.deny),
     ask: normalizePermissionList(settings?.ask),
     defaultMode: normalizePermissionDefaultMode(settings?.defaultMode) ?? "allowAll",
+    addWorkingDirs: normalizeWorkingDirectories(settings?.addWorkingDirs),
   };
 }
 
@@ -264,6 +332,7 @@ function mergePermissions(
     allow: mergePermissionLists(userPermissions.allow, projectPermissions.allow),
     deny: mergePermissionLists(userPermissions.deny, projectPermissions.deny),
     ask: mergePermissionLists(userPermissions.ask, projectPermissions.ask),
+    addWorkingDirs: [...new Set([...userPermissions.addWorkingDirs, ...projectPermissions.addWorkingDirs])],
     defaultMode: projectSettings?.permissions
       ? projectPermissions.defaultMode
       : userSettings?.permissions
@@ -530,6 +599,7 @@ export function resolveSettingsSources(
     trimString(userEnv.MODEL) ||
     (useAtlasCloudDefaults ? ATLASCLOUD_DEFAULT_MODEL : "") ||
     defaults.model;
+  const baseURL = trimString(env.BASE_URL) || (useAtlasCloudDefaults ? ATLASCLOUD_BASE_URL : "") || defaults.baseURL;
 
   const contextWindow =
     firstTokenWindow(systemEnv.CONTEXT_WINDOW, projectSettings?.contextWindow, userSettings?.contextWindow) ??
@@ -589,10 +659,53 @@ export function resolveSettingsSources(
     trimString(userSettings?.webSearchTool) ||
     "";
 
+  const multimodal =
+    resolveMultimodalMode(systemEnv.MULTIMODAL) ??
+    resolveMultimodalMode(projectSettings?.multimodal) ??
+    resolveMultimodalMode(projectEnv.MULTIMODAL) ??
+    resolveMultimodalMode(userSettings?.multimodal) ??
+    resolveMultimodalMode(userEnv.MULTIMODAL) ??
+    "default";
+
+  const filesApiEnabled =
+    baseURL === DEFAULT_BASE_URL &&
+    (parseBoolean(projectSettings?.filesApiEnabled) ?? parseBoolean(userSettings?.filesApiEnabled) ?? false);
+  const filesApiTimeoutMs =
+    firstIntegerInRange(
+      1,
+      MAX_FILES_API_TIMEOUT_MS,
+      projectSettings?.filesApiTimeoutMs,
+      userSettings?.filesApiTimeoutMs
+    ) ?? DEFAULT_FILES_API_TIMEOUT_MS;
+  const fileExpiresAfterSeconds =
+    firstIntegerInRange(
+      3_600,
+      2_592_000,
+      projectSettings?.fileExpiresAfterSeconds,
+      userSettings?.fileExpiresAfterSeconds
+    ) ?? DEFAULT_FILE_EXPIRES_AFTER_SECONDS;
+  const fileRefreshMarginSeconds =
+    firstIntegerInRange(
+      0,
+      fileExpiresAfterSeconds - 1,
+      projectSettings?.fileRefreshMarginSeconds,
+      userSettings?.fileRefreshMarginSeconds
+    ) ?? Math.min(DEFAULT_FILE_REFRESH_MARGIN_SECONDS, fileExpiresAfterSeconds - 1);
+  const fileQuotaCleanupBatch =
+    firstIntegerInRange(1, 1_000, projectSettings?.fileQuotaCleanupBatch, userSettings?.fileQuotaCleanupBatch) ??
+    DEFAULT_FILE_QUOTA_CLEANUP_BATCH;
+  const maxRequestFilesBytes =
+    firstIntegerInRange(
+      1,
+      Number.MAX_SAFE_INTEGER,
+      projectSettings?.maxRequestFilesBytes,
+      userSettings?.maxRequestFilesBytes
+    ) ?? DEFAULT_MAX_REQUEST_FILES_BYTES;
+
   return {
     env,
     apiKey: explicitApiKey || atlasCloudApiKey || undefined,
-    baseURL: trimString(env.BASE_URL) || (useAtlasCloudDefaults ? ATLASCLOUD_BASE_URL : defaults.baseURL),
+    baseURL,
     model,
     contextWindow,
     autoCompactWindow,
@@ -603,6 +716,13 @@ export function resolveSettingsSources(
     telemetryEnabled,
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
+    multimodal,
+    filesApiEnabled,
+    filesApiTimeoutMs,
+    fileExpiresAfterSeconds,
+    fileRefreshMarginSeconds,
+    fileQuotaCleanupBatch,
+    maxRequestFilesBytes,
     mcpServers: mergeMcpServers(userSettings, projectSettings, userEnv, projectEnv, systemEnv),
     permissions: mergePermissions(userSettings, projectSettings),
     enabledSkills: mergeEnabledSkills(userSettings, projectSettings),
@@ -652,7 +772,7 @@ export function applyModelConfigSelection(
 // Default constants
 // ---------------------------------------------------------------------------
 
-export const DEFAULT_MODEL = "deepseek-v4-pro";
+export const DEFAULT_MODEL = "deepseek-v4-flash";
 export const DEFAULT_BASE_URL = "https://api.deepseek.com";
 export const ATLASCLOUD_DEFAULT_MODEL = "deepseek-ai/deepseek-v4-pro";
 export const ATLASCLOUD_BASE_URL = "https://api.atlascloud.ai/v1";
@@ -665,8 +785,24 @@ export function getUserSettingsPath(): string {
   return path.join(os.homedir(), ".deepcode", "settings.json");
 }
 
+export function getDeepcodePlusSettingsPath(): string {
+  return path.join(os.homedir(), ".deepcode-plus", "settings.json");
+}
+
 export function getProjectSettingsPath(projectRoot: string): string {
   return path.join(projectRoot, ".deepcode", "settings.json");
+}
+
+export function readDeepcodePlusApiKey(settingsPath: string = getDeepcodePlusSettingsPath()): string | undefined {
+  try {
+    const raw = fs.readFileSync(settingsPath, "utf8");
+    const settings = JSON.parse(raw) as { env?: { PLUS_API_KEY?: unknown } } | null;
+    return typeof settings?.env?.PLUS_API_KEY === "string"
+      ? trimString(settings.env.PLUS_API_KEY) || undefined
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function readSettingsFile(settingsPath: string): DeepcodingSettings | null {

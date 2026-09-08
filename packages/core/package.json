@@ -1,6 +1,6 @@
 {
   "name": "@vegamo/deepcode-core",
-  "version": "0.1.34",
+  "version": "0.3.1",
   "description": "Deep Code core library — LLM session management, tool execution, and shared utilities",
   "license": "MIT",
   "type": "module",
@@ -33,7 +33,8 @@
     "gray-matter": "^4.0.3",
     "ignore": "^7.0.5",
     "openai": "^6.35.0",
-    "undici": "^7.25.0",
+    "sharp": "^0.35.3",
+    "undici": "^7.29.0",
     "zod": "^4.4.3"
   }
 }

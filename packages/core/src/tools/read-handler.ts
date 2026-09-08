@@ -1,7 +1,7 @@
 import * as fs from "fs";
 import * as path from "path";
 import ignore from "ignore";
-import type { ToolExecutionContext, ToolExecutionFollowUpMessage, ToolExecutionResult } from "./executor";
+import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
 import { readTextFileWithMetadata } from "../common/file-utils";
 import {
   createFullFileSnippet,
@@ -55,64 +55,15 @@ export async function handleReadTool(
   args: Record<string, unknown>,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
-  let filePath = typeof args.file_path === "string" ? normalizeFilePath(args.file_path) : "";
-  if (!filePath.trim()) {
+  const resolved = resolveReadFilePath(args.file_path, context.projectRoot);
+  if (!resolved.ok) {
     return {
       ok: false,
       name: "read",
-      error: 'Missing required "file_path" string.',
+      error: resolved.error,
     };
   }
-
-  if (!isAbsoluteFilePath(filePath)) {
-    if (filePath.startsWith("../") || filePath.startsWith("..\\")) {
-      return {
-        ok: false,
-        name: "read",
-        error: "file_path must be an absolute path.",
-      };
-    }
-    const normalizedSuffix = normalizeRelativeSuffix(filePath);
-    const isIgnored = loadGitignoreMatcher(context.projectRoot);
-    const matches = normalizedSuffix ? findSuffixMatches(context.projectRoot, normalizedSuffix, isIgnored) : [];
-    if (matches.length > 1) {
-      return {
-        ok: false,
-        name: "read",
-        error:
-          "file_path must be an absolute path. " +
-          `The file_path is ambiguous and may refer to multiple files:\n${matches.slice(0, 3).join("\n")}` +
-          (matches.length > 3 ? `\n...and ${matches.length - 3} more.` : ""),
-      };
-    }
-
-    const resolvedPath = path.resolve(context.projectRoot, filePath);
-    if (!fs.existsSync(resolvedPath)) {
-      if (matches.length > 0) {
-        return {
-          ok: false,
-          name: "read",
-          error: "file_path must be an absolute path. " + `The file_path "${filePath}" is ambiguous.`,
-        };
-      } else {
-        return {
-          ok: false,
-          name: "read",
-          error: `File not found: ${filePath}`,
-        };
-      }
-    }
-
-    filePath = resolvedPath;
-  }
-
-  if (!fs.existsSync(filePath)) {
-    return {
-      ok: false,
-      name: "read",
-      error: `File not found: ${filePath}`,
-    };
-  }
+  const filePath = resolved.filePath;
 
   let stat: fs.Stats;
   try {
@@ -172,22 +123,10 @@ export async function handleReadTool(
     }
 
     if (isImageExtension(ext)) {
-      const buffer = fs.readFileSync(filePath);
-      const mime = getImageMimeType(ext);
-      markFileRead(context.sessionId, filePath, {
-        content: "",
-        timestamp: Math.floor(stat.mtimeMs),
-        isPartialView: true,
-      });
       return {
-        ok: true,
+        ok: false,
         name: "read",
-        output: "File loaded.",
-        metadata: {
-          mime,
-          bytes: buffer.length,
-        },
-        followUpMessages: [buildImageFollowUpMessage(filePath, mime, buffer)],
+        error: "Image files are not supported by read. Use ReadImage or UnderstandImage instead.",
       };
     }
 
@@ -244,6 +183,51 @@ export async function handleReadTool(
       error: message,
     };
   }
+}
+
+export function resolveReadFilePath(
+  value: unknown,
+  projectRoot: string
+): { ok: true; filePath: string } | { ok: false; error: string } {
+  let filePath = typeof value === "string" ? normalizeFilePath(value) : "";
+  if (!filePath.trim()) {
+    return { ok: false, error: 'Missing required "file_path" string.' };
+  }
+
+  if (!isAbsoluteFilePath(filePath)) {
+    if (filePath.startsWith("../") || filePath.startsWith("..\\")) {
+      return { ok: false, error: "file_path must be an absolute path." };
+    }
+    const normalizedSuffix = normalizeRelativeSuffix(filePath);
+    const isIgnored = loadGitignoreMatcher(projectRoot);
+    const matches = normalizedSuffix ? findSuffixMatches(projectRoot, normalizedSuffix, isIgnored) : [];
+    if (matches.length > 1) {
+      return {
+        ok: false,
+        error:
+          "file_path must be an absolute path. " +
+          `The file_path is ambiguous and may refer to multiple files:\n${matches.slice(0, 3).join("\n")}` +
+          (matches.length > 3 ? `\n...and ${matches.length - 3} more.` : ""),
+      };
+    }
+
+    const resolvedPath = path.resolve(projectRoot, filePath);
+    if (!fs.existsSync(resolvedPath)) {
+      if (matches.length > 0) {
+        return {
+          ok: false,
+          error: "file_path must be an absolute path. " + `The file_path "${filePath}" is ambiguous.`,
+        };
+      }
+      return { ok: false, error: `File not found: ${filePath}` };
+    }
+    filePath = resolvedPath;
+  }
+
+  if (!fs.existsSync(filePath)) {
+    return { ok: false, error: `File not found: ${filePath}` };
+  }
+  return { ok: true, filePath };
 }
 
 function normalizeRelativeSuffix(relativePath: string): string | null {
@@ -428,49 +412,6 @@ function formatWithLineNumbers(lines: string[], startLineNumber: number): string
 
 function isImageExtension(ext: string): boolean {
   return [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff", ".svg", ".ico", ".avif"].includes(ext);
-}
-
-function getImageMimeType(ext: string): string {
-  switch (ext) {
-    case ".jpg":
-    case ".jpeg":
-      return "image/jpeg";
-    case ".gif":
-      return "image/gif";
-    case ".webp":
-      return "image/webp";
-    case ".bmp":
-      return "image/bmp";
-    case ".tif":
-    case ".tiff":
-      return "image/tiff";
-    case ".svg":
-      return "image/svg+xml";
-    case ".ico":
-      return "image/x-icon";
-    case ".avif":
-      return "image/avif";
-    case ".png":
-    default:
-      return "image/png";
-  }
-}
-
-function buildImageFollowUpMessage(filePath: string, mime: string, buffer: Buffer): ToolExecutionFollowUpMessage {
-  const fileName = path.basename(filePath);
-  return {
-    role: "system",
-    content:
-      `The read tool has loaded \`${fileName}\`. ` + "Use the attached image content to answer the original request.",
-    contentParams: [
-      {
-        type: "image_url",
-        image_url: {
-          url: `data:${mime};base64,${buffer.toString("base64")}`,
-        },
-      },
-    ],
-  };
 }
 
 function countPdfPages(buffer: Buffer): number | null {

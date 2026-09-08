@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildExitSummaryText, buildResumeHintText } from "../ui";
+import { buildExitSummaryText, buildPluginRateLimitHintText, buildResumeHintText } from "../ui";
 import type { ModelUsage, SessionEntry } from "@vegamo/deepcode-core";
 
 const stripAnsi = (text: string): string => text.replace(/\u001b\[[0-9;]*[a-zA-Z]/g, "");
@@ -137,6 +137,35 @@ test("buildResumeHintText shows resume command when sessionId is provided", () =
 
 test("buildResumeHintText returns null when sessionId is omitted", () => {
   assert.equal(buildResumeHintText(), null);
+});
+
+test("buildPluginRateLimitHintText shows the UnderstandImage package hint", () => {
+  const hint = buildPluginRateLimitHintText({
+    ...buildSession(null),
+    pluginRateLimitedTool: "UnderstandImage",
+  });
+
+  assert.equal(
+    hint,
+    "This conversation just exceeded the UnderstandImage tool rate limit. Visit https://deepcode.vegamo.cn/plus/packages for more details."
+  );
+});
+
+test("buildPluginRateLimitHintText shows the WebSearch package hint", () => {
+  const hint = buildPluginRateLimitHintText({
+    ...buildSession(null),
+    pluginRateLimitedTool: "WebSearch",
+  });
+
+  assert.equal(
+    hint,
+    "This conversation just exceeded the WebSearch tool rate limit. Visit https://deepcode.vegamo.cn/plus/packages for more details."
+  );
+});
+
+test("buildPluginRateLimitHintText returns null without a rate limit", () => {
+  assert.equal(buildPluginRateLimitHintText(buildSession(null)), null);
+  assert.equal(buildPluginRateLimitHintText(null), null);
 });
 
 function buildSession(usage: ModelUsage | null, usagePerModel: Record<string, ModelUsage> | null = null): SessionEntry {

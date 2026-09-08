@@ -32,6 +32,7 @@ First classify the request:
      ```
 
      If this skill is loaded from a project-level or different user-level path, use the `scripts/find-skill.js` file next to this `SKILL.md` instead.
+
    - The script searches the same roots Deep Code CLI scans, in priority order:
      1. Project native skills: `./.deepcode/skills/<folder>/SKILL.md`
      2. Project interoperable skills: `./.agents/skills/<folder>/SKILL.md`
@@ -139,15 +140,49 @@ Use one question at a time unless two decisions are tightly coupled. Each questi
 Examples:
 
 ```json
-{"questions":[{"question":"请选择您偏好的语言。","options":[{"label":"中文","description":"后续询问和推荐描述都使用中文。"},{"label":"English","description":"Use English for follow-up questions and the recommended description."}]}]}
+{
+  "questions": [
+    {
+      "question": "请选择您偏好的语言。",
+      "options": [
+        { "label": "中文", "description": "后续询问和推荐描述都使用中文。" },
+        { "label": "English", "description": "Use English for follow-up questions and the recommended description." }
+      ]
+    }
+  ]
+}
 ```
 
 ```json
-{"questions":[{"question":"How should I proceed with this description recommendation?","options":[{"label":"Apply change","description":"Update only the description field in the native digest output SKILL.md."},{"label":"Abandon change","description":"Leave the file unchanged."},{"label":"Discuss wording","description":"Continue refining the proposed description before editing."}]}]}
+{
+  "questions": [
+    {
+      "question": "How should I proceed with this description recommendation?",
+      "options": [
+        {
+          "label": "Apply change",
+          "description": "Update only the description field in the native digest output SKILL.md."
+        },
+        { "label": "Abandon change", "description": "Leave the file unchanged." },
+        { "label": "Discuss wording", "description": "Continue refining the proposed description before editing." }
+      ]
+    }
+  ]
+}
 ```
 
 ```json
-{"questions":[{"question":"Where should I install this Agent Skill?","options":[{"label":"User-level","description":"Install to ~/.agents/skills so it is available across projects."},{"label":"Project-level","description":"Install to ./.agents/skills so it is available in this project."}]}]}
+{
+  "questions": [
+    {
+      "question": "Where should I install this Agent Skill?",
+      "options": [
+        { "label": "User-level", "description": "Install to ~/.agents/skills so it is available across projects." },
+        { "label": "Project-level", "description": "Install to ./.agents/skills so it is available in this project." }
+      ]
+    }
+  ]
+}
 ```
 
 ## Review Heuristics

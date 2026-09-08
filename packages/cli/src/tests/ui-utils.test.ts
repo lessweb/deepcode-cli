@@ -1,7 +1,20 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { SessionEntry } from "@vegamo/deepcode-core";
-import { buildStatusLine, formatContextUsage, formatTokenCount } from "../ui/utils/index";
+import type { SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
+import { buildPromptHistory, buildStatusLine, formatContextUsage, formatTokenCount } from "../ui/utils/index";
+
+test("buildPromptHistory includes only visible non-empty user messages", () => {
+  const messages = [
+    buildMessage("user", " first prompt ", true),
+    buildMessage("user", "internal image follow-up", false),
+    buildMessage("system", "system prompt", false),
+    buildMessage("assistant", "assistant reply", true),
+    buildMessage("user", "   ", true),
+    buildMessage("user", "second prompt", true),
+  ];
+
+  assert.deepEqual(buildPromptHistory(messages), ["first prompt", "second prompt"]);
+});
 
 test("formatTokenCount uses binary K/M units with at most one decimal", () => {
   assert.equal(formatTokenCount(0), "0");
@@ -86,3 +99,18 @@ test("buildStatusLine omits an empty model", () => {
     "status: pending"
   );
 });
+
+function buildMessage(role: SessionMessage["role"], content: string, visible: boolean): SessionMessage {
+  return {
+    id: `${role}-${content}`,
+    sessionId: "session-1",
+    role,
+    content,
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible,
+    createTime: "2026-01-01T00:00:00.000Z",
+    updateTime: "2026-01-01T00:00:00.000Z",
+  };
+}

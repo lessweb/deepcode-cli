@@ -4,6 +4,8 @@ import { getScopeRiskColor } from "../ui/views/PermissionPrompt";
 
 test("getScopeRiskColor maps permission scopes by risk", () => {
   assert.equal(getScopeRiskColor("read-in-cwd"), "#22c55e");
+  assert.equal(getScopeRiskColor("read-in-tmp"), "#22c55e");
+  assert.equal(getScopeRiskColor("write-in-tmp"), "#22c55e");
   assert.equal(getScopeRiskColor("query-git-log"), "#22c55e");
 
   assert.equal(getScopeRiskColor("read-out-cwd"), "#f59e0b");

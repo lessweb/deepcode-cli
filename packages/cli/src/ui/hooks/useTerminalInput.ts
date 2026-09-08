@@ -34,6 +34,11 @@ const CTRL_LEFT_SEQUENCES = new Set(["\u001B[1;5D", "\u001B[5D"]);
 const CTRL_RIGHT_SEQUENCES = new Set(["\u001B[1;5C", "\u001B[5C"]);
 const META_LEFT_SEQUENCES = new Set(["\u001B[1;3D", "\u001B[3D", "\u001Bb"]);
 const META_RIGHT_SEQUENCES = new Set(["\u001B[1;3C", "\u001B[3C", "\u001Bf"]);
+// Application cursor keys mode (DECCKM) arrows.
+const APPLICATION_LEFT = "\u001BOD";
+const APPLICATION_RIGHT = "\u001BOC";
+const CTRL_HOME_SEQUENCES = new Set(["\u001B[1;5H", "\u001B[5H"]);
+const CTRL_END_SEQUENCES = new Set(["\u001B[1;5F", "\u001B[5F"]);
 const TERMINAL_FOCUS_IN = "\u001B[I";
 const TERMINAL_FOCUS_OUT = "\u001B[O";
 
@@ -118,15 +123,21 @@ export function parseTerminalInput(data: Buffer | string): { input: string; key:
   const key: InputKey = {
     upArrow: raw === "\u001B[A",
     downArrow: raw === "\u001B[B",
-    leftArrow: raw === "\u001B[D" || CTRL_LEFT_SEQUENCES.has(raw) || META_LEFT_SEQUENCES.has(raw),
-    rightArrow: raw === "\u001B[C" || CTRL_RIGHT_SEQUENCES.has(raw) || META_RIGHT_SEQUENCES.has(raw),
-    home: HOME_SEQUENCES.has(raw),
-    end: END_SEQUENCES.has(raw),
+    leftArrow:
+      raw === "\u001B[D" || raw === APPLICATION_LEFT || CTRL_LEFT_SEQUENCES.has(raw) || META_LEFT_SEQUENCES.has(raw),
+    rightArrow:
+      raw === "\u001B[C" || raw === APPLICATION_RIGHT || CTRL_RIGHT_SEQUENCES.has(raw) || META_RIGHT_SEQUENCES.has(raw),
+    home: HOME_SEQUENCES.has(raw) || CTRL_HOME_SEQUENCES.has(raw),
+    end: END_SEQUENCES.has(raw) || CTRL_END_SEQUENCES.has(raw),
     pageDown: raw === "\u001B[6~",
     pageUp: raw === "\u001B[5~",
     return: raw === "\r" || SHIFT_RETURN_SEQUENCES.has(raw) || META_RETURN_SEQUENCES.has(raw),
     escape: raw === "\u001B",
-    ctrl: CTRL_LEFT_SEQUENCES.has(raw) || CTRL_RIGHT_SEQUENCES.has(raw),
+    ctrl:
+      CTRL_LEFT_SEQUENCES.has(raw) ||
+      CTRL_RIGHT_SEQUENCES.has(raw) ||
+      CTRL_HOME_SEQUENCES.has(raw) ||
+      CTRL_END_SEQUENCES.has(raw),
     shift: SHIFT_RETURN_SEQUENCES.has(raw),
     tab: raw === "\t" || raw === "\u001B[Z",
     backspace: BACKSPACE_BYTES.has(raw),

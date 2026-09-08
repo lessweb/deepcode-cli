@@ -7,7 +7,7 @@ import * as path from "path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const testFiles = globSync("*.test.ts", { cwd: __dirname });
 
-const result = spawnSync(process.execPath, ["--import", "tsx", "--test", ...testFiles], {
+const result = spawnSync(process.execPath, ["--import", "tsx", "--test", "--test-concurrency=1", ...testFiles], {
   stdio: "inherit",
   cwd: __dirname,
 });

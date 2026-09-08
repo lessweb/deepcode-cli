@@ -49,7 +49,7 @@ Deep Code 推荐使用 `deepseek-v4-pro`，也支持 `deepseek-v4-flash`。创�
 | `env.BASE_URL` | DeepSeek API 地址，默认 `https://api.deepseek.com` |
 | `env.API_KEY` | DeepSeek API Key |
 | `thinkingEnabled` | 是否启用思考模式 |
-| `reasoningEffort` | 推理强度，常用 `"high"` 或 `"max"` |
+| `reasoningEffort` | 推理强度，可选 `"low"`、`"high"` 或 `"max"` |
 
 也可以在项目目录中创建 `.deepcode/settings.json`，为当前项目单独设置模型、权限或 MCP。
 

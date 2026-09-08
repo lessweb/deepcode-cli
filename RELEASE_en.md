@@ -2,11 +2,11 @@
 
 Deep Code uses three scripts to manage version releases in the monorepo:
 
-| Script | Command | Purpose |
-|--------|---------|---------|
-| `scripts/version.js` | `npm run release:version` | Bump all workspace package versions + regenerate lockfile |
-| `scripts/prepare-package.js` | `npm run prepare:package` | Build CLI + quality checks + publish to npm + git commit & tag |
-| `scripts/prepare-vscode.js` | `npm run prepare:vscode` | Build VSCode extension + quality checks + publish to VS Code Marketplace + git commit & tag |
+| Script                       | Command                   | Purpose                                                                                     |
+| ---------------------------- | ------------------------- | ------------------------------------------------------------------------------------------- |
+| `scripts/version.js`         | `npm run release:version` | Sync root and workspace package versions + update lockfile                                  |
+| `scripts/prepare-package.js` | `npm run prepare:package` | Build CLI + quality checks + publish to npm + git commit & tag                              |
+| `scripts/prepare-vscode.js`  | `npm run prepare:vscode`  | Build VSCode extension + quality checks + publish to VS Code Marketplace + git commit & tag |
 
 Release flow: bump version first, then publish CLI and VSCode extension separately.
 
@@ -26,16 +26,16 @@ npm run release:version -- <bump-type | version> [options]
 
 ### Supported Bump Types
 
-| Type | Current | Result | Description |
-|------|---------|--------|-------------|
-| `patch` | `0.1.31` | `0.1.32` | Patch version +1 |
-| `minor` | `0.1.31` | `0.2.0` | Minor version +1, patch reset |
-| `major` | `0.1.31` | `1.0.0` | Major version +1, minor/patch reset |
-| `prepatch` | `0.1.31` | `0.1.32-0` | Pre-release patch |
-| `preminor` | `0.1.31` | `0.2.0-0` | Pre-release minor |
-| `premajor` | `0.1.31` | `1.0.0-0` | Pre-release major |
-| `prerelease` | `0.1.31` | `0.1.32-0` | Increment pre-release number |
-| `from-git` | — | Read from latest git tag | For cases where tag exists but package.json not updated |
+| Type         | Current  | Result                   | Description                                             |
+| ------------ | -------- | ------------------------ | ------------------------------------------------------- |
+| `patch`      | `0.1.31` | `0.1.32`                 | Patch version +1                                        |
+| `minor`      | `0.1.31` | `0.2.0`                  | Minor version +1, patch reset                           |
+| `major`      | `0.1.31` | `1.0.0`                  | Major version +1, minor/patch reset                     |
+| `prepatch`   | `0.1.31` | `0.1.32-0`               | Pre-release patch                                       |
+| `preminor`   | `0.1.31` | `0.2.0-0`                | Pre-release minor                                       |
+| `premajor`   | `0.1.31` | `1.0.0-0`                | Pre-release major                                       |
+| `prerelease` | `0.1.31` | `0.1.32-0`               | Increment pre-release number                            |
+| `from-git`   | —        | Read from latest git tag | For cases where tag exists but package.json not updated |
 
 You can also specify an exact version:
 
@@ -71,8 +71,8 @@ npm run release:version -- premajor --preid alpha
 
 1. Reads current version from `packages/core/package.json`
 2. Calculates target version based on bump type
-3. Updates `version` field in **all** `packages/*/package.json` (core, cli, vscode-ide-companion)
-4. Deletes old `package-lock.json` and regenerates via `npm install --package-lock-only`
+3. Updates the root `package.json` and **all** `packages/*/package.json` version fields (core, cli, vscode-ide-companion)
+4. Updates the root and workspace package version entries in `package-lock.json`
 
 ### Examples
 
@@ -116,25 +116,25 @@ npm run prepare:package -- <version> [options]
 
 ### Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `<version>` | **Required**. Semver version to publish |
-| `--tag <dist-tag>` | npm dist-tag, default `"latest"`, commonly `beta` or `next` |
-| `--dry-run` | Preview mode, no actual writes |
-| `--force` | Skip main branch check, allow publishing from other branches |
+| Argument           | Description                                                  |
+| ------------------ | ------------------------------------------------------------ |
+| `<version>`        | **Required**. Semver version to publish                      |
+| `--tag <dist-tag>` | npm dist-tag, default `"latest"`, commonly `beta` or `next`  |
+| `--dry-run`        | Preview mode, no actual writes                               |
+| `--force`          | Skip main branch check, allow publishing from other branches |
 
 ### Execution Flow (8 Steps)
 
-| Step | Action | Description |
-|------|--------|-------------|
-| 1 | Git check | Working tree must be clean, must be on main branch (`--force` skips branch check) |
-| 2 | npm auth | Checks `npm whoami`, aborts if not logged in |
-| 3 | Update versions | Updates `packages/core` and `packages/cli` version fields |
-| 4 | Quality checks | `npm run check` (typecheck + eslint + prettier) |
-| 5 | Tests | `npm run test --workspaces` |
-| 6 | Build | `npm run build` (core tsc + esbuild inlines core and all deps into `dist/cli.js`) |
-| 7 | Publish CLI | Writes `dist/package.json` with `dependencies: {}`, runs `npm publish` from `dist/` |
-| 8 | Git commit & tag | `chore(release): v<version>` + `git tag v<version>` |
+| Step | Action           | Description                                                                         |
+| ---- | ---------------- | ----------------------------------------------------------------------------------- |
+| 1    | Git check        | Working tree must be clean, must be on main branch (`--force` skips branch check)   |
+| 2    | npm auth         | Checks `npm whoami`, aborts if not logged in                                        |
+| 3    | Update versions  | Updates `packages/core` and `packages/cli` version fields                           |
+| 4    | Quality checks   | `npm run check` (typecheck + eslint + prettier)                                     |
+| 5    | Tests            | `npm run test --workspaces`                                                         |
+| 6    | Build            | `npm run build` (core tsc + esbuild inlines core and all deps into `dist/cli.js`)   |
+| 7    | Publish CLI      | Writes `dist/package.json` with `dependencies: {}`, runs `npm publish` from `dist/` |
+| 8    | Git commit & tag | `chore(release): v<version>` + `git tag v<version>`                                 |
 
 ### Examples
 
@@ -192,23 +192,23 @@ VSCE_PAT=<token> npm run prepare:vscode -- <version> [options]
 
 ### Arguments
 
-| Argument | Description |
-|----------|-------------|
-| `<version>` | **Required**. Semver version to publish |
-| `--dry-run` | Preview mode, no actual writes |
-| `--force` | Skip main branch check, allow publishing from other branches |
+| Argument    | Description                                                  |
+| ----------- | ------------------------------------------------------------ |
+| `<version>` | **Required**. Semver version to publish                      |
+| `--dry-run` | Preview mode, no actual writes                               |
+| `--force`   | Skip main branch check, allow publishing from other branches |
 
 ### Execution Flow (7 Steps)
 
-| Step | Action | Description |
-|------|--------|-------------|
-| 1 | Git check | Working tree must be clean, must be on main branch |
-| 2 | VSCE_PAT check | Environment variable must be set |
-| 3 | Update versions | Updates `packages/core`, `packages/cli`, and `packages/vscode-ide-companion` version fields |
-| 4 | Quality checks | `npm run check` (typecheck + eslint + prettier) |
-| 5 | Tests | `npm run test --workspaces` |
-| 6 | Build | `npm run build:vscode` (core tsc + esbuild bundle extension + copy templates + vsce package) |
-| 7 | Publish | `vsce publish <version> --no-dependencies` to VS Code Marketplace |
+| Step | Action          | Description                                                                                  |
+| ---- | --------------- | -------------------------------------------------------------------------------------------- |
+| 1    | Git check       | Working tree must be clean, must be on main branch                                           |
+| 2    | VSCE_PAT check  | Environment variable must be set                                                             |
+| 3    | Update versions | Updates `packages/core`, `packages/cli`, and `packages/vscode-ide-companion` version fields  |
+| 4    | Quality checks  | `npm run check` (typecheck + eslint + prettier)                                              |
+| 5    | Tests           | `npm run test --workspaces`                                                                  |
+| 6    | Build           | `npm run build:vscode` (core tsc + esbuild bundle extension + copy templates + vsce package) |
+| 7    | Publish         | `vsce publish <version> --no-dependencies` to VS Code Marketplace                            |
 
 ### Examples
 

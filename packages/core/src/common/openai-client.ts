@@ -3,7 +3,7 @@ import * as os from "os";
 import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
-import { resolveCurrentSettings } from "../settings";
+import { readDeepcodePlusApiKey, resolveCurrentSettings, type ReasoningEffort } from "../settings";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
 // global fetch (undici) only keeps connections alive for 4 seconds, which
@@ -19,26 +19,46 @@ const keepAliveAgent = new Agent({ keepAliveTimeout: 180_000 });
 let cachedOpenAI: OpenAI | null = null;
 let cachedOpenAIKey = "";
 
+export const DEEPCODE_PLUS_BASE_URL = "https://deepcode.vegamo.cn/plugin/openai";
+
+export function resolveOpenAIConnection(
+  settings: { apiKey?: string; baseURL: string },
+  plusApiKey?: string
+): { apiKey?: string; baseURL: string } {
+  if (settings.apiKey) {
+    return { apiKey: settings.apiKey, baseURL: settings.baseURL };
+  }
+  if (plusApiKey) {
+    return { apiKey: plusApiKey, baseURL: DEEPCODE_PLUS_BASE_URL };
+  }
+  return { apiKey: undefined, baseURL: settings.baseURL };
+}
+
 export function createOpenAIClient(projectRoot: string = process.cwd()): {
   client: OpenAI | null;
+  apiKey?: string;
   model: string;
   baseURL: string;
   temperature?: number;
   thinkingEnabled: boolean;
-  reasoningEffort: "high" | "max";
+  reasoningEffort: ReasoningEffort;
   debugLogEnabled: boolean;
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
   env: Record<string, string>;
   machineId?: string;
+  plusApiKey?: string;
 } {
   const settings = resolveCurrentSettings(projectRoot);
-  if (!settings.apiKey) {
+  const plusApiKey = readDeepcodePlusApiKey();
+  const connection = resolveOpenAIConnection(settings, plusApiKey);
+  if (!connection.apiKey) {
     return {
       client: null,
+      apiKey: undefined,
       model: settings.model,
-      baseURL: settings.baseURL,
+      baseURL: connection.baseURL,
       temperature: settings.temperature,
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
@@ -48,15 +68,17 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
       webSearchTool: settings.webSearchTool,
       env: settings.env,
       machineId: getMachineId(),
+      plusApiKey,
     };
   }
 
-  const cacheKey = `${settings.apiKey}::${settings.baseURL}`;
+  const cacheKey = `${connection.apiKey}::${connection.baseURL}`;
   if (cachedOpenAI && cachedOpenAIKey === cacheKey) {
     return {
       client: cachedOpenAI,
+      apiKey: connection.apiKey,
       model: settings.model,
-      baseURL: settings.baseURL,
+      baseURL: connection.baseURL,
       temperature: settings.temperature,
       thinkingEnabled: settings.thinkingEnabled,
       reasoningEffort: settings.reasoningEffort,
@@ -66,12 +88,13 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
       webSearchTool: settings.webSearchTool,
       env: settings.env,
       machineId: getMachineId(),
+      plusApiKey,
     };
   }
 
   cachedOpenAI = new OpenAI({
-    apiKey: settings.apiKey,
-    baseURL: settings.baseURL || undefined,
+    apiKey: connection.apiKey,
+    baseURL: connection.baseURL || undefined,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     fetch: (url: any, init: any) => undiciFetch(url, { ...init, dispatcher: keepAliveAgent }),
   });
@@ -92,8 +115,9 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
 
   return {
     client: cachedOpenAI,
+    apiKey: connection.apiKey,
     model: settings.model,
-    baseURL: settings.baseURL,
+    baseURL: connection.baseURL,
     temperature: settings.temperature,
     thinkingEnabled: settings.thinkingEnabled,
     reasoningEffort: settings.reasoningEffort,
@@ -103,6 +127,7 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     webSearchTool: settings.webSearchTool,
     env: settings.env,
     machineId: getMachineId(),
+    plusApiKey,
   };
 }
 

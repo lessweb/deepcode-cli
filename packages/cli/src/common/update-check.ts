@@ -5,7 +5,7 @@ import * as os from "os";
 import * as path from "path";
 import { render, type Instance } from "ink";
 import { UpdatePrompt, type UpdatePromptChoice } from "../ui";
-import { killProcessTree } from "@vegamo/deepcode-core";
+import { killProcessTree, TENCENT_MIRROR_REGISTRY } from "@vegamo/deepcode-core";
 import type { PackageJson } from "../utils/package";
 
 type UpdateState = {
@@ -21,7 +21,6 @@ type UpdateState = {
 const UPDATE_STATE_FILE = "update-check.json";
 const NPM_VIEW_TIMEOUT_MS = 5000;
 const MAX_NPM_VIEW_OUTPUT_CHARS = 64 * 1024;
-const TENCENT_MIRROR_REGISTRY = "https://mirrors.cloud.tencent.com/npm/";
 export const UPDATE_SUCCESS_MESSAGE = "🎉 Update ran successfully! Please restart Deep Code.";
 
 export async function promptForPendingUpdate(packageInfo: PackageJson): Promise<{ installed: boolean }> {

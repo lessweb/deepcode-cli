@@ -1,7 +1,9 @@
 import { handleAskUserQuestionTool } from "./ask-user-question-handler";
 import { handleBashTool } from "./bash-handler";
 import { handleEditTool } from "./edit-handler";
+import { handleReadImageTool } from "./read-image-handler";
 import { handleReadTool } from "./read-handler";
+import { handleSkillTool } from "./skill-handler";
 import { handleUpdatePlanTool } from "./update-plan-handler";
 import { handleUnderstandImageTool } from "./understand-image-handler";
 import { handleWebSearchTool } from "./web-search-handler";
@@ -9,6 +11,7 @@ import { handleWriteTool } from "./write-handler";
 import type { McpManager } from "../mcp/mcp-manager";
 import type {
   CreateOpenAIClient,
+  SharpLoader,
   ToolCall,
   ToolExecutionHooks,
   ToolExecutionResult,
@@ -18,6 +21,7 @@ import type {
 
 export type {
   CreateOpenAIClient,
+  SharpLoader,
   ToolCall,
   ToolExecutionContext,
   ToolExecutionHooks,
@@ -28,6 +32,7 @@ export type {
   ProcessTimeoutControl,
   BackgroundProcessCompletion,
   ToolExecutionFollowUpMessage,
+  PluginRateLimitedTool,
 } from "../common/tool-types";
 
 const BUILT_IN_TOOL_NAME_ALIASES = new Map<string, string>([
@@ -41,12 +46,19 @@ export class ToolExecutor {
   private readonly projectRoot: string;
   private readonly createOpenAIClient?: CreateOpenAIClient;
   private readonly mcpManager?: McpManager;
+  private readonly loadSharp?: SharpLoader;
   private readonly toolHandlers = new Map<string, ToolHandler>();
 
-  constructor(projectRoot: string, createOpenAIClient?: CreateOpenAIClient, mcpManager?: McpManager) {
+  constructor(
+    projectRoot: string,
+    createOpenAIClient?: CreateOpenAIClient,
+    mcpManager?: McpManager,
+    loadSharp?: SharpLoader
+  ) {
     this.projectRoot = projectRoot;
     this.createOpenAIClient = createOpenAIClient;
     this.mcpManager = mcpManager;
+    this.loadSharp = loadSharp;
     this.registerToolHandlers();
   }
 
@@ -80,8 +92,10 @@ export class ToolExecutor {
   private registerToolHandlers(): void {
     this.toolHandlers.set("bash", handleBashTool);
     this.toolHandlers.set("read", handleReadTool);
+    this.toolHandlers.set("ReadImage", handleReadImageTool);
     this.toolHandlers.set("write", handleWriteTool);
     this.toolHandlers.set("edit", handleEditTool);
+    this.toolHandlers.set("skill", handleSkillTool);
     this.toolHandlers.set("AskUserQuestion", handleAskUserQuestionTool);
     this.toolHandlers.set("UpdatePlan", handleUpdatePlanTool);
     this.toolHandlers.set("UnderstandImage", handleUnderstandImageTool);
@@ -160,6 +174,7 @@ export class ToolExecutor {
         projectRoot: this.projectRoot,
         toolCall,
         createOpenAIClient: this.createOpenAIClient,
+        loadSharp: this.loadSharp,
         onProcessStart: hooks?.onProcessStart,
         onProcessExit: hooks?.onProcessExit,
         onProcessStdout: hooks?.onProcessStdout,
@@ -167,6 +182,8 @@ export class ToolExecutor {
         onBackgroundProcessComplete: hooks?.onBackgroundProcessComplete,
         onBeforeFileMutation: hooks?.onBeforeFileMutation,
         onAfterFileMutation: hooks?.onAfterFileMutation,
+        onPluginRateLimitExceeded: hooks?.onPluginRateLimitExceeded,
+        onLoadSkill: hooks?.onLoadSkill,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

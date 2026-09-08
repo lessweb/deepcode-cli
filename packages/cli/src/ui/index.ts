@@ -14,12 +14,14 @@ export {
   resolvePromptTerminalCursorPosition,
 } from "./hooks/cursor";
 export { default as AppContainer } from "./views/AppContainer";
-export { AskUserQuestionPrompt } from "./views/AskUserQuestionPrompt";
+export { AskUserQuestionPrompt, applyOtherAnswerEdit } from "./views/AskUserQuestionPrompt";
 export {
   PlanImplementationPrompt,
   extractProposedPlan,
+  getClearContextImplementationPrompt,
   getImplementationPrompt,
   getPlanImplementationChoice,
+  type PlanImplementationChoice,
 } from "./views/PlanImplementationPrompt";
 export { MessageView } from "./components";
 export { parseDiffPreview } from "./components/MessageView/utils";
@@ -96,4 +98,4 @@ export {
   type FileMentionToken,
 } from "./core/file-mentions";
 export { findExpandedThinkingId, isCollapsedThinking } from "./core/thinking-state";
-export { buildExitSummaryText, buildResumeHintText } from "./exit-summary";
+export { buildExitSummaryText, buildPluginRateLimitHintText, buildResumeHintText } from "./exit-summary";

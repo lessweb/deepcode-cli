@@ -8,6 +8,7 @@ import type { BackgroundProcessCompletion, ProcessTimeoutControl, ToolExecutionC
 import { handleBashTool } from "../tools/bash-handler";
 import { handleEditTool } from "../tools/edit-handler";
 import { handleReadTool } from "../tools/read-handler";
+import { handleSkillTool } from "../tools/skill-handler";
 import { handleUpdatePlanTool } from "../tools/update-plan-handler";
 import { handleWriteTool } from "../tools/write-handler";
 
@@ -238,6 +239,38 @@ test("UpdatePlan rejects non-string plan payloads", async () => {
   assert.equal(result.ok, false);
   assert.equal(result.name, "UpdatePlan");
   assert.match(result.error ?? "", /InputValidationError/);
+});
+
+test("Skill delegates loading through the onLoadSkill hook", async () => {
+  const workspace = createTempWorkspace();
+  const loaded: string[] = [];
+
+  const result = await handleSkillTool(
+    { name: "skill-writer" },
+    createContext("skill-load", workspace, {
+      onLoadSkill: async (skillName) => {
+        loaded.push(skillName);
+        return { ok: true, name: "skill", output: `Loaded skill: ${skillName}.` };
+      },
+    })
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.name, "skill");
+  assert.equal(result.output, "Loaded skill: skill-writer.");
+  assert.deepEqual(loaded, ["skill-writer"]);
+});
+
+test("Skill rejects empty names and reports missing hooks", async () => {
+  const workspace = createTempWorkspace();
+
+  const invalid = await handleSkillTool({ name: "  " }, createContext("skill-invalid", workspace));
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.error ?? "", /InputValidationError/);
+
+  const missingHook = await handleSkillTool({ name: "skill-writer" }, createContext("skill-no-hook", workspace));
+  assert.equal(missingHook.ok, false);
+  assert.match(missingHook.error ?? "", /Skill loading is not available in this context/);
 });
 
 test("Read returns snippet metadata and Edit can scope replacements by snippet_id", async () => {
@@ -1164,7 +1197,7 @@ test("Edit preserves CRLF line endings for existing files", async () => {
   assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\r\ngamma\r\n");
 });
 
-test("Read returns an acknowledgement for images and attaches the image as a follow-up system message", async () => {
+test("Read rejects images without attaching their contents", async () => {
   const workspace = createTempWorkspace();
   const filePath = path.join(workspace, "pixel.png");
   fs.writeFileSync(
@@ -1177,22 +1210,9 @@ test("Read returns an acknowledgement for images and attaches the image as a fol
 
   const readResult = await handleReadTool({ file_path: filePath }, createContext("image-read", workspace));
 
-  assert.equal(readResult.ok, true);
-  assert.equal(readResult.output, "File loaded.");
-  assert.equal(readResult.metadata?.mime, "image/png");
-  assert.equal(Array.isArray(readResult.followUpMessages), true);
-  assert.equal(readResult.followUpMessages?.length, 1);
-
-  const followUpMessage = readResult.followUpMessages?.[0];
-  assert.equal(followUpMessage?.role, "system");
-  assert.match(followUpMessage?.content ?? "", /pixel\.png/);
-  const contentParams = Array.isArray(followUpMessage?.contentParams) ? followUpMessage.contentParams : [];
-  assert.equal(contentParams.length, 1);
-  assert.equal((contentParams[0] as { type?: unknown }).type, "image_url");
-  assert.match(
-    String((contentParams[0] as { image_url?: { url?: unknown } }).image_url?.url ?? ""),
-    /^data:image\/png;base64,/
-  );
+  assert.equal(readResult.ok, false);
+  assert.match(readResult.error ?? "", /not supported by read/);
+  assert.equal(readResult.followUpMessages, undefined);
 });
 
 test("Read reports PDFs as binary without attaching their contents", async () => {

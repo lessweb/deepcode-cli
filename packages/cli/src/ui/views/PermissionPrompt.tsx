@@ -30,8 +30,10 @@ type PromptOption = {
 
 const ALWAYS_ALLOWED_SCOPES = new Set<AskPermissionScope>([
   "read-in-cwd",
+  "read-in-tmp",
   "read-out-cwd",
   "write-in-cwd",
+  "write-in-tmp",
   "write-out-cwd",
   "delete-in-cwd",
   "delete-out-cwd",
@@ -229,6 +231,8 @@ function isAlwaysAllowedScope(scope: AskPermissionScope): scope is PermissionSco
 export function getScopeRiskColor(scope: AskPermissionScope): string {
   switch (scope) {
     case "read-in-cwd":
+    case "read-in-tmp":
+    case "write-in-tmp":
     case "query-git-log":
       return "#22c55e";
     case "read-out-cwd":
@@ -251,10 +255,14 @@ function describeScope(scope: PermissionScope): string {
   switch (scope) {
     case "read-in-cwd":
       return "reads inside this workspace";
+    case "read-in-tmp":
+      return "reads inside system temporary directories";
     case "read-out-cwd":
       return "reads outside this workspace";
     case "write-in-cwd":
       return "writes inside this workspace";
+    case "write-in-tmp":
+      return "writes inside system temporary directories";
     case "write-out-cwd":
       return "writes outside this workspace";
     case "delete-in-cwd":

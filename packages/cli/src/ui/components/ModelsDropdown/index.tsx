@@ -11,11 +11,12 @@ type ThinkingModeOption = {
   reasoningEffort?: ReasoningEffort;
 };
 
-export const MODEL_COMMAND_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash"] as const;
+export const MODEL_COMMAND_MODELS = ["deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"] as const;
 
 export const MODEL_COMMAND_THINKING_OPTIONS: ThinkingModeOption[] = [
   { label: "Thinking mode [max]", thinkingEnabled: true, reasoningEffort: "max" },
   { label: "Thinking mode [high]", thinkingEnabled: true, reasoningEffort: "high" },
+  { label: "Thinking mode [low]", thinkingEnabled: true, reasoningEffort: "low" },
   { label: "No thinking", thinkingEnabled: false },
 ];
 

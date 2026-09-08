@@ -120,6 +120,37 @@ test("renderMessageToStdout renders user messages with > prefix", () => {
   assert.ok(output.includes("> fix the bug"));
 });
 
+test("MessageView renders only answer user messages as Markdown", () => {
+  const regular = makeSessionMessage({ role: "user", content: "**Questions answered**" });
+  const answers = makeSessionMessage({
+    role: "user",
+    content: "**Questions answered**",
+    meta: { isAnswers: true },
+  });
+
+  const regularOutput = stripAnsi(
+    renderToString(React.createElement(MessageView, { message: regular, width: 80 }), { columns: 80 })
+  );
+  const answersOutput = stripAnsi(
+    renderToString(React.createElement(MessageView, { message: answers, width: 80 }), { columns: 80 })
+  );
+
+  assert.match(regularOutput, /\*\*Questions answered\*\*/);
+  assert.doesNotMatch(answersOutput, /\*\*/);
+  assert.match(answersOutput, /Questions answered/);
+});
+
+test("renderMessageToStdout renders answer user messages as Markdown", () => {
+  const msg = makeSessionMessage({
+    role: "user",
+    content: "**Questions answered**",
+    meta: { isAnswers: true },
+  });
+  const output = stripAnsi(renderMessageToStdout(msg, RawMode.Raw));
+
+  assert.equal(output, "> Questions answered");
+});
+
 test("renderMessageToStdout shows (no content) for empty user messages", () => {
   const msg = makeSessionMessage({ role: "user", content: "" });
   const output = renderMessageToStdout(msg, RawMode.Raw);
@@ -267,6 +298,19 @@ test("renderMessageToStdout renders system skill load messages", () => {
   });
   const output = renderMessageToStdout(msg, RawMode.Raw);
   assert.ok(output.includes("⚡ Loaded skill: code-review"));
+});
+
+test("MessageView renders tool skill load messages with the existing skill status", () => {
+  const msg = makeSessionMessage({
+    role: "tool",
+    content: JSON.stringify({ ok: true, name: "skill", output: "full skill document" }),
+    meta: { skill: { name: "code-review", path: "", description: "" } },
+  });
+  const output = renderToString(React.createElement(MessageView, { message: msg }), { columns: 80 });
+
+  assert.ok(output.includes("⚡ Loaded skill: code-review"));
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw).includes("⚡ Loaded skill: code-review"), true);
+  assert.equal(output.includes("full skill document"), false);
 });
 
 test("renderMessageToStdout renders system summary messages", () => {

@@ -733,6 +733,10 @@ body {
   max-width: 80%;
 }
 
+.bubble.user.answers {
+  white-space: normal;
+}
+
 .bubble.system {
   background: transparent;
   border-color: transparent;
@@ -1081,8 +1085,26 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
+}
+
+.bubble[data-thinking-live="true"] .bubble-title-text {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.thinking-preview {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  flex: 1 0 0;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.thinking-preview[hidden] {
+  display: none;
 }
 
 @keyframes spin {
@@ -1097,6 +1119,56 @@ body {
   padding: 12px 16px 16px;
   background: var(--vscode-sideBar-background);
   flex-shrink: 0;
+}
+
+.plugin-rate-limit-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--vscode-notificationsWarningIcon-foreground, #f59e0b);
+  border-left-width: 3px;
+  border-radius: 6px;
+  background: var(--vscode-notifications-background, var(--vscode-input-background));
+  color: var(--vscode-foreground);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.plugin-rate-limit-notice[hidden] {
+  display: none;
+}
+
+.plugin-rate-limit-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.plugin-rate-limit-text a {
+  color: var(--vscode-textLink-foreground);
+}
+
+.plugin-rate-limit-text a:hover {
+  color: var(--vscode-textLink-activeForeground);
+}
+
+.plugin-rate-limit-close {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--vscode-descriptionForeground);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  padding: 0 3px;
+}
+
+.plugin-rate-limit-close:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+  color: var(--vscode-foreground);
 }
 
 .input-wrap {

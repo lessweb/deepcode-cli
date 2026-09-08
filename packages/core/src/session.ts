@@ -2,6 +2,8 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import * as crypto from "crypto";
+import { stripVTControlCharacters } from "node:util";
+import { fileURLToPath, pathToFileURL } from "url";
 import matter from "gray-matter";
 import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
@@ -9,9 +11,9 @@ import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
 import { readTextFileWithMetadata } from "./common/file-utils";
 import {
+  buildSkillCatalogPrompt,
   buildSkillDocumentsPrompt,
   getCompactPrompt,
-  getDefaultSkillPrompt,
   getExtensionRoot,
   getPlanModePrompt,
   getRuntimeContext,
@@ -24,11 +26,20 @@ import {
   type CreateOpenAIClient,
   type ProcessTimeoutControl,
   type ProcessTimeoutInfo,
+  type PluginRateLimitedTool,
+  type SharpLoader,
   type ToolCallExecution,
   type ToolExecutionHooks,
+  type ToolExecutionFollowUpMessage,
+  type ToolExecutionResult,
 } from "./tools/executor";
 import { McpManager } from "./mcp/mcp-manager";
 import {
+  DEFAULT_FILE_EXPIRES_AFTER_SECONDS,
+  DEFAULT_FILE_QUOTA_CLEANUP_BATCH,
+  DEFAULT_FILE_REFRESH_MARGIN_SECONDS,
+  DEFAULT_FILES_API_TIMEOUT_MS,
+  DEFAULT_MAX_REQUEST_FILES_BYTES,
   getDefaultAutoCompactWindow,
   type McpServerConfig,
   type PermissionScope,
@@ -55,7 +66,24 @@ import {
 import { clearSessionWorkingDir } from "./tools/bash-handler";
 import { reportNewPrompt } from "./common/telemetry";
 import { OpenAIMessageConverter } from "./common/openai-message-converter";
-import { supportsMultimodal } from "./common/model-capabilities";
+import { supportsMultimodal, type MultimodalMode } from "./common/model-capabilities";
+import {
+  decodeDeepSeekImageDataUrl,
+  DeepSeekFileStore,
+  type DeepSeekFileReference,
+  type DeepSeekFilesPolicy,
+} from "./common/deepseek-files";
+import { loadImageFile } from "./tools/image-file";
+import {
+  getLlmRetryDelayMs,
+  getLlmRetryAfterMs,
+  isRetryableLlmError,
+  LLM_STREAM_IDLE_TIMEOUT_MS,
+  LlmStreamDisconnectedError,
+  LlmStreamIdleTimeoutError,
+  MAX_LLM_RETRIES,
+  waitForLlmRetry,
+} from "./common/llm-retry";
 
 export type { PermissionScope } from "./settings";
 export type {
@@ -259,6 +287,7 @@ export type SessionEntry = {
   processes: Map<string, SessionProcessEntry> | null; // {pid: process info}
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
+  pluginRateLimitedTool?: PluginRateLimitedTool;
   forkedFrom?: {
     sessionId: string;
     messageId: string;
@@ -278,9 +307,11 @@ export type MessageMeta = {
   paramsMd?: string;
   resultMd?: string;
   asThinking?: boolean;
+  isAnswers?: boolean;
   isSummary?: boolean;
   isModelChange?: boolean;
   skill?: SkillInfo;
+  skillCatalog?: Array<{ name: string; description: string }>;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;
 };
@@ -314,11 +345,12 @@ export type UserPromptContent = {
   permissions?: UserToolPermission[];
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
+  isAnswers?: boolean;
 };
 
 type PersistedPromptImage = {
   buffer: Buffer;
-  extension: ".jpg" | ".png" | ".webp";
+  extension: ".gif" | ".jpg" | ".png" | ".webp";
 };
 
 export type SkillInfo = {
@@ -334,6 +366,13 @@ export type SessionManagerOptions = {
   createOpenAIClient: CreateOpenAIClient;
   getResolvedSettings: () => {
     model: string;
+    multimodal?: MultimodalMode;
+    filesApiEnabled?: boolean;
+    filesApiTimeoutMs?: number;
+    fileExpiresAfterSeconds?: number;
+    fileRefreshMarginSeconds?: number;
+    fileQuotaCleanupBatch?: number;
+    maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
@@ -345,8 +384,10 @@ export type SessionManagerOptions = {
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   onSessionEntryUpdated?: (entry: SessionEntry) => void;
   onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
+  onLlmRetry?: (event: LlmRetryEvent) => void;
   onMcpStatusChanged?: () => void;
   onProcessStdout?: (pid: number, chunk: string) => void;
+  loadSharp?: SharpLoader;
   nonInteractive?: boolean;
 };
 
@@ -356,7 +397,17 @@ export type LlmStreamProgress = {
   startedAt: string;
   estimatedTokens: number;
   formattedTokens: string;
+  previewText?: string;
   phase: "start" | "update" | "end";
+};
+
+export type LlmRetryEvent = {
+  requestId: string;
+  sessionId?: string;
+  error: string;
+  attempt: number;
+  maxRetries: number;
+  delayMs: number;
 };
 
 export class SessionManager {
@@ -364,6 +415,13 @@ export class SessionManager {
   private readonly createOpenAIClient: CreateOpenAIClient;
   private readonly getResolvedSettings: () => {
     model: string;
+    multimodal?: MultimodalMode;
+    filesApiEnabled?: boolean;
+    filesApiTimeoutMs?: number;
+    fileExpiresAfterSeconds?: number;
+    fileRefreshMarginSeconds?: number;
+    fileQuotaCleanupBatch?: number;
+    maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
     webSearchTool?: string;
@@ -374,6 +432,7 @@ export class SessionManager {
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
+  private readonly onLlmRetry?: (event: LlmRetryEvent) => void;
   private readonly onMcpStatusChanged?: () => void;
   private readonly onProcessStdout?: (pid: number, chunk: string) => void;
   private readonly nonInteractive: boolean;
@@ -383,9 +442,11 @@ export class SessionManager {
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
+  private readonly loadSharp?: SharpLoader;
   private readonly mcpManager = new McpManager();
   private mcpToolDefinitions: ToolDefinition[] = [];
   private readonly messageConverter: OpenAIMessageConverter;
+  private readonly deepSeekFiles = new DeepSeekFileStore();
 
   constructor(options: SessionManagerOptions) {
     this.projectRoot = options.projectRoot;
@@ -394,10 +455,12 @@ export class SessionManager {
     this.onAssistantMessage = options.onAssistantMessage;
     this.onSessionEntryUpdated = options.onSessionEntryUpdated;
     this.onLlmStreamProgress = options.onLlmStreamProgress;
+    this.onLlmRetry = options.onLlmRetry;
     this.onMcpStatusChanged = options.onMcpStatusChanged;
     this.onProcessStdout = options.onProcessStdout;
     this.nonInteractive = options.nonInteractive === true;
-    this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager);
+    this.loadSharp = options.loadSharp;
+    this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager, options.loadSharp);
     this.mcpManager.prepare(this.getResolvedSettings().mcpServers);
     this.messageConverter = new OpenAIMessageConverter({
       renderInitPrompt: () => this.renderInitCommandPrompt(),
@@ -411,9 +474,10 @@ export class SessionManager {
   buildOpenAIMessages(
     messages: SessionMessage[],
     thinkingEnabled: boolean,
-    model: string
+    model: string,
+    multimodal?: MultimodalMode
   ): ChatCompletionMessageParam[] {
-    return this.messageConverter.buildMessages(messages, thinkingEnabled, model);
+    return this.messageConverter.buildMessages(messages, thinkingEnabled, model, multimodal);
   }
 
   async initMcpServers(servers?: Record<string, McpServerConfig>): Promise<void> {
@@ -483,12 +547,23 @@ export class SessionManager {
     return `${Math.round(roundedTokens / 1000)}k`;
   }
 
+  private formatStreamPreview(text?: string): string | undefined {
+    if (text === undefined) {
+      return undefined;
+    }
+
+    return stripVTControlCharacters(text)
+      .replace(/\r\n|[\r\n\t\u2028\u2029]/g, " ")
+      .replace(/[\x00-\x1f\x7f-\x9f]/g, "");
+  }
+
   private emitLlmStreamProgress(
     requestId: string,
     startedAt: string,
     estimatedTokens: number,
     phase: LlmStreamProgress["phase"],
-    sessionId?: string
+    sessionId?: string,
+    previewText?: string
   ): void {
     this.onLlmStreamProgress?.({
       requestId,
@@ -496,6 +571,7 @@ export class SessionManager {
       startedAt,
       estimatedTokens: Math.round(estimatedTokens),
       formattedTokens: this.formatEstimatedTokens(estimatedTokens),
+      previewText: this.formatStreamPreview(previewText),
       phase,
     });
   }
@@ -518,6 +594,95 @@ export class SessionManager {
     throw error;
   }
 
+  private getDeepSeekFilesSettings(): {
+    enabled: boolean;
+    maxRequestFilesBytes: number;
+    policy: DeepSeekFilesPolicy;
+  } {
+    const settings = this.getResolvedSettings();
+    return {
+      enabled: settings.filesApiEnabled === true,
+      maxRequestFilesBytes: settings.maxRequestFilesBytes ?? DEFAULT_MAX_REQUEST_FILES_BYTES,
+      policy: {
+        timeoutMs: settings.filesApiTimeoutMs ?? DEFAULT_FILES_API_TIMEOUT_MS,
+        expiresAfterSeconds: settings.fileExpiresAfterSeconds ?? DEFAULT_FILE_EXPIRES_AFTER_SECONDS,
+        refreshMarginSeconds: settings.fileRefreshMarginSeconds ?? DEFAULT_FILE_REFRESH_MARGIN_SECONDS,
+        quotaCleanupBatch: settings.fileQuotaCleanupBatch ?? DEFAULT_FILE_QUOTA_CLEANUP_BATCH,
+      },
+    };
+  }
+
+  private async buildMessagesWithDeepSeekFiles(
+    messages: SessionMessage[],
+    thinkingEnabled: boolean,
+    model: string,
+    apiKey: string,
+    signal: AbortSignal
+  ): Promise<{ messages: ChatCompletionMessageParam[]; references: DeepSeekFileReference[] }> {
+    const settings = this.getDeepSeekFilesSettings();
+    const converted = this.messageConverter.buildMessages(messages, thinkingEnabled, model, "on");
+    const images: Array<{
+      messageIndex: number;
+      contentIndex: number;
+      image: ReturnType<typeof decodeDeepSeekImageDataUrl>;
+    }> = [];
+    let totalBytes = 0;
+    const uniqueImages = new Map<string, ReturnType<typeof decodeDeepSeekImageDataUrl>>();
+
+    for (let messageIndex = 0; messageIndex < converted.length; messageIndex += 1) {
+      const content = (converted[messageIndex] as { content?: unknown }).content;
+      if (!Array.isArray(content)) {
+        continue;
+      }
+      for (let contentIndex = 0; contentIndex < content.length; contentIndex += 1) {
+        const part = content[contentIndex] as { type?: unknown; image_url?: { url?: unknown } };
+        if (part.type !== "image_url" || typeof part.image_url?.url !== "string") {
+          continue;
+        }
+        const image = decodeDeepSeekImageDataUrl(part.image_url.url, images.length);
+        if (!uniqueImages.has(image.hash)) {
+          totalBytes += image.buffer.byteLength;
+          if (totalBytes > settings.maxRequestFilesBytes) {
+            throw new Error(
+              `Images in this request exceed the configured ${settings.maxRequestFilesBytes}-byte Files API limit.`
+            );
+          }
+          uniqueImages.set(image.hash, image);
+        }
+        images.push({ messageIndex, contentIndex, image });
+      }
+    }
+
+    const uniqueImageList = [...uniqueImages.values()];
+    const references = await Promise.all(
+      uniqueImageList.map((image) => this.deepSeekFiles.ensureUploaded(image, apiKey, settings.policy, signal))
+    );
+    const referencesByHash = new Map(uniqueImageList.map((image, index) => [image.hash, references[index]] as const));
+    const result = converted.map((message) => {
+      const content = (message as { content?: unknown }).content;
+      return Array.isArray(content) ? ({ ...message, content: [...content] } as ChatCompletionMessageParam) : message;
+    });
+    for (let index = 0; index < images.length; index += 1) {
+      const image = images[index];
+      const content = (result[image.messageIndex] as { content: unknown[] }).content;
+      content[image.contentIndex] = { type: "file", file_id: referencesByHash.get(image.image.hash)!.fileId };
+    }
+    return { messages: result, references };
+  }
+
+  private isRejectedDeepSeekFile(error: unknown): boolean {
+    const status = (error as { status?: unknown } | null)?.status;
+    if (status !== 400) {
+      return false;
+    }
+    const detail = error instanceof Error ? error.message : String(error);
+    const file = /\bfile(?:[_ -]?(?:id|api|not[_ -]?found|deleted|expired))?/i.test(detail);
+    const missing =
+      /(?:expired|not[_ -]?found|deleted|do(?:es)? not exist|not created under (?:this|your) account)/i.test(detail);
+    const invalidId = /(?:invalid.{0,20}file[_ -]?(?:id|api)|file[_ -]?(?:id|api).{0,20}invalid)/i.test(detail);
+    return file && (missing || invalidId);
+  }
+
   private async createChatCompletionStream(
     client: NonNullable<ReturnType<CreateOpenAIClient>["client"]>,
     request: Record<string, unknown>,
@@ -529,10 +694,85 @@ export class SessionManager {
     usage?: ModelUsage | null;
   }> {
     const requestId = crypto.randomUUID();
+    const signal = options?.signal as AbortSignal | undefined;
+    for (let retryCount = 0; ; retryCount += 1) {
+      try {
+        return await this.createChatCompletionStreamAttempt(client, request, options, sessionId, debug, requestId);
+      } catch (error) {
+        if (signal?.aborted || retryCount >= MAX_LLM_RETRIES || !isRetryableLlmError(error)) {
+          throw error;
+        }
+        const attempt = retryCount + 1;
+        const delayMs = getLlmRetryAfterMs(error) ?? getLlmRetryDelayMs(attempt);
+        const errorMessage = describeLlmError(error);
+        if (sessionId) {
+          this.onAssistantMessage(
+            this.buildAssistantMessage(sessionId, `Request failed: ${errorMessage}`, null),
+            false
+          );
+        }
+        this.onLlmRetry?.({
+          requestId,
+          sessionId,
+          error: errorMessage,
+          attempt,
+          maxRetries: MAX_LLM_RETRIES,
+          delayMs,
+        });
+        await waitForLlmRetry(delayMs, signal);
+      }
+    }
+  }
+
+  private async createChatCompletionStreamAttempt(
+    client: NonNullable<ReturnType<CreateOpenAIClient>["client"]>,
+    request: Record<string, unknown>,
+    options: Record<string, unknown> | undefined,
+    sessionId: string | undefined,
+    debug: ChatCompletionDebugOptions | undefined,
+    requestId: string
+  ): Promise<{
+    choices?: Array<{ message?: Record<string, unknown> }>;
+    usage?: ModelUsage | null;
+  }> {
     const startedAt = new Date().toISOString();
     const startedAtMs = Date.now();
     let estimatedTokens = 0;
     this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "start", sessionId);
+
+    const outerSignal = options?.signal as AbortSignal | undefined;
+    const attemptController = new AbortController();
+    let idleTimedOut = false;
+    let idleTimer: ReturnType<typeof setTimeout> | null = null;
+    let idleTimeoutPromise: Promise<never>;
+    const forwardAbort = () => attemptController.abort(outerSignal?.reason);
+    const clearAttempt = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+        idleTimer = null;
+      }
+      outerSignal?.removeEventListener("abort", forwardAbort);
+    };
+    const resetIdleTimer = () => {
+      if (idleTimer) {
+        clearTimeout(idleTimer);
+      }
+      idleTimeoutPromise = new Promise((_, reject) => {
+        idleTimer = setTimeout(() => {
+          idleTimedOut = true;
+          const error = new LlmStreamIdleTimeoutError();
+          attemptController.abort(error);
+          reject(error);
+        }, LLM_STREAM_IDLE_TIMEOUT_MS);
+      });
+    };
+    if (outerSignal?.aborted) {
+      forwardAbort();
+    } else {
+      outerSignal?.addEventListener("abort", forwardAbort, { once: true });
+    }
+    resetIdleTimer();
+    const attemptOptions = { ...options, signal: attemptController.signal, maxRetries: 0 };
 
     const streamRequest = {
       ...request,
@@ -545,13 +785,17 @@ export class SessionManager {
 
     let response: unknown;
     try {
-      response = await (
-        client.chat.completions.create as unknown as (
-          body: Record<string, unknown>,
-          options?: Record<string, unknown>
-        ) => Promise<unknown>
-      )(streamRequest, options);
+      response = await Promise.race([
+        (
+          client.chat.completions.create as unknown as (
+            body: Record<string, unknown>,
+            options?: Record<string, unknown>
+          ) => Promise<unknown>
+        )(streamRequest, attemptOptions),
+        idleTimeoutPromise!,
+      ]);
     } catch (error) {
+      const requestError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
         location: debug?.location ?? "SessionManager.createChatCompletionStream:create",
@@ -560,9 +804,9 @@ export class SessionManager {
         model: typeof request.model === "string" ? request.model : undefined,
         baseURL: debug?.baseURL,
         durationMs: Date.now() - startedAtMs,
-        params: { ...debug?.params, options: summarizeCompletionOptions(options) },
+        params: { ...debug?.params, options: summarizeCompletionOptions(attemptOptions) },
         request: streamRequest,
-        error: normalizeDebugError(error),
+        error: normalizeDebugError(requestError),
       });
       logApiError({
         timestamp: new Date().toISOString(),
@@ -570,14 +814,16 @@ export class SessionManager {
         requestId,
         sessionId,
         model: typeof request.model === "string" ? request.model : undefined,
-        error: getLlmErrorDetails(error),
+        error: getLlmErrorDetails(requestError),
         request: streamRequest,
       });
+      clearAttempt();
       this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
-      throw error;
+      throw requestError;
     }
 
     if (!response || typeof (response as { [Symbol.asyncIterator]?: unknown })[Symbol.asyncIterator] !== "function") {
+      clearAttempt();
       this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
@@ -587,7 +833,7 @@ export class SessionManager {
         model: typeof request.model === "string" ? request.model : undefined,
         baseURL: debug?.baseURL,
         durationMs: Date.now() - startedAtMs,
-        params: { ...debug?.params, options: summarizeCompletionOptions(options) },
+        params: { ...debug?.params, options: summarizeCompletionOptions(attemptOptions) },
         request: streamRequest,
         response,
       });
@@ -598,6 +844,7 @@ export class SessionManager {
     let reasoningContent = "";
     let refusal: string | null = null;
     let usage: ModelUsage | null = null;
+    let streamCompleted = false;
     const responseChunks: unknown[] = [];
     const toolCallsByIndex = new Map<
       number,
@@ -608,25 +855,40 @@ export class SessionManager {
       }
     >();
 
-    const trackText = (value: unknown) => {
+    let previewText = "";
+    const trackText = (value: unknown, includeInPreview = false) => {
       if (typeof value !== "string" || value.length === 0) {
         return;
       }
       estimatedTokens += this.estimateStreamTokens(value);
-      this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "update", sessionId);
+      if (includeInPreview) {
+        previewText += value;
+      }
+      this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "update", sessionId, previewText);
     };
 
     try {
-      for await (const chunk of response as AsyncIterable<Record<string, unknown>>) {
+      const iterator = (response as AsyncIterable<Record<string, unknown>>)[Symbol.asyncIterator]();
+      for (;;) {
+        const item = await Promise.race([iterator.next(), idleTimeoutPromise!]);
+        if (item.done) {
+          break;
+        }
+        const chunk = item.value;
+        resetIdleTimer();
         if (debug?.enabled) {
           responseChunks.push(chunk);
         }
         if ("usage" in chunk && chunk.usage != null) {
           usage = chunk.usage as ModelUsage;
+          streamCompleted = true;
         }
 
         const choices = Array.isArray(chunk.choices) ? chunk.choices : [];
         for (const choice of choices) {
+          if (isUsageRecord(choice) && choice.finish_reason != null) {
+            streamCompleted = true;
+          }
           const delta = isUsageRecord(choice) && isUsageRecord(choice.delta) ? choice.delta : null;
           if (!delta) {
             continue;
@@ -635,13 +897,13 @@ export class SessionManager {
           const contentDelta = delta.content;
           if (typeof contentDelta === "string") {
             content += contentDelta;
-            trackText(contentDelta);
+            trackText(contentDelta, true);
           }
 
           const reasoningDelta = delta.reasoning_content ?? delta.reasoning;
           if (typeof reasoningDelta === "string") {
             reasoningContent += reasoningDelta;
-            trackText(reasoningDelta);
+            trackText(reasoningDelta, true);
           }
 
           if (typeof delta.refusal === "string") {
@@ -680,7 +942,11 @@ export class SessionManager {
           }
         }
       }
+      if (!streamCompleted) {
+        throw new LlmStreamDisconnectedError();
+      }
     } catch (error) {
+      const streamError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
         location: debug?.location ?? "SessionManager.createChatCompletionStream:stream",
@@ -689,10 +955,10 @@ export class SessionManager {
         model: typeof request.model === "string" ? request.model : undefined,
         baseURL: debug?.baseURL,
         durationMs: Date.now() - startedAtMs,
-        params: { ...debug?.params, options: summarizeCompletionOptions(options) },
+        params: { ...debug?.params, options: summarizeCompletionOptions(attemptOptions) },
         request: streamRequest,
         responseChunks,
-        error: normalizeDebugError(error),
+        error: normalizeDebugError(streamError),
       });
       logApiError({
         timestamp: new Date().toISOString(),
@@ -700,11 +966,12 @@ export class SessionManager {
         requestId,
         sessionId,
         model: typeof request.model === "string" ? request.model : undefined,
-        error: getLlmErrorDetails(error),
+        error: getLlmErrorDetails(streamError),
         request: streamRequest,
       });
-      throw error;
+      throw streamError;
     } finally {
+      clearAttempt();
       this.emitLlmStreamProgress(requestId, startedAt, estimatedTokens, "end", sessionId);
     }
 
@@ -735,7 +1002,7 @@ export class SessionManager {
       model: typeof request.model === "string" ? request.model : undefined,
       baseURL: debug?.baseURL,
       durationMs: Date.now() - startedAtMs,
-      params: { ...debug?.params, options: summarizeCompletionOptions(options) },
+      params: { ...debug?.params, options: summarizeCompletionOptions(attemptOptions) },
       request: streamRequest,
       responseChunks,
       response: finalResponse,
@@ -1015,7 +1282,7 @@ ${agentInstructions}
   private getLoadedSkillKeys(sessionId: string): Set<string> {
     const loadedSkillKeys = new Set<string>();
     for (const message of this.listSessionMessages(sessionId)) {
-      if (message.role !== "system" || !message.meta?.skill) {
+      if ((message.role !== "system" && message.role !== "tool") || !message.meta?.skill) {
         continue;
       }
       loadedSkillKeys.add(this.getSkillKey(message.meta.skill));
@@ -1090,6 +1357,85 @@ ${agentInstructions}
       this.appendSessionMessage(sessionId, skillMessage);
       this.onAssistantMessage(skillMessage, true);
     }
+  }
+
+  private listPreloadedSkillCatalog(sessionId: string): Array<{ name: string; description: string }> {
+    const entries = new Map<string, { name: string; description: string }>();
+    for (const message of this.listSessionMessages(sessionId)) {
+      if (message.role !== "system") {
+        continue;
+      }
+      const catalog = message.meta?.skillCatalog;
+      if (!Array.isArray(catalog)) {
+        continue;
+      }
+      for (const entry of catalog) {
+        if (!entry || typeof entry.name !== "string" || !entry.name || entries.has(entry.name)) {
+          continue;
+        }
+        entries.set(entry.name, {
+          name: entry.name,
+          description: typeof entry.description === "string" ? entry.description : "",
+        });
+      }
+    }
+    return Array.from(entries.values());
+  }
+
+  private mergeSkillCatalog(
+    previous: Array<{ name: string; description: string }>,
+    next: Array<{ name: string; description: string }>
+  ): Array<{ name: string; description: string }> {
+    const merged = [...previous];
+    const seen = new Set(previous.map((entry) => entry.name));
+    for (const entry of next) {
+      if (seen.has(entry.name)) {
+        continue;
+      }
+      seen.add(entry.name);
+      merged.push(entry);
+    }
+    return merged;
+  }
+
+  private appendSkillCatalogMessage(sessionId: string, skills: Array<{ name: string; description: string }>): void {
+    if (skills.length === 0) {
+      return;
+    }
+    const content = buildSkillCatalogPrompt(skills);
+    const lastCatalogMessage = [...this.listSessionMessages(sessionId)]
+      .reverse()
+      .find((message) => message.role === "system" && Array.isArray(message.meta?.skillCatalog));
+    if (lastCatalogMessage?.content === content) {
+      return;
+    }
+    const message = this.buildSystemMessage(sessionId, content, null, false, { skillCatalog: skills });
+    this.appendSessionMessage(sessionId, message);
+  }
+
+  async loadSkillByName(sessionId: string, skillName: string): Promise<ToolExecutionResult> {
+    const skills = await this.listSkills(sessionId);
+    const skill = skills.find((candidate) => candidate.name === skillName);
+    if (!skill) {
+      return {
+        ok: false,
+        name: "skill",
+        error: `Unknown skill: ${skillName}. Check the available skills catalog for exact skill names.`,
+      };
+    }
+    if (skill.isLoaded) {
+      return {
+        ok: true,
+        name: "skill",
+        output: `Skill already loaded: ${skill.name}.`,
+      };
+    }
+    return {
+      ok: true,
+      name: "skill",
+      output: this.buildSkillPrompt(skill),
+      metadata: { skill: { ...skill, isLoaded: true } },
+    };
   }
 
   getActiveSessionId(): string | null {
@@ -1181,15 +1527,13 @@ ${agentInstructions}
     const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
     this.appendSessionMessage(sessionId, systemMessage);
 
-    const defaultSkillPrompt = getDefaultSkillPrompt({ enabledSkills: this.getResolvedSettings().enabledSkills });
-    if (defaultSkillPrompt) {
-      const defaultSkillMessage = this.buildSystemMessage(sessionId, defaultSkillPrompt);
-      this.appendSessionMessage(sessionId, defaultSkillMessage);
-    }
-
     const runtimeContextMessage = this.buildSystemMessage(
       sessionId,
-      getRuntimeContext(this.projectRoot, promptToolOptions.model)
+      getRuntimeContext(
+        this.projectRoot,
+        promptToolOptions.model,
+        this.getResolvedSettings().permissions?.addWorkingDirs
+      )
     );
     this.appendSessionMessage(sessionId, runtimeContextMessage);
 
@@ -1205,22 +1549,25 @@ ${agentInstructions}
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
+    let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
       const skills = await this.listSkills();
       const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal });
       this.throwIfAborted(signal);
       const skillSet = new Set(skillNames);
-      const matchedSkill = skills.filter((skill) => skillSet.has(skill.name));
-      if (Array.isArray(userPrompt.skills)) {
-        userPrompt.skills.push(...matchedSkill);
-      } else if (matchedSkill.length > 0) {
-        userPrompt.skills = matchedSkill;
-      }
+      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
     }
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
     this.throwIfAborted(signal);
 
     this.appendSkillMessages(sessionId, userPrompt.skills);
+    this.appendSkillCatalogMessage(
+      sessionId,
+      this.mergeSkillCatalog(
+        this.listPreloadedSkillCatalog(sessionId),
+        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
+      )
+    );
 
     this.activeSessionId = sessionId;
     await this.activateSession(sessionId, controller);
@@ -1277,22 +1624,25 @@ ${agentInstructions}
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
 
+    let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
       const skills = await this.listSkills(sessionId);
       const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
       this.throwIfAborted(signal);
       const skillSet = new Set(skillNames);
-      const matchedSkill = skills.filter((skill) => skillSet.has(skill.name));
-      if (Array.isArray(userPrompt.skills)) {
-        userPrompt.skills.push(...matchedSkill);
-      } else if (matchedSkill.length > 0) {
-        userPrompt.skills = matchedSkill;
-      }
+      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
     }
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
 
     this.appendSkillMessages(sessionId, userPrompt.skills);
+    this.appendSkillCatalogMessage(
+      sessionId,
+      this.mergeSkillCatalog(
+        this.listPreloadedSkillCatalog(sessionId),
+        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
+      )
+    );
     this.activeSessionId = sessionId;
     await this.activateSession(sessionId, controller);
   }
@@ -1312,8 +1662,18 @@ ${agentInstructions}
     permissionPrompt?: UserPromptContent
   ): Promise<void> {
     const startedAt = Date.now();
-    const { client, model, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, env } =
-      this.createOpenAIClient();
+    const {
+      client,
+      apiKey,
+      model,
+      baseURL,
+      temperature,
+      thinkingEnabled,
+      reasoningEffort,
+      debugLogEnabled,
+      notify,
+      env,
+    } = this.createOpenAIClient();
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
 
@@ -1408,30 +1768,74 @@ ${agentInstructions}
           await this.compactSession(sessionId, sessionController.signal);
         }
 
-        const messages = this.messageConverter.buildMessages(
+        const sessionMessages = await this.attachPromptImagesForRequest(
           this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId)),
-          thinkingEnabled,
-          model
+          model,
+          this.getResolvedSettings().multimodal
         );
+        if (this.isInterrupted(sessionId)) {
+          return;
+        }
+        const filesSettings = this.getDeepSeekFilesSettings();
+        if (filesSettings.enabled && !apiKey) {
+          throw new Error("Files API is enabled, but no API key is available for uploads.");
+        }
+        let prepared = filesSettings.enabled
+          ? await this.buildMessagesWithDeepSeekFiles(
+              sessionMessages,
+              thinkingEnabled,
+              model,
+              apiKey!,
+              sessionController.signal
+            )
+          : {
+              messages: this.messageConverter.buildMessages(
+                sessionMessages,
+                thinkingEnabled,
+                model,
+                this.getResolvedSettings().multimodal
+              ),
+              references: [] as DeepSeekFileReference[],
+            };
         const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
-        const response = await this.createChatCompletionStream(
-          client,
-          {
-            model,
-            ...(temperature !== undefined ? { temperature } : {}),
-            messages,
-            tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
-            ...thinkingOptions,
-          },
-          { signal: sessionController.signal },
-          sessionId,
-          {
-            enabled: debugLogEnabled,
-            location: "SessionManager.activateSession",
-            baseURL,
-            params: { iteration, temperature, thinkingEnabled, reasoningEffort },
+        const request = () =>
+          this.createChatCompletionStream(
+            client,
+            {
+              model,
+              ...(temperature !== undefined ? { temperature } : {}),
+              messages: prepared.messages,
+              tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
+              ...thinkingOptions,
+            },
+            { signal: sessionController.signal },
+            sessionId,
+            {
+              enabled: debugLogEnabled,
+              location: "SessionManager.activateSession",
+              baseURL,
+              params: { iteration, temperature, thinkingEnabled, reasoningEffort },
+            }
+          );
+        let response: Awaited<ReturnType<typeof request>>;
+        try {
+          response = await request();
+        } catch (error) {
+          if (!filesSettings.enabled || prepared.references.length === 0 || !this.isRejectedDeepSeekFile(error)) {
+            throw error;
           }
-        );
+          for (const reference of prepared.references) {
+            this.deepSeekFiles.invalidate(reference, apiKey!);
+          }
+          prepared = await this.buildMessagesWithDeepSeekFiles(
+            sessionMessages,
+            thinkingEnabled,
+            model,
+            apiKey!,
+            sessionController.signal
+          );
+          response = await request();
+        }
 
         const message = response.choices?.[0]?.message;
         const rawContent = message?.content;
@@ -1623,6 +2027,9 @@ ${agentInstructions}
     }));
 
     for (let i = startIndex; i < endIndex; i += 1) {
+      if (sessionMessages[i].meta?.skillCatalog) {
+        continue;
+      }
       sessionMessages[i] = { ...sessionMessages[i], compacted: true, updateTime: now };
     }
 
@@ -1645,9 +2052,15 @@ ${agentInstructions}
     this.saveSessionMessages(sessionId, sessionMessages);
   }
 
-  private getPromptToolOptions(): { model: string; webSearchEnabled: boolean; nonInteractive: boolean } {
+  private getPromptToolOptions(): {
+    model: string;
+    multimodal?: MultimodalMode;
+    webSearchEnabled: boolean;
+    nonInteractive: boolean;
+  } {
     return {
       model: this.getResolvedSettings().model,
+      multimodal: this.getResolvedSettings().multimodal,
       webSearchEnabled: true,
       nonInteractive: this.nonInteractive,
     };
@@ -1671,6 +2084,71 @@ ${agentInstructions}
       content: getSystemPrompt(this.projectRoot, this.getPromptToolOptions()),
     };
     return prepared;
+  }
+
+  private async attachPromptImagesForRequest(
+    messages: SessionMessage[],
+    model: string,
+    multimodal: MultimodalMode = "default"
+  ): Promise<SessionMessage[]> {
+    const includeImageContent = supportsMultimodal(model, multimodal);
+    const prepared = await Promise.all(
+      messages.map(async (message) => {
+        const imageUrls = message.role === "user" ? message.meta?.userPrompt?.imageUrls : undefined;
+        const promptImages: Array<{ source: "file" | "url"; value: string }> = [];
+        for (const imageUrl of imageUrls ?? []) {
+          const filePath = this.getLocalPromptImagePath(imageUrl);
+          if (filePath) {
+            promptImages.push({ source: "file", value: filePath });
+          } else if (/^https?:\/\//i.test(imageUrl)) {
+            promptImages.push({ source: "url", value: imageUrl });
+          }
+        }
+        if (promptImages.length === 0) {
+          return message;
+        }
+
+        const contentParams = Array.isArray(message.contentParams)
+          ? [...message.contentParams]
+          : message.contentParams
+            ? [message.contentParams]
+            : [];
+        if (includeImageContent) {
+          const imageParts = await Promise.all(
+            promptImages.map(async ({ source, value }) => {
+              if (source === "url") {
+                return { type: "image_url", image_url: { url: value } };
+              }
+              const { image } = await loadImageFile(value, this.loadSharp);
+              return {
+                type: "image_url",
+                image_url: { url: `data:${image.mediaType};base64,${image.data.toString("base64")}` },
+              };
+            })
+          );
+          for (const imagePart of imageParts) {
+            contentParams.push(imagePart);
+          }
+        }
+        if (!includeImageContent) {
+          contentParams.push({
+            type: "text",
+            text: `<message_meta>\n${JSON.stringify({ images: promptImages.map(({ value }) => value) }, null, 2)}\n</message_meta>`,
+          });
+        }
+        return { ...message, contentParams };
+      })
+    );
+    return prepared;
+  }
+
+  private getLocalPromptImagePath(imageUrl: string): string | null {
+    try {
+      const url = new URL(imageUrl);
+      return url.protocol === "file:" ? fileURLToPath(url) : null;
+    } catch {
+      return null;
+    }
   }
 
   private reportNewPrompt(): void {
@@ -2216,49 +2694,55 @@ ${agentInstructions}
 
   private buildUserMessage(sessionId: string, prompt: UserPromptContent): SessionMessage {
     const now = new Date().toISOString();
-    const imageParams =
-      prompt.imageUrls
-        ?.filter((url) => Boolean(url))
-        .map((url) => ({
-          type: "image_url",
-          image_url: { url },
-        })) ?? [];
 
     return {
       id: crypto.randomUUID(),
       sessionId,
       role: "user",
       content: prompt.text ?? "",
-      contentParams: imageParams.length > 0 ? imageParams : null,
+      contentParams: null,
       messageParams: null,
       compacted: false,
       visible: true,
       createTime: now,
       updateTime: now,
-      meta: { userPrompt: this.cloneUserPromptForMeta(prompt) },
+      meta: {
+        userPrompt: this.cloneUserPromptForMeta(prompt),
+        isAnswers: prompt.isAnswers,
+      },
       checkpointHash: this.getCurrentCheckpointHash(sessionId),
     };
   }
 
   private preparePromptImages(sessionId: string, prompt: UserPromptContent): UserPromptContent {
-    if (supportsMultimodal(this.getResolvedSettings().model)) {
-      return prompt;
-    }
-
     const imageUrls = prompt.imageUrls?.filter(Boolean) ?? [];
     if (imageUrls.length === 0) {
       return prompt;
     }
 
-    const images = imageUrls.map((dataUrl, index) => this.decodePersistedPromptImage(dataUrl, index));
+    const preparedUrls: string[] = [];
     const imagesDir = this.getSessionImagesDir(sessionId);
     const createdPaths: string[] = [];
     try {
-      fs.mkdirSync(imagesDir, { recursive: true });
-      for (const image of images) {
+      for (let index = 0; index < imageUrls.length; index += 1) {
+        const imageUrl = imageUrls[index];
+        if (!imageUrl.startsWith("data:")) {
+          if (imageUrl.startsWith("file:")) {
+            const url = new URL(imageUrl);
+            fileURLToPath(url);
+            preparedUrls.push(url.href);
+          } else {
+            preparedUrls.push(imageUrl);
+          }
+          continue;
+        }
+
+        const image = this.decodePersistedPromptImage(imageUrl, index);
+        fs.mkdirSync(imagesDir, { recursive: true });
         const imagePath = path.join(imagesDir, `${crypto.randomUUID()}${image.extension}`);
         fs.writeFileSync(imagePath, image.buffer, { flag: "wx", mode: 0o600 });
         createdPaths.push(imagePath);
+        preparedUrls.push(pathToFileURL(imagePath).href);
       }
     } catch (error) {
       for (const imagePath of createdPaths) {
@@ -2277,28 +2761,29 @@ ${agentInstructions}
       throw new Error(`Failed to save pasted image: ${message}`);
     }
 
-    const imageXml = [
-      "<images>",
-      ...createdPaths.map((imagePath, index) => `  <image name="[Image #${index + 1}]" path="${imagePath}" />`),
-      "</images>",
-    ].join("\n");
-    const text = prompt.text?.trimEnd() ?? "";
     return {
       ...prompt,
-      text: text ? `${text}\n\n${imageXml}` : imageXml,
+      imageUrls: preparedUrls,
     };
   }
 
   private decodePersistedPromptImage(dataUrl: string, index: number): PersistedPromptImage {
-    const match = /^data:(image\/(?:jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$/i.exec(dataUrl);
+    const match = /^data:(image\/(?:gif|jpeg|jpg|png|webp));base64,([A-Za-z0-9+/=\r\n]+)$/i.exec(dataUrl);
     if (!match) {
-      throw new Error(`Image #${index + 1} is invalid or unsupported. Only JPEG, PNG, and WebP are supported.`);
+      throw new Error(`Image #${index + 1} is invalid or unsupported. Only GIF, JPEG, PNG, and WebP are supported.`);
     }
 
     const payload = match[2].replace(/[\r\n]/g, "");
     const buffer = Buffer.from(payload, "base64");
     const mimeType = match[1].toLowerCase();
-    const extension = mimeType === "image/png" ? ".png" : mimeType === "image/webp" ? ".webp" : ".jpg";
+    const extension =
+      mimeType === "image/gif"
+        ? ".gif"
+        : mimeType === "image/png"
+          ? ".png"
+          : mimeType === "image/webp"
+            ? ".webp"
+            : ".jpg";
     return { buffer, extension };
   }
 
@@ -2316,7 +2801,12 @@ ${agentInstructions}
     try {
       fs.mkdirSync(path.dirname(targetDir), { recursive: true });
       fs.cpSync(sourceDir, targetDir, { recursive: true, errorOnExist: true });
-      return replaceStringValues(messages, sourceDir, targetDir) as SessionMessage[];
+      const replacedPaths = replaceStringValues(messages, sourceDir, targetDir);
+      return replaceStringValues(
+        replacedPaths,
+        pathToFileURL(sourceDir).href,
+        pathToFileURL(targetDir).href
+      ) as SessionMessage[];
     } catch (error) {
       try {
         fs.rmSync(targetDir, { recursive: true, force: true });
@@ -2426,6 +2916,22 @@ ${agentInstructions}
     };
   }
 
+  private buildFollowUpMessage(sessionId: string, message: ToolExecutionFollowUpMessage): SessionMessage {
+    const now = new Date().toISOString();
+    return {
+      id: crypto.randomUUID(),
+      sessionId,
+      role: message.role,
+      content: message.content,
+      contentParams: message.contentParams ?? null,
+      messageParams: null,
+      compacted: false,
+      visible: message.visible ?? false,
+      createTime: now,
+      updateTime: now,
+    };
+  }
+
   private buildSkillMessage(sessionId: string, content: string, skill: SkillInfo): SessionMessage {
     const now = new Date().toISOString();
     return {
@@ -2505,12 +3011,14 @@ ${agentInstructions}
     sessionId: string,
     toolCallId: string,
     content: string,
-    toolFunction: unknown | null
+    toolFunction: unknown | null,
+    resultMetadata?: Record<string, unknown>
   ): SessionMessage {
     const now = new Date().toISOString();
     const paramsMd = this.buildToolParamsSnippet(toolFunction);
     const resultMd = this.buildToolResultSnippet(content);
     const isInvisibleExecution = this.isInvisibleExecution(content);
+    const skill = this.getToolResultSkill(resultMetadata);
     return {
       id: crypto.randomUUID(),
       sessionId,
@@ -2526,8 +3034,46 @@ ${agentInstructions}
         function: toolFunction ?? undefined,
         paramsMd,
         resultMd,
+        skill,
       },
     };
+  }
+
+  private getToolResultSkill(metadata?: Record<string, unknown>): SkillInfo | undefined {
+    const skill = metadata?.skill;
+    if (!skill || typeof skill !== "object" || Array.isArray(skill)) {
+      return undefined;
+    }
+    const candidate = skill as Partial<SkillInfo>;
+    if (
+      typeof candidate.name !== "string" ||
+      typeof candidate.path !== "string" ||
+      typeof candidate.description !== "string"
+    ) {
+      return undefined;
+    }
+    return {
+      name: candidate.name,
+      path: candidate.path,
+      description: candidate.description,
+      isLoaded: candidate.isLoaded === true ? true : undefined,
+      allowImplicitInvocation: candidate.allowImplicitInvocation === false ? false : undefined,
+    };
+  }
+
+  private async loadSkillForToolBatch(
+    sessionId: string,
+    skillName: string,
+    loadedSkillNames: Set<string>
+  ): Promise<ToolExecutionResult> {
+    if (loadedSkillNames.has(skillName)) {
+      return { ok: true, name: "skill", output: `Skill already loaded: ${skillName}.` };
+    }
+    const result = await this.loadSkillByName(sessionId, skillName);
+    if (this.getToolResultSkill(result.metadata)) {
+      loadedSkillNames.add(skillName);
+    }
+    return result;
   }
 
   private async appendToolMessages(
@@ -2538,6 +3084,7 @@ ${agentInstructions}
       messagePermissions?: MessageToolPermission[];
     } = {}
   ): Promise<{ waitingForUser: boolean }> {
+    const loadedSkillNames = new Set<string>();
     const hooks: ToolExecutionHooks = {
       onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
@@ -2546,6 +3093,8 @@ ${agentInstructions}
       onBackgroundProcessComplete: (completion) => this.addBackgroundProcessCompletionMessage(sessionId, completion),
       onBeforeFileMutation: (filePath) => this.prepareFileMutationCheckpoint(sessionId, filePath),
       onAfterFileMutation: (filePath) => this.recordFileMutationCheckpoint(sessionId, filePath),
+      onPluginRateLimitExceeded: (tool) => this.recordPluginRateLimitExceeded(sessionId, tool),
+      onLoadSkill: (skillName) => this.loadSkillForToolBatch(sessionId, skillName, loadedSkillNames),
       shouldStop: () => this.isInterrupted(sessionId),
     };
     const parsedToolCalls = toolCalls
@@ -2574,17 +3123,18 @@ ${agentInstructions}
         waitingForUser = true;
       }
       const toolFunction = this.messageConverter.findToolFunction(toolCalls, execution.toolCallId);
-      const toolMessage = this.buildToolMessage(sessionId, execution.toolCallId, execution.content, toolFunction);
+      const toolMessage = this.buildToolMessage(
+        sessionId,
+        execution.toolCallId,
+        execution.content,
+        toolFunction,
+        execution.result.name === "skill" ? execution.result.metadata : undefined
+      );
       this.appendSessionMessage(sessionId, toolMessage);
       this.onAssistantMessage(toolMessage, true);
 
       for (const followUpMessage of execution.result.followUpMessages ?? []) {
-        if (followUpMessage.role !== "system") {
-          continue;
-        }
-        followUpMessages.push(
-          this.buildSystemMessage(sessionId, followUpMessage.content, followUpMessage.contentParams ?? null)
-        );
+        followUpMessages.push(this.buildFollowUpMessage(sessionId, followUpMessage));
       }
     }
 
@@ -2602,6 +3152,7 @@ ${agentInstructions}
       permissions: prompt.permissions ? prompt.permissions.map((permission) => ({ ...permission })) : undefined,
       alwaysAllows: prompt.alwaysAllows ? [...prompt.alwaysAllows] : undefined,
       planMode: prompt.planMode,
+      isAnswers: prompt.isAnswers,
     };
   }
 
@@ -2631,21 +3182,24 @@ ${agentInstructions}
     const signal = controller.signal;
     const userMessage = this.buildUserMessage(sessionId, userPrompt);
     this.appendSessionMessage(sessionId, userMessage);
+    let matchedSkills: SkillInfo[] = [];
     if (userPrompt.text) {
       const skills = await this.listSkills(sessionId);
       const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
       this.throwIfAborted(signal);
       const skillSet = new Set(skillNames);
-      const matchedSkill = skills.filter((skill) => skillSet.has(skill.name));
-      if (Array.isArray(userPrompt.skills)) {
-        userPrompt.skills.push(...matchedSkill);
-      } else if (matchedSkill.length > 0) {
-        userPrompt.skills = matchedSkill;
-      }
+      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
     }
     userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
     this.throwIfAborted(signal);
     this.appendSkillMessages(sessionId, userPrompt.skills);
+    this.appendSkillCatalogMessage(
+      sessionId,
+      this.mergeSkillCatalog(
+        this.listPreloadedSkillCatalog(sessionId),
+        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
+      )
+    );
   }
 
   private buildToolParamsSnippet(toolFunction: unknown | null): string {
@@ -2709,7 +3263,7 @@ ${agentInstructions}
 
     const value = args[firstKey];
     const text = typeof value === "string" ? value : JSON.stringify(value);
-    if (toolName === "read" && text.startsWith(this.projectRoot)) {
+    if ((toolName === "read" || toolName === "ReadImage") && text.startsWith(this.projectRoot)) {
       return text.slice(this.projectRoot.length).replace(/^[\\/]/, "");
     }
     return text;
@@ -2880,6 +3434,14 @@ ${agentInstructions}
     return remainingSeconds > 0 ? `${minutes}m ${remainingSeconds}s` : `${minutes}m`;
   }
 
+  private recordPluginRateLimitExceeded(sessionId: string, tool: PluginRateLimitedTool): void {
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      pluginRateLimitedTool: entry.pluginRateLimitedTool === "UnderstandImage" ? entry.pluginRateLimitedTool : tool,
+      updateTime: new Date().toISOString(),
+    }));
+  }
+
   private removeSessionProcess(sessionId: string, processId: string | number): void {
     const now = new Date().toISOString();
     const processControlKey = this.getProcessControlKey(sessionId, processId);
@@ -3011,8 +3573,13 @@ ${agentInstructions}
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
       planMode: value.planMode === true,
+      pluginRateLimitedTool: this.normalizePluginRateLimitedTool(value.pluginRateLimitedTool),
       forkedFrom: this.normalizeForkedFrom(value.forkedFrom),
     };
+  }
+
+  private normalizePluginRateLimitedTool(value: unknown): PluginRateLimitedTool | undefined {
+    return value === "UnderstandImage" || value === "WebSearch" ? value : undefined;
   }
 
   private normalizeForkedFrom(value: unknown): SessionEntry["forkedFrom"] {

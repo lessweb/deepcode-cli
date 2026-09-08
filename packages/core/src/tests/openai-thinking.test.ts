@@ -34,3 +34,10 @@ test("buildThinkingRequestOptions accepts high reasoning effort", () => {
     extra_body: { reasoning_effort: "high" },
   });
 });
+
+test("buildThinkingRequestOptions accepts low reasoning effort", () => {
+  assert.deepEqual(buildThinkingRequestOptions(true, "https://api.deepseek.com", "low"), {
+    thinking: { type: "enabled" },
+    extra_body: { reasoning_effort: "low" },
+  });
+});

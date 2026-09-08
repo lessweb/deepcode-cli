@@ -22,6 +22,7 @@ await build({
   jsx: "automatic",
   jsxImportSource: "react",
   packages: "bundle",
+  external: ["sharp"],
   inject: [join(__dirname, "esbuild-shims.js")],
   alias: {
     // react-devtools-core is a browser-only package pulled in by ink's

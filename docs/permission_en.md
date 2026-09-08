@@ -12,13 +12,15 @@ Each time the AI assistant invokes a tool, the system automatically analyzes the
 
 ## Permission Scopes
 
-Deep Code defines the following 10 permission scopes, covering various risk scenarios for tool calls:
+Deep Code defines the following 12 permission scopes, covering various risk scenarios for tool calls:
 
 | Permission Scope | Description |
 | ---------------- | ----------- |
 | `read-in-cwd` | Read files inside the current workspace |
+| `read-in-tmp` | Read files inside `/tmp` or `/private/tmp` |
 | `read-out-cwd` | Read files outside the current workspace |
 | `write-in-cwd` | Create or overwrite files inside the current workspace |
+| `write-in-tmp` | Create or overwrite files inside `/tmp` or `/private/tmp` |
 | `write-out-cwd` | Create or overwrite files outside the current workspace |
 | `delete-in-cwd` | Delete files inside the current workspace |
 | `delete-out-cwd` | Delete files outside the current workspace |
@@ -39,7 +41,8 @@ Configure permissions in `~/.deepcode/settings.json` (user-level) or `.deepcode/
     "allow": [],
     "deny": [],
     "ask": [],
-    "defaultMode": "allowAll"
+    "defaultMode": "allowAll",
+    "addWorkingDirs": ["/opt/my-project"]
   }
 }
 ```
@@ -52,6 +55,11 @@ Configure permissions in `~/.deepcode/settings.json` (user-level) or `.deepcode/
 | `deny` | `string[]` | Permission scopes that are always auto-denied |
 | `ask` | `string[]` | Permission scopes that always trigger a confirmation prompt |
 | `defaultMode` | `"allowAll"` \| `"askAll"` | Default behavior for scopes not explicitly listed in `allow`/`deny`/`ask`. Defaults to `"allowAll"` |
+| `addWorkingDirs` | `string[]` | Additional directories treated as part of the current workspace |
+
+User-level and project-level `addWorkingDirs` values are merged and deduplicated. Absolute paths are used directly, while relative paths are resolved against the current project root; directories do not need to exist yet. The workspace scope takes precedence when a path is both a working directory and a system temporary directory.
+
+The default `allowAll` mode auto-allows `read-in-tmp` and `write-in-tmp`. Explicit `allow`, `ask`, `deny`, and `askAll` settings still follow the priority rules below.
 
 ### Priority Rules
 

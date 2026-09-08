@@ -27,7 +27,7 @@ npm install -g @vegamo/deepcode-cli
 
 Run `deepcode` inside any project directory to get started.
 
-![intro2](resources/intro2.png)
+![intro2](resources/intro3.png)
 
 ## Configuration
 
@@ -45,7 +45,7 @@ Create `~/.deepcode/settings.json`:
 }
 ```
 
-The configuration file is shared with the [Deep Code VSCode extension](https://github.com/lessweb/deepcode) — configure once, use everywhere.
+The configuration file is shared with the [Deep Code VSCode extension](https://github.com/lessweb/deepcode-cli) — configure once, use everywhere.
 
 For complete configuration details (multi-level priority, environment variables, etc.), see [docs/configuration.md](docs/configuration.md).
 
@@ -95,8 +95,9 @@ Skills are discovered from these locations, in priority order:
 
 ## Supported Models
 
-- `deepseek-v4-pro` (Recommended)
-- `deepseek-v4-flash`
+- `deepseek-v4-pro`
+- `deepseek-v4-flash` (Recommended)
+- `deepseek-v4-flash-vision-exp`
 - Any other OpenAI-compatible model
 
 ## Architecture and Benchmarks
@@ -115,7 +116,11 @@ Yes. Deep Code offers a full-featured VSCode extension, available on the [VSCode
 
 ### Does Deep Code support understanding images?
 
-Deep Code supports multimodal input — you can paste images from the clipboard with `Ctrl+V`. However, `deepseek-v4` does not support multimodal yet. Some models have multimodal capabilities but impose strict limits on multi-turn dialogue requests. For multimodal input, we recommend using the Volcano Ark `Doubao-Seed-2.0-pro` model, which has the best integration.
+Yes. The `deepseek-v4-flash-vision-exp` model can read local images directly, or you can paste images from the clipboard with `Ctrl+V`, so the model can see the image content directly.
+
+Non-multimodal models such as `deepseek-v4-pro` and `deepseek-v4-flash` continue to use the `UnderstandImage` image-understanding tool. Deep Code detects model capabilities automatically; you can also override the detection with the `multimodal` setting.
+
+By default, images are sent inline as base64. With `filesApiEnabled`, Deep Code uploads images through the DeepSeek Files API and reuses the `file_id` in subsequent requests. See [docs/configuration_en.md](docs/configuration_en.md#deepseek-files-api).
 
 ### How to automatically send a Slack message after a task completes?
 
@@ -123,7 +128,7 @@ Write a shell notification script that calls a Slack webhook, then set the `noti
 
 ### How do I enable web search?
 
-Deep Code comes with a built-in, free Web Search tool that works well for most use cases. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
+Deep Code now supports native web search through the [DeepSeek Responses API](https://api-docs.deepseek.com/guides/responses_api/#tools). If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
 
 ### Does it support Coding Plan?
 

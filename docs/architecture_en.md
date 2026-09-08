@@ -26,7 +26,7 @@ The built-in tools are intentionally small and focused: `bash`, `read`, `write`,
 
 The second core design is using context caching to control cost. DeepSeek's context cache is enabled by default. When a later request fully reuses a cached prefix unit, it can hit the cache, and the response reports the number of cache-hit and cache-miss tokens. This is a best-effort system, but it does reward stable repeated prefixes.
 
-Deep Code's session architecture is designed around this property, without requiring users to cooperate manually. Stable content such as the system prompt, tool documentation, default skills, runtime context, and project instructions is placed before volatile user content. Session messages are persisted as JSONL and can be replayed consistently. Tool-call and tool-result pairings are repaired during conversion, including interrupted tool calls, so the conversation sent back to the model always remains structurally valid.
+Deep Code's session architecture is designed around this property, without requiring users to cooperate manually. Stable content such as the system prompt, tool documentation, runtime context, and project instructions is placed before volatile user content. Session messages are persisted as JSONL and can be replayed consistently. Tool-call and tool-result pairings are repaired during conversion, including interrupted tool calls, so the conversation sent back to the model always remains structurally valid.
 
 ## Core Design 3: Context Engineering Centered on Agent Skills
 

@@ -26,7 +26,7 @@ npm install -g @vegamo/deepcode-cli
 
 在任意项目目录下运行 `deepcode` 即可启动。
 
-![intro2](resources/intro2.png)
+![intro2](resources/intro3.png)
 
 ## 配置
 
@@ -44,7 +44,7 @@ npm install -g @vegamo/deepcode-cli
 }
 ```
 
-配置文件与 [Deep Code VSCode 插件](https://github.com/lessweb/deepcode) 共享，无需重复配置。
+配置文件与 [Deep Code VSCode 插件](https://github.com/lessweb/deepcode-cli) 共享，无需重复配置。
 
 完整配置说明（多层级优先级、环境变量等）请参阅 [docs/configuration.md](docs/configuration.md)。
 
@@ -96,8 +96,9 @@ Skills 会按以下优先级扫描：
 
 ## 支持的模型
 
-- `deepseek-v4-pro`（推荐使用）
-- `deepseek-v4-flash`
+- `deepseek-v4-pro`
+- `deepseek-v4-flash`（推荐使用）
+- `deepseek-v4-flash-vision-exp`
 - 任何其他 OpenAI 兼容模型
 
 ## 常见问题
@@ -108,7 +109,11 @@ Skills 会按以下优先级扫描：
 
 ### Deep Code 是否支持理解图片？
 
-Deep Code 支持多模态，可使用ctrl+v从剪贴板粘贴图片。但目前 deepseek-v4 不支持多模态。有些模型虽然有多模态能力，但对多轮对话请求的限制太严。目前多模态输入推荐使用火山方舟的 Doubao-Seed-2.0-pro 模型，适配效果最好。
+支持。`deepseek-v4-flash-vision-exp` 模型支持直接读取本地图片或使用`ctrl+v`从剪贴板粘贴图片，让模型直接看到图片内容。
+
+`deepseek-v4-pro`、`deepseek-v4-flash` 等非多模态模型仍会使用 `UnderstandImage` 识图工具。Deep Code 会自动判断模型能力，也可通过 `multimodal` 配置项手动覆盖。
+
+默认情况下，图片会以 base64 内联发送给模型。启用 `filesApiEnabled` 后，Deep Code 会使用 DeepSeek Files API 上传图片并在请求中复用 `file_id`。
 
 ### 怎样在任务完成后自动给 Slack 发消息？
 
@@ -116,7 +121,7 @@ Deep Code 支持多模态，可使用ctrl+v从剪贴板粘贴图片。但目前 
 
 ### 怎样启用联网搜索功能？
 
-Deep Code自带免费的、且大部分情况够用的Web Search工具。如果你希望使用自定义脚本进行联网搜索，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径即可。详细步骤可参考：https://github.com/qorzj/web_search_cli
+未配置 `webSearchTool` 时，如果 `BASE_URL` 是 `https://api.deepseek.com`，Deep Code 会使用 DeepSeek Responses API 的联网搜索能力，并固定使用 `deepseek-v4-flash`；其他 API 地址仍使用 Deep Code Web Search API。如果希望使用自定义脚本，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径，自定义脚本始终优先。详细步骤可参考：https://github.com/qorzj/web_search_cli
 
 ### 如何配置 MCP？
 

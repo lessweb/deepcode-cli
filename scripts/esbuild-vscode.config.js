@@ -1,4 +1,6 @@
 import { build } from "esbuild";
+import { readFileSync, rmSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,7 +9,13 @@ const root = join(__dirname, "..");
 
 const vscodeRoot = join(root, "packages", "vscode-ide-companion");
 const entry = join(vscodeRoot, "src", "extension.ts");
-const outfile = join(vscodeRoot, "out", "extension.js");
+const outDir = join(vscodeRoot, "out");
+const outfile = join(outDir, "extension.js");
+const resolveFromExtension = createRequire(join(vscodeRoot, "package.json"));
+const sharpEntry = resolveFromExtension.resolve("sharp");
+const sharpPackage = JSON.parse(readFileSync(join(dirname(sharpEntry), "..", "package.json"), "utf8"));
+
+rmSync(outDir, { recursive: true, force: true });
 
 await build({
   entryPoints: [entry],
@@ -16,7 +24,10 @@ await build({
   format: "cjs",
   target: "node18",
   outfile,
-  external: ["vscode"],
+  external: ["vscode", "sharp"],
+  define: {
+    __DEEPCODE_SHARP_VERSION__: JSON.stringify(sharpPackage.version),
+  },
   sourcemap: true,
   footer: {
     js: "module.exports = { activate, deactivate };",
@@ -26,4 +37,4 @@ await build({
   },
 });
 
-console.log(`\n✅  ${outfile}  built successfully\n\n`);
+console.log(`\n✅  ${outfile} built successfully\n\n`);

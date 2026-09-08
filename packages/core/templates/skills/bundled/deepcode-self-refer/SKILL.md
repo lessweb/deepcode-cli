@@ -36,7 +36,7 @@ Map the user's question to the appropriate document(s):
 | **Overview, features, quick start** | `references/README.md`              | Installation, slash commands, keyboard shortcuts, supported models, FAQ                                               |
 | **Configuration & settings**        | `references/configuration.md`       | `settings.json` fields, config hierarchy, env vars, thinking mode, reasoning effort, webSearchTool, enabledSkills     |
 | **MCP setup & usage**               | `references/mcp.md`                 | MCP server config format, GitHub/Playwright/Filesystem examples, tool naming (`mcp__<name>__<tool>`), troubleshooting |
-| **Permissions**                     | `references/permission.md`          | Permission scopes (10 types), allow/deny/ask/defaultMode config, priority rules, persistence                          |
+| **Permissions**                     | `references/permission.md`          | Permission scopes (12 types), allow/deny/ask/defaultMode config, priority rules, persistence                          |
 | **Notifications**                   | `references/notify.md`              | Notify script path, injected env vars, Slack/Feishu/iTerm2/macOS/Linux/Windows examples                               |
 | **Session persistence**             | `references/session-persistence.md` | Storage paths, JSONL format, session index, compaction, `/undo` mechanics, code snapshots                             |
 

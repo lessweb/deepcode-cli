@@ -1,14 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { VALID_PERMISSION_SCOPES, parseUserToolPermissions, parsePermissionScopes, getNonce } from "../utils.js";
+import {
+  PLUS_PACKAGES_URL,
+  VALID_PERMISSION_SCOPES,
+  getNonce,
+  isAllowedExternalUrl,
+  parsePermissionScopes,
+  parseUserToolPermissions,
+} from "../utils.js";
+
+test("isAllowedExternalUrl accepts only the Plus packages URL", () => {
+  assert.equal(isAllowedExternalUrl(PLUS_PACKAGES_URL), true);
+  assert.equal(isAllowedExternalUrl("https://deepcode.vegamo.cn/plus/packages/other"), false);
+  assert.equal(isAllowedExternalUrl("https://example.com"), false);
+  assert.equal(isAllowedExternalUrl(undefined), false);
+});
 
 // --- VALID_PERMISSION_SCOPES ---
 
 test("VALID_PERMISSION_SCOPES contains all expected scopes", () => {
   const expected = [
     "read-in-cwd",
+    "read-in-tmp",
     "read-out-cwd",
     "write-in-cwd",
+    "write-in-tmp",
     "write-out-cwd",
     "delete-in-cwd",
     "delete-out-cwd",

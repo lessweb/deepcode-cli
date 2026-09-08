@@ -5,6 +5,7 @@ import type { PromptDraft } from "../views/PromptInput";
 import type { ModelConfigSelection } from "@vegamo/deepcode-core";
 import type { SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
 import type { SessionManager } from "@vegamo/deepcode-core";
+import type { MessageMeta } from "@vegamo/deepcode-core";
 
 /**
  * Render all messages directly to stdout for Raw mode display.
@@ -26,7 +27,7 @@ export function renderRawModeMessages(allMessages: SessionMessage[], mode: strin
   }
 }
 
-export function buildSyntheticUserMessage(content: string, imageCount: number): SessionMessage {
+export function buildSyntheticUserMessage(content: string, imageCount: number, meta?: MessageMeta): SessionMessage {
   const now = new Date().toISOString();
   return {
     id: `local-${Math.random().toString(36).slice(2)}`,
@@ -45,14 +46,25 @@ export function buildSyntheticUserMessage(content: string, imageCount: number): 
     visible: true,
     createTime: now,
     updateTime: now,
+    meta,
   };
 }
 
+export function buildPromptHistory(messages: SessionMessage[]): string[] {
+  return messages
+    .filter((message) => message.role === "user" && message.visible && typeof message.content === "string")
+    .map((message) => (message.content ?? "").trim())
+    .filter((content) => content.length > 0);
+}
+
 export function buildPromptDraftFromSessionMessage(message: SessionMessage, nonce: number): PromptDraft {
+  const storedImageUrls = message.meta?.userPrompt?.imageUrls;
   return {
     nonce,
     text: typeof message.content === "string" ? message.content : "",
-    imageUrls: extractImageUrlsFromContentParams(message.contentParams),
+    imageUrls: Array.isArray(storedImageUrls)
+      ? storedImageUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
+      : extractImageUrlsFromContentParams(message.contentParams),
   };
 }
 

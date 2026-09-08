@@ -252,6 +252,9 @@ test("userPrompt with text sends userMessage and loading states", async () => {
   const types = deps.messages.map((m: any) => m.type);
   assert.ok(types.includes("userMessage"), `Expected userMessage, got: ${types.join(", ")}`);
   assert.ok(types.includes("loading"), `Expected loading, got: ${types.join(", ")}`);
+  const userMessage = deps.messages.find((message: any) => message.type === "userMessage") as any;
+  assert.equal(userMessage.html, undefined);
+  assert.equal(userMessage.meta, undefined);
 
   // Should end with loading: false
   const lastLoading = [...deps.messages].reverse().find((m: any) => m.type === "loading");
@@ -287,6 +290,29 @@ test("userPrompt passes multiple image urls to the session manager", async () =>
   assert.deepEqual(submittedPrompt?.imageUrls, ["data:image/png;base64,abc", "data:image/jpeg;base64,def"]);
 });
 
+test("userPrompt passes the AskUserQuestion answer marker to the session manager", async () => {
+  const deps = createDeps();
+  let submittedPrompt: any = null;
+  (deps.sessionManager as any).handleUserPrompt = (prompt: any) => {
+    submittedPrompt = prompt;
+    return Promise.resolve();
+  };
+
+  await handleWebviewMessage(
+    {
+      type: "userPrompt",
+      prompt: "Questions 1/1 answered\n - Continue?\n   answer: Yes",
+      isAnswers: true,
+    },
+    deps
+  );
+
+  assert.equal(submittedPrompt?.isAnswers, true);
+  const userMessage = deps.messages.find((message: any) => message.type === "userMessage") as any;
+  assert.equal(userMessage.meta?.isAnswers, true);
+  assert.match(userMessage.html, /^<p>Questions 1\/1 answered/);
+});
+
 test("userPrompt with permissions (continue) does not send userMessage", async () => {
   const deps = createDeps();
   await handleWebviewMessage(
@@ -305,10 +331,12 @@ test("userPrompt with permissions (continue) does not send userMessage", async (
 
 test("userPrompt sends sessionStatus after handling", async () => {
   const deps = createDeps();
+  (deps.sessionManager.getSession("session-1") as any).pluginRateLimitedTool = "WebSearch";
   await handleWebviewMessage({ type: "userPrompt", prompt: "hello" }, deps);
 
-  const types = deps.messages.map((m: any) => m.type);
-  assert.ok(types.includes("sessionStatus"), `Expected sessionStatus, got: ${types.join(", ")}`);
+  const status = deps.messages.find((m: any) => m.type === "sessionStatus") as any;
+  assert.ok(status, "Expected sessionStatus");
+  assert.equal(status.pluginRateLimitedTool, "WebSearch");
 });
 
 test("userPrompt sends showSessionsList after handling", async () => {
@@ -357,8 +385,25 @@ test("loadSession sends loadSession with correct fields", () => {
   assert.equal(msg.sessionId, "session-1");
   assert.equal(msg.summary, "Test Session");
   assert.equal(msg.status, "idle");
+  assert.equal(msg.pluginRateLimitedTool, null);
   assert.ok(Array.isArray(msg.sessions), "sessions should be an array");
   assert.ok(Array.isArray(msg.messages), "messages should be an array");
+});
+
+test("loadSession includes the persisted plugin rate limit", () => {
+  const sessionManager = createMockSessionManager();
+  (sessionManager.getSession("session-1") as any).pluginRateLimitedTool = "UnderstandImage";
+  const messages: unknown[] = [];
+
+  loadSession(
+    "session-1",
+    sessionManager,
+    (msg) => messages.push(msg),
+    (t) => t
+  );
+
+  const msg = messages.find((item: any) => item.type === "loadSession") as any;
+  assert.equal(msg.pluginRateLimitedTool, "UnderstandImage");
 });
 
 test("loadSession with non-existent session does nothing", () => {

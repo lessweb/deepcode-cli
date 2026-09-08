@@ -1,9 +1,17 @@
 import type { PermissionScope, UserToolPermission } from "@vegamo/deepcode-core";
 
+export const PLUS_PACKAGES_URL = "https://deepcode.vegamo.cn/plus/packages";
+
+export function isAllowedExternalUrl(value: unknown): value is string {
+  return value === PLUS_PACKAGES_URL;
+}
+
 export const VALID_PERMISSION_SCOPES = new Set<PermissionScope>([
   "read-in-cwd",
+  "read-in-tmp",
   "read-out-cwd",
   "write-in-cwd",
+  "write-in-tmp",
   "write-out-cwd",
   "delete-in-cwd",
   "delete-out-cwd",

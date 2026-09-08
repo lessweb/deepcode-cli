@@ -33,8 +33,9 @@ Deep Code supports agent skills that allows you to extend the assistant's capabi
 
 ## Supported Models
 
-- `deepseek-v4-pro` (Recommended)
-- `deepseek-v4-flash`
+- `deepseek-v4-pro`
+- `deepseek-v4-flash` (Recommended)
+- `deepseek-v4-flash-vision-exp`
 - `deepseek-chat`
 - Any other OpenAI-compatible model
 
@@ -62,7 +63,11 @@ npm install -g @vegamo/deepcode-cli
 
 ### Does Deep Code support understanding images?
 
-Deep Code supports multimodal, but `deepseek-v4` does not support multimodal yet. Some models have multimodal capabilities but impose strict limits on multi-turn dialogue requests. For multimodal input, we recommend using the Volcano Ark `Doubao-Seed-2.0-pro` model, which has the best integration.
+Yes. The `deepseek-v4-flash-vision-exp` model can read local images directly, or you can paste images from the clipboard with `Ctrl+V`, so the model can see the image content directly.
+
+Non-multimodal models such as `deepseek-v4-pro` and `deepseek-v4-flash` continue to use the `UnderstandImage` image-understanding tool. Deep Code detects model capabilities automatically; you can also override the detection with the `multimodal` setting.
+
+By default, images are sent inline as base64. With `filesApiEnabled`, Deep Code uploads images through the DeepSeek Files API and reuses the `file_id` in subsequent requests. See [docs/configuration_en.md](../../docs/configuration_en.md#deepseek-files-api).
 
 ### How to automatically send a Slack message after a task completes?
 
@@ -84,4 +89,4 @@ Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compati
 ```
 
 ## Getting Help
-- Report bugs or request features on GitHub Issues (https://github.com/lessweb/deepcode/issues)
+- Report bugs or request features on GitHub Issues (https://github.com/lessweb/deepcode-cli/issues)
