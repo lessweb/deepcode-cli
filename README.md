@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/lessweb-deepcode-cli-badge.png)](https://mseep.ai/app/lessweb-deepcode-cli)
+
 <div align="center">
 <br/>
 <br/>
