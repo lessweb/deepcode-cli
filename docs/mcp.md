@@ -84,6 +84,21 @@ MCP 工具在 Deep Code 中的命名格式为 `mcp__<服务名>__<工具名>`，
 }
 ```
 
+### Parallel Search
+
+通过 `web_search` 和 `web_fetch` 工具提供实时网页搜索和 URL 内容提取。默认端点无需账户或 API Key；`mcp-remote` 会将远程 Streamable HTTP 服务器桥接为 stdio：
+
+```json
+{
+  "mcpServers": {
+    "parallel-search": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://search.parallel.ai/mcp"]
+    }
+  }
+}
+```
+
 ### 文件系统
 
 让 Deep Code 在指定目录中读写文件：
