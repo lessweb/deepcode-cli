@@ -41,7 +41,7 @@
     "ink-gradient": "^4.0.1",
     "react": "^19.2.5",
     "read-package-up": "^12.0.0",
-    "sharp": "^0.35.3",
+    "sharp": "^0.35.4",
     "string-width": "^8.2.1",
     "yargs": "^18.0.0"
   },
