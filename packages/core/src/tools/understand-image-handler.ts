@@ -16,6 +16,7 @@ export async function handleUnderstandImageTool(
   args: Record<string, unknown>,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
+  context.signal?.throwIfAborted();
   const prompt = typeof args.prompt === "string" ? args.prompt.trim() : "";
   const imagePath = typeof args.image_path === "string" ? args.image_path.trim() : "";
 
@@ -38,6 +39,7 @@ export async function handleUnderstandImageTool(
   try {
     stat = fs.statSync(imagePath);
   } catch (error) {
+    context.signal?.throwIfAborted();
     const message = error instanceof Error ? error.message : String(error);
     return toolError(`Unable to access image: ${message}`);
   }
@@ -54,7 +56,8 @@ export async function handleUnderstandImageTool(
   const activityId = `understand-image-${randomUUID()}`;
   context.onProcessStart?.(activityId, `UnderstandImage: ${path.basename(imagePath)}`);
   try {
-    const image = await fs.promises.readFile(imagePath);
+    const image = await fs.promises.readFile(imagePath, { signal: context.signal });
+    context.signal?.throwIfAborted();
     const form = new FormData();
     form.append("prompt", prompt);
     form.append("image", new Blob([new Uint8Array(image)], { type: mimeType }), path.basename(imagePath));
@@ -64,6 +67,7 @@ export async function handleUnderstandImageTool(
     const plusApiKey = clientContext?.plusApiKey;
     const response = await fetch(DEFAULT_UNDERSTAND_IMAGE_API_URL, {
       method: "POST",
+      signal: context.signal,
       headers:
         machineId || plusApiKey
           ? {
@@ -78,7 +82,9 @@ export async function handleUnderstandImageTool(
       return toolError(`UnderstandImage API request failed with status ${response.status}${body ? `: ${body}` : ""}`);
     }
 
+    context.signal?.throwIfAborted();
     const payload = (await response.json()) as { success?: unknown; result?: unknown; reason?: unknown };
+    context.signal?.throwIfAborted();
     if (payload.success !== true) {
       const reason =
         typeof payload.reason === "string" && payload.reason.trim() ? payload.reason.trim() : "Unknown error";
@@ -98,6 +104,7 @@ export async function handleUnderstandImageTool(
       metadata: { imagePath },
     };
   } catch (error) {
+    context.signal?.throwIfAborted();
     const message = error instanceof Error ? error.message : String(error);
     return toolError(`UnderstandImage request failed: ${message}`);
   } finally {

@@ -16,7 +16,12 @@ export type LoadedImageFile = {
   stat: fs.Stats;
 };
 
-export async function loadImageFile(filePath: string, loadSharp?: SharpLoader): Promise<LoadedImageFile> {
+export async function loadImageFile(
+  filePath: string,
+  loadSharp?: SharpLoader,
+  signal?: AbortSignal
+): Promise<LoadedImageFile> {
+  signal?.throwIfAborted();
   const declaredMediaType = MIME_TYPE_BY_EXTENSION.get(path.extname(filePath).toLowerCase());
   if (!declaredMediaType) {
     throw new Error("Unsupported image format. Only PNG, JPEG, WebP, and GIF are supported.");
@@ -39,7 +44,11 @@ export async function loadImageFile(filePath: string, loadSharp?: SharpLoader): 
     throw new Error("Image file exceeds the 20 MiB source limit.");
   }
 
-  const source = await fs.promises.readFile(filePath);
+  const source = await fs.promises.readFile(filePath, { signal });
+  signal?.throwIfAborted();
   const sharp = loadSharp ? await loadSharp() : (await import("sharp")).default;
-  return { image: await normalizeImage(source, declaredMediaType, sharp), stat };
+  signal?.throwIfAborted();
+  const image = await normalizeImage(source, declaredMediaType, sharp);
+  signal?.throwIfAborted();
+  return { image, stat };
 }

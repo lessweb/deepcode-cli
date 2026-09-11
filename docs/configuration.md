@@ -81,7 +81,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 
 是否启用 DeepSeek 思考模式。设置为 `true` 启用、`false` 禁用。
 
-- 对于 `deepseek-v4-pro` 和 `deepseek-v4-flash`，思考模式**默认启用**。
+- 对于 `deepseek-flash`、`deepseek-v4-pro`、`deepseek-v4-flash` 和 `deepseek-v4-flash-vision-exp`，思考模式**默认启用**。
 - 对于其他模型，思考模式**默认关闭**。
 
 #### `reasoningEffort` — 推理强度

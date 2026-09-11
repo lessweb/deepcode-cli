@@ -143,6 +143,7 @@ export class ToolExecutor {
     toolCall: ToolCall,
     hooks?: ToolExecutionHooks
   ): Promise<ToolExecutionResult> {
+    hooks?.signal?.throwIfAborted();
     const toolName = toolCall.function.name;
     const handlerName = BUILT_IN_TOOL_NAME_ALIASES.get(toolName) ?? toolName;
     const handler = this.toolHandlers.get(handlerName);
@@ -169,7 +170,8 @@ export class ToolExecutor {
     }
 
     try {
-      return await handler(parsedArgs.args, {
+      const result = await handler(parsedArgs.args, {
+        signal: hooks?.signal,
         sessionId,
         projectRoot: this.projectRoot,
         toolCall,
@@ -185,7 +187,10 @@ export class ToolExecutor {
         onPluginRateLimitExceeded: hooks?.onPluginRateLimitExceeded,
         onLoadSkill: hooks?.onLoadSkill,
       });
+      hooks?.signal?.throwIfAborted();
+      return result;
     } catch (error) {
+      hooks?.signal?.throwIfAborted();
       const message = error instanceof Error ? error.message : String(error);
       return {
         ok: false,

@@ -74,11 +74,13 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 
 普通模型的默认上下文窗口为 `256K`，DeepSeek V4 系列为 `1M`。未设置自动压缩阈值时取最终上下文窗口的 50%；无效值会被忽略，自动压缩阈值超过上下文窗口时会限制为上下文窗口。
 
+通过 `/model` 或 `model` 配置可选择 `deepseek-flash`（DeepSeek-V4.1-Flash）。它支持原生图片输入和 `low/high/max` 思考强度，默认上下文窗口为 1M（1,048,576 tokens），自动压缩阈值为 512K；显式配置优先。默认模型仍为 `deepseek-v4-flash`。
+
 #### `thinkingEnabled` — 思考模式
 
 是否启用 DeepSeek 思考模式。设置为 `true` 启用、`false` 禁用。
 
-- 对于 `deepseek-v4-pro` 和 `deepseek-v4-flash`，思考模式**默认启用**。
+- 对于 `deepseek-flash`、`deepseek-v4-pro`、`deepseek-v4-flash` 和 `deepseek-v4-flash-vision-exp`，思考模式**默认启用**。
 - 对于其他模型，思考模式**默认关闭**。
 
 #### `reasoningEffort` — 推理强度

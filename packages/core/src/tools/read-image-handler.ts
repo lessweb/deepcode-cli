@@ -9,6 +9,7 @@ export async function handleReadImageTool(
   args: Record<string, unknown>,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
+  context.signal?.throwIfAborted();
   const resolved = resolveReadFilePath(args.file_path, context.projectRoot);
   if (!resolved.ok) {
     return toolError(resolved.error);
@@ -16,7 +17,7 @@ export async function handleReadImageTool(
   const filePath = resolved.filePath;
 
   try {
-    const { image, stat } = await loadImageFile(filePath, context.loadSharp);
+    const { image, stat } = await loadImageFile(filePath, context.loadSharp, context.signal);
     markFileRead(context.sessionId, filePath, {
       content: "",
       timestamp: Math.floor(stat.mtimeMs),
@@ -37,6 +38,7 @@ export async function handleReadImageTool(
       followUpMessages: [buildImageFollowUpMessage(filePath, image)],
     };
   } catch (error) {
+    context.signal?.throwIfAborted();
     const message = error instanceof Error ? error.message : String(error);
     return toolError(`Unable to read image: ${message}`);
   }

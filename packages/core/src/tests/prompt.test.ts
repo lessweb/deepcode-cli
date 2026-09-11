@@ -310,3 +310,16 @@ test("runtime prompt assets live under templates", () => {
   assert.equal(fs.existsSync(path.join(repoRoot, "docs", "tools")), false);
   assert.equal(fs.existsSync(path.join(repoRoot, "docs", "prompts")), false);
 });
+
+test("deepseek-flash uses native image tools unless multimodal is disabled", () => {
+  for (const multimodal of ["default", "off"] as const) {
+    const config = { model: "deepseek-flash", multimodal };
+    const native = multimodal === "default";
+    const names = getTools(config).map((tool) => tool.function.name);
+    assert.equal(names.includes("ReadImage"), native);
+    assert.equal(names.includes("UnderstandImage"), !native);
+    const prompt = getSystemPrompt("/tmp/project", config);
+    assert.equal(prompt.includes("## ReadImage"), native);
+    assert.equal(prompt.includes("## UnderstandImage"), !native);
+  }
+});

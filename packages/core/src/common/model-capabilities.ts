@@ -2,6 +2,7 @@ export const DEEPSEEK_V4_MODELS = new Set([
   "deepseek-v4-flash",
   "deepseek-v4-pro",
   "deepseek-v4-flash-vision-exp",
+  "deepseek-flash",
   "deepseek-ai/deepseek-v4-pro",
 ]);
 
@@ -17,7 +18,7 @@ export function defaultsToThinkingMode(model: string): boolean {
  * `mode` is the resolved `multimodal` configuration:
  * - `"on"`: always treat the model as multimodal.
  * - `"off"`: always treat the model as non-multimodal.
- * - `"default"` (or omitted): infer from whether the model name contains `-vision`.
+ * - `"default"` (or omitted): recognize `deepseek-flash` or model names containing `-vision`.
  */
 export function supportsMultimodal(model: string, mode: MultimodalMode = "default"): boolean {
   if (mode === "on") {
@@ -26,5 +27,5 @@ export function supportsMultimodal(model: string, mode: MultimodalMode = "defaul
   if (mode === "off") {
     return false;
   }
-  return model.includes("-vision");
+  return model === "deepseek-flash" || model.includes("-vision");
 }

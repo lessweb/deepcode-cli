@@ -81,7 +81,7 @@ The default context window is `256K` for regular models and `1M` for DeepSeek V4
 
 Whether to enable DeepSeek thinking mode. Set to `true` to enable, `false` to disable.
 
-- For `deepseek-v4-pro` and `deepseek-v4-flash`, thinking mode is **enabled by default**.
+- For `deepseek-flash`, `deepseek-v4-pro`, `deepseek-v4-flash`, and `deepseek-v4-flash-vision-exp`, thinking mode is **enabled by default**.
 - For other models, thinking mode is **disabled by default**.
 
 #### `reasoningEffort` — Reasoning Intensity

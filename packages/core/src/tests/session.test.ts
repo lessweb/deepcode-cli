@@ -719,6 +719,7 @@ test("SessionManager excludes disabled skills by resolved skill name", async () 
         "renamed-disabled": false,
         "deepcode-self-refer": false,
         "image-generator": false,
+        "video-generator": false,
         "skill-digester": false,
         plan: false,
         "enabled-skill": true,
@@ -5132,4 +5133,68 @@ test("stream previews combine only reasoning and content, sanitize text, and res
     assert.equal(events.at(-1)?.previewText, undefined);
     assert.equal(response.choices[0].message.content, "\u001b[31m中文👋\u001b[0m\nanswer\r!\u0007");
   }
+});
+
+test("interrupt settles an active prompt waiting for an internal tool request", { timeout: 5000 }, async () => {
+  const workspace = createTempDir("deepcode-cancel-tool-workspace-");
+  setHomeDir(createTempDir("deepcode-cancel-tool-home-"));
+  let notifyStarted!: () => void;
+  const started = new Promise<void>((resolve) => {
+    notifyStarted = resolve;
+  });
+  const client = {
+    chat: {
+      completions: {
+        create: (_body: unknown, options: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            options.signal.addEventListener("abort", () => reject(options.signal.reason), { once: true });
+            notifyStarted();
+          }),
+      },
+    },
+  };
+  let enabled = false;
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: () => ({
+      client: enabled ? (client as any) : null,
+      model: "test",
+      thinkingEnabled: false,
+      telemetryEnabled: false,
+    }),
+    getResolvedSettings: () => ({ model: "test" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  const sessionId = await manager.createSession({ text: "" });
+  manager.setActiveSessionId(sessionId);
+  enabled = true;
+  // Exercise handleUserPrompt's controller lifetime with a pending built-in tool batch.
+  manager.replySession = async (_id, _prompt, controller) => {
+    (manager as any).sessionControllers.set(sessionId, controller);
+    await (manager as any).appendToolMessages(sessionId, [
+      {
+        id: "cancel-search",
+        type: "function",
+        function: { name: "WebSearch", arguments: '{"query":"query"}' },
+      },
+    ]);
+  };
+  const prompt = manager.handleUserPrompt({ text: "continue" });
+  await started;
+  manager.interruptActiveSession();
+  await prompt;
+  assert.equal(manager.getSession(sessionId)?.status, "interrupted");
+  assert.equal((manager as any).activePromptController, null);
+  assert.equal(
+    manager.listSessionMessages(sessionId).some((message) => message.role === "tool"),
+    false
+  );
+  let resumed = false;
+  manager.replySession = async (_id, _prompt, controller) => {
+    assert.equal(controller?.signal.aborted, false);
+    resumed = true;
+  };
+  await manager.handleUserPrompt({ text: "next" });
+  assert.equal(resumed, true);
 });

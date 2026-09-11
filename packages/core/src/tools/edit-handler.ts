@@ -136,6 +136,7 @@ export async function handleEditTool(
       try {
         stat = fs.statSync(filePath);
       } catch (error) {
+        context.signal?.throwIfAborted();
         const message = error instanceof Error ? error.message : String(error);
         return {
           ok: false,
@@ -223,7 +224,10 @@ export async function handleEditTool(
           const looseEscapeMatches = findLooseEscapeMatches(raw, oldString, scope);
           if (looseEscapeMatches.length === 1 && looseEscapeMatches[0]?.score === 1) {
             const correctedStrings = await correctEscapedStringsWithLLM(
-              raw.slice(scope.startOffset, scope.endOffset),
+              raw.slice(
+                Math.min(scope.startOffset, looseEscapeMatches[0].startOffset),
+                Math.max(scope.endOffset, looseEscapeMatches[0].endOffset)
+              ),
               oldString,
               newString,
               looseEscapeMatches[0].text,
@@ -304,7 +308,9 @@ export async function handleEditTool(
 
         const updated = applyReplacement(raw, replacementOldString, replacementNewString, matches, replaceAll);
         const diffPreview = buildDiffPreview(filePath, raw, updated);
+        context.signal?.throwIfAborted();
         context.onBeforeFileMutation?.(filePath);
+        context.signal?.throwIfAborted();
         writeTextFile(filePath, updated, metadata.encoding, metadata.lineEndings);
         context.onAfterFileMutation?.(filePath);
         const freshMetadata = readTextFileWithMetadata(filePath);
@@ -337,6 +343,7 @@ export async function handleEditTool(
           },
         };
       } catch (error) {
+        context.signal?.throwIfAborted();
         const message = error instanceof Error ? error.message : String(error);
         return {
           ok: false,
@@ -419,7 +426,7 @@ function findOccurrences(raw: string, needle: string, scope: SearchScope): Match
     return [];
   }
 
-  const scopeText = raw.slice(scope.startOffset, scope.endOffset);
+  const scopeText = raw;
   const matches: MatchOccurrence[] = [];
   let searchIndex = 0;
 
@@ -428,8 +435,12 @@ function findOccurrences(raw: string, needle: string, scope: SearchScope): Match
     if (found === -1) {
       break;
     }
-    const startOffset = scope.startOffset + found;
+    const startOffset = found;
     const endOffset = startOffset + needle.length;
+    if (startOffset >= scope.endOffset || endOffset <= scope.startOffset) {
+      searchIndex = found + needle.length;
+      continue;
+    }
     matches.push({
       startOffset,
       endOffset,
@@ -447,7 +458,7 @@ function findLooseEscapeMatches(raw: string, needle: string, scope: SearchScope)
     return [];
   }
 
-  const scopeText = raw.slice(scope.startOffset, scope.endOffset);
+  const scopeText = raw;
   const looseEscapeRegex = buildLooseEscapeRegex(needle);
   if (!looseEscapeRegex) {
     return [];
@@ -461,8 +472,9 @@ function findLooseEscapeMatches(raw: string, needle: string, scope: SearchScope)
     }
 
     const text = match[0];
-    const startOffset = scope.startOffset + match.index;
+    const startOffset = match.index;
     const endOffset = startOffset + text.length;
+    if (startOffset >= scope.endOffset || endOffset <= scope.startOffset) continue;
     matches.push({
       text,
       score: similarityScore(normalizedNeedle, normalizeLooseText(text)),
@@ -649,39 +661,45 @@ async function inferOldStringNotFoundReasonWithLLM(
   const contentAfterSnippet = getLinesAfterScope(lineIndex, scope, contextLineLimit);
 
   try {
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You diagnose failed file edits when old_string was not found. " +
-            "Return XML only using <response><reason>...</reason></response>. " +
-            "Be concise and specific. Explain the likely mismatch between old_string and the <snippet_text/> content. " +
-            "Do not suggest unrelated changes.",
-        },
-        {
-          role: "user",
-          content:
-            "<request>\n" +
-            `  <content_before_snippet><![CDATA[${contentBeforeSnippet}]]></content_before_snippet>\n` +
-            `  <snippet_text><![CDATA[${snippetText}]]></snippet_text>\n` +
-            `  <content_after_snippet><![CDATA[${contentAfterSnippet}]]></content_after_snippet>\n` +
-            `  <old_string><![CDATA[${oldString}]]></old_string>\n` +
-            `  <new_string><![CDATA[${newString}]]></new_string>\n` +
-            "</request>\n" +
-            "<output_format>\n" +
-            "  <response>\n" +
-            "    <reason><![CDATA[...]]></reason>\n" +
-            "  </response>\n" +
-            "</output_format>",
-        },
-      ],
-      ...buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort),
-    });
+    context.signal?.throwIfAborted();
+    const response = await client.chat.completions.create(
+      {
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You diagnose failed file edits when old_string was not found. " +
+              "Return XML only using <response><reason>...</reason></response>. " +
+              "Be concise and specific. Explain the likely mismatch between old_string and the <snippet_text/> content. " +
+              "Do not suggest unrelated changes.",
+          },
+          {
+            role: "user",
+            content:
+              "<request>\n" +
+              `  <content_before_snippet><![CDATA[${contentBeforeSnippet}]]></content_before_snippet>\n` +
+              `  <snippet_text><![CDATA[${snippetText}]]></snippet_text>\n` +
+              `  <content_after_snippet><![CDATA[${contentAfterSnippet}]]></content_after_snippet>\n` +
+              `  <old_string><![CDATA[${oldString}]]></old_string>\n` +
+              `  <new_string><![CDATA[${newString}]]></new_string>\n` +
+              "</request>\n" +
+              "<output_format>\n" +
+              "  <response>\n" +
+              "    <reason><![CDATA[...]]></reason>\n" +
+              "  </response>\n" +
+              "</output_format>",
+          },
+        ],
+        ...buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort),
+      },
+      { signal: context.signal }
+    );
+    context.signal?.throwIfAborted();
 
     return parseOldStringNotFoundReason(response.choices?.[0]?.message?.content ?? "");
   } catch {
+    context.signal?.throwIfAborted();
     return null;
   }
 }
@@ -729,35 +747,40 @@ async function correctEscapedStringsWithLLM(
 
   try {
     const problemDescription = describeCorrectionProblems(oldString, matchedText);
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            `You correct file-edit strings when ${problemDescription}. ` +
-            "Return XML only using <response><corrected_old_string>...</corrected_old_string><corrected_new_string>...</corrected_new_string></response>. " +
-            "Do not change semantics; only fix quoting or escaping so corrected_old_string matches the snippet exactly.",
-        },
-        {
-          role: "user",
-          content:
-            "<request>\n" +
-            `  <snippet_text><![CDATA[${snippetText}]]></snippet_text>\n` +
-            `  <old_string><![CDATA[${oldString}]]></old_string>\n` +
-            `  <new_string><![CDATA[${newString}]]></new_string>\n` +
-            `  <matched_text><![CDATA[${matchedText}]]></matched_text>\n` +
-            "</request>\n" +
-            "<output_format>\n" +
-            "  <response>\n" +
-            "    <corrected_old_string><![CDATA[...]]></corrected_old_string>\n" +
-            "    <corrected_new_string><![CDATA[...]]></corrected_new_string>\n" +
-            "  </response>\n" +
-            "</output_format>",
-        },
-      ],
-      ...buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort),
-    });
+    context.signal?.throwIfAborted();
+    const response = await client.chat.completions.create(
+      {
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              `You correct file-edit strings when ${problemDescription}. ` +
+              "Return XML only using <response><corrected_old_string>...</corrected_old_string><corrected_new_string>...</corrected_new_string></response>. " +
+              "Do not change semantics; only fix quoting or escaping so corrected_old_string matches the snippet exactly.",
+          },
+          {
+            role: "user",
+            content:
+              "<request>\n" +
+              `  <snippet_text><![CDATA[${snippetText}]]></snippet_text>\n` +
+              `  <old_string><![CDATA[${oldString}]]></old_string>\n` +
+              `  <new_string><![CDATA[${newString}]]></new_string>\n` +
+              `  <matched_text><![CDATA[${matchedText}]]></matched_text>\n` +
+              "</request>\n" +
+              "<output_format>\n" +
+              "  <response>\n" +
+              "    <corrected_old_string><![CDATA[...]]></corrected_old_string>\n" +
+              "    <corrected_new_string><![CDATA[...]]></corrected_new_string>\n" +
+              "  </response>\n" +
+              "</output_format>",
+          },
+        ],
+        ...buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort),
+      },
+      { signal: context.signal }
+    );
+    context.signal?.throwIfAborted();
 
     const content = response.choices?.[0]?.message?.content ?? "";
     const parsed = parseCorrectedEditStrings(content);
@@ -782,6 +805,7 @@ async function correctEscapedStringsWithLLM(
 
     return parsed;
   } catch {
+    context.signal?.throwIfAborted();
     return null;
   }
 }

@@ -1,3 +1,4 @@
+import { bindProcessAbort } from "../common/process-abort";
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
 import type OpenAI from "openai";
@@ -25,6 +26,7 @@ type SearchPreparation = {
 };
 
 type LLMClientContext = {
+  signal?: AbortSignal;
   client: OpenAI;
   model: string;
   baseURL?: string;
@@ -40,6 +42,7 @@ export async function handleWebSearchTool(
   args: Record<string, unknown>,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
+  context.signal?.throwIfAborted();
   const query = typeof args.query === "string" ? args.query : "";
   if (!query.trim()) {
     return {
@@ -64,7 +67,7 @@ export async function handleWebSearchTool(
     };
   }
 
-  return executeDefaultWebSearch(query, llmContext, context);
+  return executeDefaultWebSearch(query, { ...llmContext, signal: context.signal }, context);
 }
 
 function hasUsableClient(value: ReturnType<CreateOpenAIClient> | undefined): value is LLMClientContext {
@@ -77,7 +80,9 @@ async function executeConfiguredWebSearch(
   context: ToolExecutionContext,
   configuredEnv: Record<string, string>
 ): Promise<ToolExecutionResult> {
+  context.signal?.throwIfAborted();
   const execution = await runWebSearchScript(scriptPath, query, context, configuredEnv);
+  context.signal?.throwIfAborted();
   const output = execution.stdout.slice(0, MAX_OUTPUT_CHARS);
   const truncated = execution.stdout.length > MAX_OUTPUT_CHARS;
 
@@ -129,8 +134,10 @@ async function executeDefaultWebSearch(
   llmContext: LLMClientContext,
   context: ToolExecutionContext
 ): Promise<ToolExecutionResult> {
+  context.signal?.throwIfAborted();
   try {
     const prepared = await prepareSearchQuery(query, llmContext);
+    context.signal?.throwIfAborted();
     const output =
       llmContext.baseURL === DEEPSEEK_BASE_URL
         ? await runDeepSeekWebSearchRequest(prepared.resolvedQuery, llmContext.client, context)
@@ -154,6 +161,7 @@ async function executeDefaultWebSearch(
       },
     };
   } catch (error) {
+    context.signal?.throwIfAborted();
     const message = error instanceof Error ? error.message : String(error);
     return {
       ok: false,
@@ -169,12 +177,15 @@ async function runWebSearchScript(
   context: ToolExecutionContext,
   configuredEnv: Record<string, string>
 ): Promise<{ stdout: string; stderr: string; exitCode: number | null; signal: string | null; error?: string }> {
+  context.signal?.throwIfAborted();
   return new Promise((resolve) => {
     const child = spawn(scriptPath, [query], {
       cwd: context.projectRoot,
+      detached: process.platform !== "win32",
       env: { ...process.env, ...configuredEnv },
       stdio: ["ignore", "pipe", "pipe"],
     });
+    bindProcessAbort(child, context.signal);
     const pid = child.pid;
     if (typeof pid === "number") {
       context.onProcessStart?.(pid, formatWebSearchActivityLabel(query));
@@ -294,10 +305,15 @@ ${query}
 }
 
 async function chat(llmContext: LLMClientContext, prompt: string): Promise<string> {
-  const response = await llmContext.client.chat.completions.create({
-    model: llmContext.model,
-    messages: [{ role: "user", content: prompt }],
-  });
+  llmContext.signal?.throwIfAborted();
+  const response = await llmContext.client.chat.completions.create(
+    {
+      model: llmContext.model,
+      messages: [{ role: "user", content: prompt }],
+    },
+    { signal: llmContext.signal }
+  );
+  llmContext.signal?.throwIfAborted();
 
   const content = response.choices?.[0]?.message?.content as unknown;
   if (typeof content === "string") {
@@ -347,6 +363,7 @@ async function runDefaultWebSearchRequest(
   try {
     const response = await fetch(DEFAULT_WEB_SEARCH_API_URL, {
       method: "POST",
+      signal: context.signal,
       headers: {
         "Content-Type": "application/json",
         Token: machineId,
@@ -360,12 +377,14 @@ async function runDefaultWebSearchRequest(
       throw new Error(`WebSearch API request failed with status ${response.status}${body ? `: ${body}` : ""}`);
     }
 
+    context.signal?.throwIfAborted();
     const payload = (await response.json()) as {
       success?: unknown;
       result?: unknown;
       reason?: unknown;
     };
 
+    context.signal?.throwIfAborted();
     if (payload.success !== true) {
       const reason =
         typeof payload.reason === "string" && payload.reason.trim() ? payload.reason.trim() : "Unknown error";
@@ -393,12 +412,16 @@ async function runDeepSeekWebSearchRequest(
   const activityId = `web-search-${randomUUID()}`;
   context.onProcessStart?.(activityId, formatWebSearchActivityLabel(query));
   try {
-    const response = await client.responses.create({
-      model: DEEPSEEK_WEB_SEARCH_MODEL,
-      input: query,
-      tools: [{ type: "web_search" }],
-      tool_choice: "required",
-    });
+    const response = await client.responses.create(
+      {
+        model: DEEPSEEK_WEB_SEARCH_MODEL,
+        input: query,
+        tools: [{ type: "web_search" }],
+        tool_choice: "required",
+      },
+      { signal: context.signal }
+    );
+    context.signal?.throwIfAborted();
 
     if (response.status === "failed") {
       throw new Error(`DeepSeek Responses API returned status ${response.status}.`);

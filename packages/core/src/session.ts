@@ -3086,6 +3086,7 @@ ${agentInstructions}
   ): Promise<{ waitingForUser: boolean }> {
     const loadedSkillNames = new Set<string>();
     const hooks: ToolExecutionHooks = {
+      signal: this.sessionControllers.get(sessionId)?.signal,
       onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),

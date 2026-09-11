@@ -40,6 +40,7 @@ export async function executeValidatedTool<TSchema extends z.ZodType<Record<stri
     preprocess?: (args: Record<string, unknown>) => ValidationResult;
   } = {}
 ): Promise<ToolExecutionResult> {
+  context.signal?.throwIfAborted();
   const preprocessed: ValidationResult = options.preprocess
     ? options.preprocess(rawArgs)
     : { ok: true, input: rawArgs };

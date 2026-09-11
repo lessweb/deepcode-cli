@@ -1,6 +1,6 @@
 {
   "name": "@vegamo/deepcode-monorepo",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "description": "Deep Code — CLI, core library, and VSCode companion",
   "license": "MIT",

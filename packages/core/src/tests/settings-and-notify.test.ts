@@ -633,7 +633,7 @@ test("resolveSettings applies thinking defaults to the default model", () => {
     TEST_PROCESS_ENV
   );
 
-  assert.equal(DEFAULT_MODEL, "deepseek-v4-flash");
+  assert.equal(DEFAULT_MODEL, "deepseek-flash");
   assert.equal(resolved.model, DEFAULT_MODEL);
   assert.equal(resolved.thinkingEnabled, true);
 });
@@ -763,7 +763,7 @@ test("applyModelConfigSelection persists a new selected model and thinking optio
       reasoningEffort: "max",
     },
     {
-      model: "deepseek-v4-flash",
+      model: "deepseek-flash",
       thinkingEnabled: true,
       reasoningEffort: "high",
     }
@@ -771,7 +771,7 @@ test("applyModelConfigSelection persists a new selected model and thinking optio
 
   assert.equal(result.changed, true);
   assert.equal(result.settings.env?.MODEL, "deepseek-v4-pro");
-  assert.equal(result.settings.model, "deepseek-v4-flash");
+  assert.equal(result.settings.model, "deepseek-flash");
   assert.equal(result.settings.thinkingEnabled, true);
   assert.equal(result.settings.reasoningEffort, "high");
 });
@@ -931,3 +931,21 @@ test(
     assert.equal(calls[1]?.options.env?.TITLE, "Fix login bug");
   }
 );
+
+test("resolveSettings applies deepseek-flash capabilities and respects explicit overrides", () => {
+  const defaults = { model: "default-model", baseURL: "https://api.deepseek.com" };
+  const resolved = resolveSettings({ model: "deepseek-flash" }, defaults, TEST_PROCESS_ENV);
+  assert.equal(resolved.model, "deepseek-flash");
+  assert.equal(resolved.thinkingEnabled, true);
+  assert.equal(resolved.contextWindow, 1024 * 1024);
+  assert.equal(resolved.autoCompactWindow, 512 * 1024);
+
+  const overridden = resolveSettings(
+    { model: "deepseek-flash", thinkingEnabled: false, contextWindow: "512K", autoCompactWindow: "128K" },
+    defaults,
+    TEST_PROCESS_ENV
+  );
+  assert.equal(overridden.thinkingEnabled, false);
+  assert.equal(overridden.contextWindow, 512 * 1024);
+  assert.equal(overridden.autoCompactWindow, 128 * 1024);
+});

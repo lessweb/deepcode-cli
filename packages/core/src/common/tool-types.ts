@@ -33,6 +33,7 @@ export type PluginRateLimitedTool = "UnderstandImage" | "WebSearch";
 export type SharpLoader = () => Promise<typeof sharp>;
 
 export type ToolExecutionContext = {
+  signal?: AbortSignal;
   sessionId: string;
   projectRoot: string;
   toolCall: ToolCall;
@@ -52,6 +53,7 @@ export type ToolExecutionContext = {
 };
 
 export type ToolExecutionHooks = {
+  signal?: AbortSignal;
   onProcessStart?: (processId: string | number, command: string) => void;
   onProcessExit?: (processId: string | number) => void;
   onProcessStdout?: (processId: string | number, chunk: string) => void;

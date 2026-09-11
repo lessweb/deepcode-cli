@@ -16,7 +16,7 @@ Traditional editing tools often require the model to provide a file path plus la
 
 Deep Code's solution is the snippet system. In addition to returning file contents, the `read` tool maintains session-local file state for text files and returns a `snippet_id` in metadata. The `edit` tool then requires this `snippet_id` as a mandatory parameter. A snippet carries the file path, line range, preview, version, and scope type.
 
-This reshapes the editing contract: a file must be read before it can be edited; the snippet must exist in the current session; the file must not have changed since it was read; replacement is searched only within the snippet's scope; non-unique matches return candidate snippets instead of guessing; and bulk replacement can require declaring the expected number of occurrences.
+This reshapes the editing contract: a file must be read before it can be edited; the snippet must exist in the current session; the file must not have changed since it was read; replacement is searched in the full file and only matches intersecting the snippet are eligible, including matches extending beyond its boundaries; non-unique matches return candidate snippets instead of guessing; and bulk replacement can require declaring the expected number of occurrences.
 
 This is a repair strategy that understands model behavior rather than indulging it. It does not require the model to stay perfect under pressure. Instead, it makes the correct operation easier to express while giving the framework enough local information to detect ambiguity. It remains strict at the interface validation layer, but is tolerant of common, recoverable text mistakes made by coding agents, allowing the agent to keep moving forward when the intent is clear.
 

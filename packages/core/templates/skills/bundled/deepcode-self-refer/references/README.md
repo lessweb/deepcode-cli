@@ -99,6 +99,7 @@ Skills 会按以下优先级扫描：
 - `deepseek-v4-pro`
 - `deepseek-v4-flash`（推荐使用）
 - `deepseek-v4-flash-vision-exp`
+- `deepseek-flash`（DeepSeek-V4.1-Flash，支持原生图片输入、思考模式和 1M 上下文）
 - 任何其他 OpenAI 兼容模型
 
 ## 常见问题
@@ -109,7 +110,7 @@ Skills 会按以下优先级扫描：
 
 ### Deep Code 是否支持理解图片？
 
-支持。`deepseek-v4-flash-vision-exp` 模型支持直接读取本地图片或使用`ctrl+v`从剪贴板粘贴图片，让模型直接看到图片内容。
+支持。`deepseek-flash` 和 `deepseek-v4-flash-vision-exp` 模型支持直接读取本地图片或使用`ctrl+v`从剪贴板粘贴图片，让模型直接看到图片内容。
 
 `deepseek-v4-pro`、`deepseek-v4-flash` 等非多模态模型仍会使用 `UnderstandImage` 识图工具。Deep Code 会自动判断模型能力，也可通过 `multimodal` 配置项手动覆盖。
 

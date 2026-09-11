@@ -1285,3 +1285,99 @@ async function waitFor(predicate: () => boolean, timeoutMs: number): Promise<voi
   }
   assert.equal(predicate(), true);
 }
+
+for (const [label, offset, limit, oldString, expected] of [
+  ["crosses start", 3, 1, "b\nc\n", "a\nX\nd\ne\n"],
+  ["crosses end", 2, 1, "b\nc\n", "a\nX\nd\ne\n"],
+  ["contains snippet", 3, 1, "b\nc\nd\n", "a\nX\ne\n"],
+  ["touches start only", 3, 1, "b\n", null],
+  ["touches end only", 3, 1, "d\n", null],
+  ["outside", 3, 1, "a\n", null],
+] as const) {
+  test(`Edit intersection ${label}`, async () => {
+    const workspace = createTempWorkspace();
+    const filePath = path.join(workspace, "intersection.txt");
+    const original = "a\nb\nc\nd\ne\n";
+    fs.writeFileSync(filePath, original);
+    const context = createContext(workspace, workspace);
+    const read = await handleReadTool({ file_path: filePath, offset, limit }, context);
+    const result = await handleEditTool(
+      { snippet_id: (read.metadata!.snippet as { id: string }).id, old_string: oldString, new_string: "X\n" },
+      context
+    );
+    assert.equal(result.ok, expected !== null);
+    assert.equal(fs.readFileSync(filePath, "utf8"), expected ?? original);
+  });
+}
+
+test("Edit replaces a whole function intersecting a 15-line snippet without diagnosis", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "function.py");
+  const oldString = Array.from({ length: 42 }, (_, index) => `line_${index}\n`).join("");
+  fs.writeFileSync(filePath, oldString);
+  const context = createContext(workspace, workspace, {
+    createOpenAIClient: () => {
+      throw new Error("Unexpected diagnosis");
+    },
+  });
+  const read = await handleReadTool({ file_path: filePath, offset: 1, limit: 15 }, context);
+  const result = await handleEditTool(
+    { snippet_id: (read.metadata!.snippet as { id: string }).id, old_string: oldString, new_string: "replacement\n" },
+    context
+  );
+  assert.equal(result.ok, true);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "replacement\n");
+});
+
+test("Edit replace_all counts only intersecting occurrences", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "duplicates.txt");
+  fs.writeFileSync(filePath, "a\nb\na\nb\na\nb\n");
+  const context = createContext(workspace, workspace);
+  const read = await handleReadTool({ file_path: filePath, offset: 2, limit: 2 }, context);
+  const args = { snippet_id: (read.metadata!.snippet as { id: string }).id, old_string: "a\nb\n", new_string: "X\n" };
+  assert.equal((await handleEditTool(args, context)).ok, false);
+  assert.equal((await handleEditTool({ ...args, replace_all: true, expected_occurrences: 3 }, context)).ok, false);
+  const result = await handleEditTool({ ...args, replace_all: true, expected_occurrences: 2 }, context);
+  assert.equal(result.ok, true);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "X\nX\na\nb\n");
+});
+
+test("Edit Tab correction can cross snippet boundaries", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "tabs.txt");
+  fs.writeFileSync(filePath, "first\nsecond\nthird\n");
+  const context = createContext(workspace, workspace);
+  const read = await handleReadTool({ file_path: filePath, offset: 2, limit: 1 }, context);
+  const result = await handleEditTool(
+    {
+      snippet_id: (read.metadata!.snippet as { id: string }).id,
+      old_string: "first\n\tsecond\n\tthird",
+      new_string: "updated",
+    },
+    context
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.metadata?.matched_via, "line_leading_tab_correction");
+  assert.equal(fs.readFileSync(filePath, "utf8"), "updated\n");
+});
+
+test("Edit cancellation before mutation preserves the file", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "cancel.txt");
+  fs.writeFileSync(filePath, "original");
+  const controller = new AbortController();
+  const context = createContext(workspace, workspace, {
+    signal: controller.signal,
+    onBeforeFileMutation: () => controller.abort(),
+  });
+  const read = await handleReadTool({ file_path: filePath }, context);
+  await assert.rejects(
+    handleEditTool(
+      { snippet_id: (read.metadata!.snippet as { id: string }).id, old_string: "original", new_string: "late" },
+      context
+    ),
+    { name: "AbortError" }
+  );
+  assert.equal(fs.readFileSync(filePath, "utf8"), "original");
+});

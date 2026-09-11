@@ -97,6 +97,29 @@ test("OpenAIMessageConverter preserves image content for multimodal models", () 
   ]);
 });
 
+test("OpenAIMessageConverter preserves image content for deepseek-flash", () => {
+  const c = converter();
+  const messages: SessionMessage[] = [
+    msg({
+      role: "system",
+      content: "Loaded pixel.png",
+      contentParams: [{ type: "image_url", image_url: { url: "data:image/png;base64,abc" } }],
+    }),
+  ];
+
+  const result = c.buildMessages(messages, false, "deepseek-flash") as Array<{
+    role: string;
+    content: unknown;
+  }>;
+
+  assert.equal(result.length, 1);
+  assert.equal(result[0]?.role, "system");
+  assert.deepEqual(result[0]?.content, [
+    { type: "text", text: "Loaded pixel.png" },
+    { type: "image_url", image_url: { url: "data:image/png;base64,abc" } },
+  ]);
+});
+
 test("OpenAIMessageConverter filters image content for non-multimodal models", () => {
   const c = converter();
   const messages: SessionMessage[] = [
@@ -124,7 +147,7 @@ test("OpenAIMessageConverter multimodal config overrides model-based filtering",
   ];
 
   // "off" drops image content even for a multimodal model.
-  const off = c.buildMessages(messages, false, "custom-vision-model", "off") as Array<{ content: unknown }>;
+  const off = c.buildMessages(messages, false, "deepseek-flash", "off") as Array<{ content: unknown }>;
   assert.deepEqual(off[0]?.content, [{ type: "text", text: "Loaded pixel.png" }]);
 
   // "on" keeps image content even for a non-multimodal model.
