@@ -43,9 +43,38 @@ MCP 工具在 Deep Code 中的命名格式为 `mcp__<服务名>__<工具名>`，
 
 | 字段      | 类型     | 必填 | 说明                                                                                                                   |
 | --------- | -------- | ---- | ---------------------------------------------------------------------------------------------------------------------- |
-| `command` | string   | 是   | MCP 服务器的可执行文件路径或命令（如 `npx`、`node`、`python`）。当命令是 `npx` 时，Deep Code 会自动在参数前补充 `-y`。 |
+| `command` | string   | 否   | 本地 stdio 服务器的可执行文件路径或命令（如 `npx`、`node`、`python`）。当命令是 `npx` 时，Deep Code 会自动在参数前补充 `-y`。 |
 | `args`    | string[] | 否   | 传递给命令的参数列表                                                                                                   |
 | `env`     | object   | 否   | 传递给 MCP 服务器进程的环境变量（如 API Key）                                                                          |
+| `type`    | string   | 否   | 传输类型：`stdio`（本地子进程，默认）或 `http`（远程 Streamable HTTP）。给出 `url` 时默认为 `http`。                   |
+| `url`     | string   | 否   | 远程 MCP 服务器的 HTTP(S) 端点（Streamable HTTP）。设置后即为远程服务器，无需 `command`。                             |
+| `headers` | object   | 否   | 远程请求附带的 HTTP 头（如 `Authorization`），常用于鉴权。                                                            |
+
+> 本地服务器用 `command`/`args`/`env`，远程服务器用 `url`/`headers`，二者择一。
+
+## 远程 MCP 服务器（Streamable HTTP）
+
+除了本地 stdio 服务器，Deep Code 也支持通过 **Streamable HTTP**（MCP 2025-03-26）连接远程 MCP 服务器。只要在配置里给出 `url`（或显式设置 `type: "http"`）即可：
+
+```json
+{
+  "mcpServers": {
+    "remote-service": {
+      "type": "http",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
+```
+
+- `url`：远程服务器的 HTTP(S) 端点。
+- `headers`：可选，附加到每个请求的 HTTP 头，常用于鉴权（如 `Authorization`）。
+- 初始化时服务器返回的 `Mcp-Session-Id` 会被自动记录，并在后续请求中回传。
+
+> 当前仅支持 Streamable HTTP；尚不支持旧版 HTTP+SSE 双端点传输与 OAuth 授权流程。
 
 ## 常用 MCP 示例
 
