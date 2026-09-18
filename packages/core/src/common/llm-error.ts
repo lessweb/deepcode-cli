@@ -102,10 +102,19 @@ function getErrorDetails(error: unknown, depth: number, seen: Set<object>): LlmE
 }
 
 function getProviderMessage(error: unknown): string | undefined {
-  if (!isRecord(error) || !isRecord(error.error)) {
+  if (!isRecord(error)) {
     return undefined;
   }
-  return safeText(error.error.message);
+  // Providers and gateways do not agree on the error payload shape: some send
+  // an object with `message`, others send the message as a plain string.
+  const payload = error.error;
+  if (typeof payload === "string") {
+    return safeText(payload);
+  }
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+  return safeText(payload.message);
 }
 
 function getHeader(headers: unknown, name: string): string | undefined {
