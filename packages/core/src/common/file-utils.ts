@@ -1,4 +1,5 @@
 import * as fs from "fs";
+import * as os from "os";
 import * as path from "path";
 import type { FileState, FileLineEnding } from "./state";
 
@@ -15,6 +16,20 @@ export function normalizeContent(value: string): string {
 
 export function detectLineEndings(value: string): FileLineEnding {
   return value.includes("\r\n") ? "CRLF" : "LF";
+}
+
+/**
+ * Line ending a newly created file should use: the platform-native one.
+ *
+ * Created files have no existing EOL to preserve, and models emit LF-only text.
+ * Writing that verbatim produces LF files on Windows, where native tooling (and
+ * the files the user's editor creates) use CRLF. Existing files are unaffected:
+ * their recorded line endings still win in the write handler.
+ *
+ * @param eol platform line ending, injectable for tests
+ */
+export function platformLineEnding(eol: string = os.EOL): FileLineEnding {
+  return eol === "\r\n" ? "CRLF" : "LF";
 }
 
 export function detectEncoding(buffer: Buffer): BufferEncoding {

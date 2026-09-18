@@ -6,6 +6,7 @@ import {
   ensureParentDirectory,
   hasFileChangedSinceState,
   normalizeContent,
+  platformLineEnding,
   readTextFileWithMetadata,
   writeTextFile,
 } from "../common/file-utils";
@@ -96,7 +97,8 @@ export async function handleWriteTool(
 
         const existingMetadata = existingFile ? readTextFileWithMetadata(filePath) : null;
         const encoding = existingMetadata?.encoding ?? "utf8";
-        const lineEndings = existingMetadata?.lineEndings ?? (input.content.includes("\r\n") ? "CRLF" : "LF");
+        const lineEndings =
+          existingMetadata?.lineEndings ?? (input.content.includes("\r\n") ? "CRLF" : platformLineEnding());
         const diffPreview = buildDiffPreview(filePath, existingMetadata?.content ?? null, normalizedContent);
         context.signal?.throwIfAborted();
         context.onBeforeFileMutation?.(filePath);
