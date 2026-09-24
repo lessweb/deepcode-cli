@@ -22,6 +22,18 @@ test("describeLlmError shows provider business errors with trace metadata", () =
   );
 });
 
+test("describeLlmError keeps provider errors whose payload is a plain string", () => {
+  const error = Object.assign(new Error("502 Bad Gateway"), {
+    status: 502,
+    error: "Gateway failed",
+    headers: new Headers({
+      "x-request-id": "request-789",
+    }),
+  });
+
+  assert.equal(describeLlmError(error), "HTTP 502: Gateway failed [request ID: request-789]");
+});
+
 test("describeLlmError unwraps underlying network causes", () => {
   const cause = new Error("getaddrinfo ENOTFOUND api.deepseek.com");
   const error = Object.assign(new Error("Connection error."), { cause });
