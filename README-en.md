@@ -98,9 +98,12 @@ Skills are discovered from these locations, in priority order:
 While a turn is running, `Enter` no longer blocks and does not have to wait: the prompt becomes
 supplemental guidance, appended to the conversation right before the model's next step of that
 turn. The model therefore reads it together with the work it already did and can revise or
-supersede the earlier instructions. Up to 10 messages can wait; press `Backspace` on an empty
-prompt to drop the last one. `Esc` still interrupts the turn immediately, and slash commands
-still wait for the turn to finish.
+supersede the earlier instructions. When the model is in the middle of writing an answer, that
+answer is cut short and whatever it already wrote stays in the conversation; set
+`steerMode: "queue"` to wait for the next request boundary instead. Up to 10 messages can wait;
+press `Backspace` on an empty prompt to drop the last one. Running commands are never
+interrupted, `Esc` still interrupts the turn immediately, and slash commands still wait for the
+turn to finish.
 
 ## Supported Models
 

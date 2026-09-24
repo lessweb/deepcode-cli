@@ -49,7 +49,11 @@ type CapturedRequest = {
 };
 
 type TestClient = {
-  chat: { completions: { create: (request: unknown) => Promise<unknown> } };
+  chat: {
+    completions: {
+      create: (request: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>;
+    };
+  };
 };
 
 function isSkillMatchingRequest(request: any): boolean {
@@ -87,6 +91,65 @@ function createClientMock(options: {
           if (response instanceof Error) {
             throw response;
           }
+          return response;
+        },
+      },
+    },
+  };
+}
+
+/**
+ * Client whose second call behaves like a long streaming answer: it emits one
+ * chunk and then stays open until the request is aborted, which is what
+ * `steerActiveSession()` does when the user sends new guidance.
+ */
+function createSteerableClient(options: {
+  requests: CapturedRequest[];
+  firstResponse: unknown;
+  streamedContent: string;
+  onStreamStarted: () => void;
+  followUpResponses: unknown[];
+}): TestClient {
+  let callIndex = 0;
+  return {
+    chat: {
+      completions: {
+        create: async (request: unknown, requestOptions?: { signal?: AbortSignal }) => {
+          if (isSkillMatchingRequest(request)) {
+            return createSkillMatchingResponse();
+          }
+          options.requests.push(request as CapturedRequest);
+          const index = callIndex;
+          callIndex += 1;
+
+          if (index === 0) {
+            return options.firstResponse;
+          }
+          if (index === 1) {
+            const signal = requestOptions?.signal;
+            const streamedContent = options.streamedContent;
+            const onStreamStarted = options.onStreamStarted;
+            return (async function* streamUntilAborted() {
+              yield { choices: [{ delta: { content: streamedContent } }] };
+              onStreamStarted();
+              await new Promise<void>((_resolve, reject) => {
+                const abort = () => {
+                  const error = new Error("Request was aborted.");
+                  error.name = "AbortError";
+                  reject(error);
+                };
+                if (signal?.aborted) {
+                  abort();
+                  return;
+                }
+                signal?.addEventListener("abort", abort, { once: true });
+              });
+              yield { choices: [{ delta: {}, finish_reason: "stop" }] };
+            })();
+          }
+
+          const response = options.followUpResponses.shift();
+          assert.ok(response, "expected a queued follow-up response");
           return response;
         },
       },
@@ -369,4 +432,90 @@ test("guidance with an image is injected as a user message that carries the imag
   const stored = findInjectedMessages(manager.listSessionMessages(sessionId));
   assert.equal(stored.length, 1);
   assert.deepEqual(stored[0]!.meta?.userPrompt?.imageUrls, ["https://example.com/design.png"]);
+});
+
+test("guidance sent while the model is writing cuts the answer short and keeps the turn alive", async () => {
+  const workspace = createTempDir("deepcode-steer-workspace-");
+  const home = createTempDir("deepcode-steer-home-");
+  setHomeDir(home);
+  stubTelemetry();
+
+  const requests: CapturedRequest[] = [];
+  let markStreamStarted: () => void = () => {};
+  const streamStarted = new Promise<void>((resolve) => {
+    markStreamStarted = resolve;
+  });
+  const client = createSteerableClient({
+    requests,
+    firstResponse: createChatResponse("initial answer"),
+    streamedContent: "Here is the first half",
+    onStreamStarted: () => markStreamStarted(),
+    followUpResponses: [createChatResponse("revised answer")],
+  });
+  const injected: SessionMessage[] = [];
+  const manager = createTestManager({
+    projectRoot: workspace,
+    client,
+    onSupplementaryPromptInjected: (message) => injected.push(message),
+  });
+
+  const sessionId = await manager.createSession({ text: "install nginx" });
+  requests.length = 0;
+
+  const turn = manager.activateSession(sessionId);
+  await streamStarted;
+
+  // The user changes direction while the answer is still streaming.
+  assert.ok(manager.addSupplementaryPrompt(sessionId, { text: "use apache instead" }));
+  assert.equal(manager.steerActiveSession(), true);
+  await turn;
+
+  // The turn continued with the guidance instead of ending or failing.
+  assert.equal(requests.length, 2);
+  const followUp = requests[1]!.messages;
+  assert.deepEqual(
+    followUp.filter((message) => message.role === "user").map((message) => message.content),
+    ["install nginx", "use apache instead"]
+  );
+  // The follow-up request keeps the earlier answer, the cut-short answer and the
+  // guidance, in that order.
+  assert.deepEqual(
+    followUp.filter((message) => message.role === "assistant").map((message) => message.content),
+    ["initial answer", "Here is the first half"]
+  );
+
+  // What the model had written is kept in the transcript and marked as cut short.
+  const stored = manager.listSessionMessages(sessionId);
+  const partial = stored.find((message) => message.content === "Here is the first half");
+  assert.equal(partial?.role, "assistant");
+  assert.equal(partial?.meta?.interrupted, true);
+  assert.equal(partial?.visible, true);
+  const partialIndex = stored.findIndex((message) => message.id === partial?.id);
+  const guidanceIndex = stored.findIndex((message) => message.meta?.isSupplementary === true);
+  assert.ok(partialIndex !== -1 && guidanceIndex > partialIndex);
+
+  // The session finished normally, so a steered answer is not an interruption.
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+  assert.equal(manager.countPendingSupplementaryPrompts(sessionId), 0);
+  assert.equal(injected.length, 1);
+});
+
+test("steerActiveSession does nothing when no answer is streaming", async () => {
+  const workspace = createTempDir("deepcode-steer-idle-workspace-");
+  const home = createTempDir("deepcode-steer-idle-home-");
+  setHomeDir(home);
+  stubTelemetry();
+
+  const requests: CapturedRequest[] = [];
+  const client = createClientMock({ responses: [createChatResponse("done")], requests });
+  const manager = createTestManager({ projectRoot: workspace, client });
+
+  const sessionId = await manager.createSession({ text: "start" });
+
+  // No request in flight: the guidance stays queued for the next request boundary,
+  // and a tool that is executing is therefore never killed by typing.
+  assert.equal(manager.steerActiveSession(), false);
+  assert.ok(manager.addSupplementaryPrompt(sessionId, { text: "also add tests" }));
+  assert.equal(manager.steerActiveSession(), false);
+  assert.equal(manager.countPendingSupplementaryPrompts(sessionId), 1);
 });

@@ -88,6 +88,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
                 return <Text key={i}>{seg.body}</Text>;
               })
             : null}
+          {message.meta?.interrupted ? <Text dimColor>— superseded by your guidance</Text> : null}
         </Box>
       </Box>
     );

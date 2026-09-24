@@ -33,6 +33,7 @@ function createSettings(
     debugLogEnabled: false,
     telemetryEnabled: false,
     multimodal: "default",
+    steerMode: "interrupt",
     filesApiEnabled: false,
     filesApiTimeoutMs: 60_000,
     fileExpiresAfterSeconds: 604_800,

@@ -81,6 +81,7 @@ import {
   LLM_STREAM_IDLE_TIMEOUT_MS,
   LlmStreamDisconnectedError,
   LlmStreamIdleTimeoutError,
+  LlmSteeredError,
   MAX_LLM_RETRIES,
   waitForLlmRetry,
 } from "./common/llm-retry";
@@ -316,6 +317,8 @@ export type MessageMeta = {
   userPrompt?: UserPromptContent;
   /** User guidance that arrived while the turn was already running. */
   isSupplementary?: boolean;
+  /** Assistant output that was cut short because new guidance superseded it. */
+  interrupted?: boolean;
 };
 
 export type SessionMessage = {
@@ -461,6 +464,10 @@ export class SessionManager {
   /** Supplemental guidance that arrived while a turn was already running. */
   private readonly supplementaryPrompts = new Map<string, SupplementaryPrompt[]>();
   private supplementaryPromptNextId = 1;
+  /** Abort handle of the LLM request each session is currently streaming. */
+  private readonly steerControllers = new Map<string, AbortController>();
+  /** Sessions whose in-flight answer was superseded by new user guidance. */
+  private readonly steeredSessions = new Set<string>();
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
@@ -723,7 +730,12 @@ export class SessionManager {
       try {
         return await this.createChatCompletionStreamAttempt(client, request, options, sessionId, debug, requestId);
       } catch (error) {
-        if (signal?.aborted || retryCount >= MAX_LLM_RETRIES || !isRetryableLlmError(error)) {
+        if (
+          error instanceof LlmSteeredError ||
+          signal?.aborted ||
+          retryCount >= MAX_LLM_RETRIES ||
+          !isRetryableLlmError(error)
+        ) {
           throw error;
         }
         const attempt = retryCount + 1;
@@ -970,6 +982,11 @@ export class SessionManager {
         throw new LlmStreamDisconnectedError();
       }
     } catch (error) {
+      if (sessionId && this.steeredSessions.has(sessionId)) {
+        // The user sent new guidance while this answer was streaming. Hand the
+        // partial answer to the caller instead of reporting a failure.
+        throw new LlmSteeredError(content, reasoningContent.length > 0 ? reasoningContent : null);
+      }
       const streamError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
@@ -1579,6 +1596,79 @@ ${agentInstructions}
     return pending.length;
   }
 
+  /**
+   * Cut short the answer the model is currently writing so the guidance the user
+   * just sent is read now instead of after that answer finishes.
+   *
+   * Nothing is interrupted when no answer is streaming (for example while a tool
+   * is executing): the guidance then waits for the next request boundary, so a
+   * running command is never killed by normal typing. Returns whether an answer
+   * was cut short.
+   */
+  steerActiveSession(): boolean {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) {
+      return false;
+    }
+
+    const controller = this.steerControllers.get(sessionId);
+    if (!controller) {
+      return false;
+    }
+
+    this.steeredSessions.add(sessionId);
+    if (!controller.signal.aborted) {
+      controller.abort(new Error("Superseded by new user guidance."));
+    }
+    return true;
+  }
+
+  /**
+   * Keep the part of the answer the model produced before it was steered, so the
+   * conversation still shows what it had said when the user changed direction.
+   */
+  private appendSteeredAnswer(sessionId: string, error: LlmSteeredError): void {
+    if (!error.hasPartialAnswer()) {
+      return;
+    }
+
+    const message = this.buildAssistantMessage(sessionId, error.partialContent, null, error.partialThinking ?? "");
+    message.meta = { ...(message.meta ?? {}), interrupted: true };
+    this.appendSessionMessage(sessionId, message);
+    this.onAssistantMessage(message, false);
+  }
+
+  /**
+   * Signal for one LLM request: it aborts when the turn is interrupted or when the
+   * answer is superseded by new guidance, and it is released once the request is
+   * settled so `steerActiveSession` only ever targets a live stream.
+   */
+  private beginRequestSteer(sessionId: string, turnSignal: AbortSignal): { signal: AbortSignal; release: () => void } {
+    const steerController = new AbortController();
+    const forwardTurnAbort = () => {
+      if (!steerController.signal.aborted) {
+        steerController.abort(turnSignal.reason);
+      }
+    };
+    if (turnSignal.aborted) {
+      forwardTurnAbort();
+    } else {
+      turnSignal.addEventListener("abort", forwardTurnAbort, { once: true });
+    }
+    this.steerControllers.set(sessionId, steerController);
+
+    return {
+      signal: steerController.signal,
+      release: () => {
+        turnSignal.removeEventListener("abort", forwardTurnAbort);
+        if (this.steerControllers.get(sessionId) === steerController) {
+          this.steerControllers.delete(sessionId);
+        }
+        this.steeredSessions.delete(sessionId);
+      },
+    };
+  }
+
   async handleUserPrompt(userPrompt: UserPromptContent): Promise<void> {
     const controller = new AbortController();
     this.activePromptController = controller;
@@ -1933,6 +2023,7 @@ ${agentInstructions}
               references: [] as DeepSeekFileReference[],
             };
         const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
+        const steer = this.beginRequestSteer(sessionId, sessionController.signal);
         const request = () =>
           this.createChatCompletionStream(
             client,
@@ -1943,7 +2034,7 @@ ${agentInstructions}
               tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
               ...thinkingOptions,
             },
-            { signal: sessionController.signal },
+            { signal: steer.signal },
             sessionId,
             {
               enabled: debugLogEnabled,
@@ -1956,6 +2047,12 @@ ${agentInstructions}
         try {
           response = await request();
         } catch (error) {
+          if (error instanceof LlmSteeredError && !sessionController.signal.aborted) {
+            // The user changed direction while this answer was streaming: keep what
+            // the model already wrote, then let the loop continue with the guidance.
+            this.appendSteeredAnswer(sessionId, error);
+            continue;
+          }
           if (!filesSettings.enabled || prepared.references.length === 0 || !this.isRejectedDeepSeekFile(error)) {
             throw error;
           }
@@ -1970,6 +2067,8 @@ ${agentInstructions}
             sessionController.signal
           );
           response = await request();
+        } finally {
+          steer.release();
         }
 
         const message = response.choices?.[0]?.message;
@@ -2801,6 +2900,8 @@ ${agentInstructions}
     }
     this.sessionControllers.delete(sessionId);
     this.setSupplementaryPrompts(sessionId, []);
+    this.steerControllers.delete(sessionId);
+    this.steeredSessions.delete(sessionId);
     if (options.removeMessages) {
       this.removeSessionMessages([sessionId]);
       try {

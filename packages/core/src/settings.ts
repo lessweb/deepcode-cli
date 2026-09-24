@@ -84,6 +84,8 @@ export type ResolvedStatusLineSettings = {
   providers: StatusLineProviderConfig[];
 };
 
+export type SteerMode = "interrupt" | "queue";
+
 export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   contextWindow?: number | string;
@@ -97,6 +99,8 @@ export type DeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   multimodal?: MultimodalMode;
+  /** How a prompt sent while the model is writing is handled. Defaults to `interrupt`. */
+  steerMode?: SteerMode;
   filesApiEnabled?: boolean;
   filesApiTimeoutMs?: number;
   fileExpiresAfterSeconds?: number;
@@ -124,6 +128,7 @@ export type ResolvedDeepcodingSettings = {
   notify?: string;
   webSearchTool?: string;
   multimodal: MultimodalMode;
+  steerMode: SteerMode;
   filesApiEnabled: boolean;
   filesApiTimeoutMs: number;
   fileExpiresAfterSeconds: number;
@@ -199,6 +204,17 @@ function resolveMultimodalMode(value: unknown): MultimodalMode | undefined {
   }
   const normalized = value.trim().toLowerCase();
   if (normalized === "default" || normalized === "on" || normalized === "off") {
+    return normalized;
+  }
+  return undefined;
+}
+
+function resolveSteerMode(value: unknown): SteerMode | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "interrupt" || normalized === "queue") {
     return normalized;
   }
   return undefined;
@@ -663,6 +679,9 @@ export function resolveSettingsSources(
     resolveMultimodalMode(userEnv.MULTIMODAL) ??
     "default";
 
+  const steerMode =
+    resolveSteerMode(projectSettings?.steerMode) ?? resolveSteerMode(userSettings?.steerMode) ?? "interrupt";
+
   const filesApiEnabled =
     baseURL === DEFAULT_BASE_URL &&
     (parseBoolean(projectSettings?.filesApiEnabled) ?? parseBoolean(userSettings?.filesApiEnabled) ?? false);
@@ -713,6 +732,7 @@ export function resolveSettingsSources(
     notify: notify || undefined,
     webSearchTool: webSearchTool || undefined,
     multimodal,
+    steerMode,
     filesApiEnabled,
     filesApiTimeoutMs,
     fileExpiresAfterSeconds,

@@ -566,11 +566,17 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           imageUrls: submission.imageUrls,
           skills: submission.selectedSkills,
         });
+        // With `steerMode: "interrupt"` (the default) the answer that is streaming is
+        // cut short so the guidance is read straight away; `"queue"` only waits for the
+        // next request boundary. Running tools are never interrupted.
+        if (resolveCurrentSettings(projectRoot).steerMode !== "queue") {
+          sessionManager.steerActiveSession();
+        }
         return;
       }
       void handlePrompt(submission);
     },
-    [handlePrompt, sessionManager]
+    [handlePrompt, projectRoot, sessionManager]
   );
 
   const handlePlanImplementationChoice = useCallback(

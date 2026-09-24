@@ -35,6 +35,7 @@ export type {
   PermissionDefaultMode,
   McpServerConfig,
   ReasoningEffort,
+  SteerMode,
   StatusLineSettings,
   ResolvedStatusLineSettings,
   StatusLineProviderConfig,

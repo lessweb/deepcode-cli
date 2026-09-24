@@ -171,6 +171,28 @@ test("resolveSettings reads top-level multimodal and ignores invalid values", ()
   assert.equal(invalid.multimodal, "default");
 });
 
+test("resolveSettings defaults steerMode to interrupt and ignores invalid values", () => {
+  const defaults = resolveSettings(
+    {},
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  const queued = resolveSettings(
+    { steerMode: "queue" },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  const invalid = resolveSettings(
+    { steerMode: "sometimes" as never },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+
+  assert.equal(defaults.steerMode, "interrupt");
+  assert.equal(queued.steerMode, "queue");
+  assert.equal(invalid.steerMode, "interrupt");
+});
+
 test("resolveSettings reads MULTIMODAL from env", () => {
   const resolved = resolveSettings(
     { env: { MULTIMODAL: "off" } },
