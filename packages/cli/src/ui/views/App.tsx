@@ -20,6 +20,7 @@ import {
   findPendingAskUserQuestion,
   formatAskUserQuestionAnswers,
 } from "../core/ask-user-question";
+import { formatQueuedPromptPreview } from "../core/prompt-queue";
 import { PermissionPrompt, type PermissionPromptResult } from "./PermissionPrompt";
 import {
   PlanImplementationPrompt,
@@ -53,6 +54,7 @@ import type {
   SessionMessage,
   SessionStatus,
   SkillInfo,
+  SupplementaryPrompt,
   UndoTarget,
   UserPromptContent,
 } from "@vegamo/deepcode-core";
@@ -69,6 +71,16 @@ type AppProps = {
   onRestart?: () => void;
 };
 
+/**
+ * One-line label for guidance waiting to be injected into the running turn, so
+ * the user can recognise what will be sent at the model's next step.
+ */
+function buildQueuedPromptPreview(submission: { text: string; imageUrls: string[]; skills?: SkillInfo[] }): string {
+  const skillNames = submission.skills?.map((skill) => skill.name).filter(Boolean) ?? [];
+  const text = submission.text.trim() || (skillNames.length > 0 ? skillNames.join(", ") : "");
+  return formatQueuedPromptPreview(text, submission.imageUrls.length);
+}
+
 function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRestart }: AppProps): React.ReactElement {
   const { exit } = useApp();
   const { stdout, write } = useStdout();
@@ -82,8 +94,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const writeRef = useRef(write);
   const lastRenderedColumnsRef = useRef<number | null>(null);
   const messagesRef = useRef<SessionMessage[]>([]);
+  const busyRef = useRef(false);
   const [view, setView] = useState<View>("chat");
   const [busy, setBusy] = useState(false);
+  const [pendingSupplementary, setPendingSupplementary] = useState<SupplementaryPrompt[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -114,6 +128,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
 
   rawModeRef.current = mode;
   messagesRef.current = messages;
+  busyRef.current = busy;
 
   const sessionManager = useMemo(() => {
     return new SessionManager({
@@ -148,6 +163,16 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       onMcpStatusChanged: () => {
         // 当 MCP 状态变更时，如果当前正在查看 MCP 状态页面，则更新显示
         setMcpStatuses(sessionManager.getMcpStatus());
+      },
+      onSupplementaryQueueChanged: (sessionId, pending) => {
+        // Guidance belongs to the session it was typed in, so only mirror the
+        // active session in the prompt footer.
+        if (sessionId === sessionManager.getActiveSessionId()) {
+          setPendingSupplementary(pending);
+        }
+      },
+      onSupplementaryPromptInjected: (message) => {
+        setMessages((prev) => [...prev, message]);
       },
       onProcessStdout: (pid, chunk) => {
         const buf = processStdoutRef.current;
@@ -238,6 +263,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     setPlanMode(false);
     setPendingPlanImplementation(null);
     setDismissedQuestionIds(new Set());
+    setPendingSupplementary([]);
     await resetStaticView([]);
     await refreshSkills();
   }, [sessionManager, resetStaticView, refreshSkills]);
@@ -525,11 +551,34 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     [projectRoot, sessionManager]
   );
 
+  const cancelLastQueuedPrompt = useCallback((): void => {
+    sessionManager.cancelSupplementaryPrompt(sessionManager.getActiveSessionId());
+  }, [sessionManager]);
+
   const handleSubmit = useCallback(
     (submission: PromptSubmission) => {
+      // Prompts submitted while a turn is running become supplemental guidance:
+      // SessionManager appends them as a user message right before the next LLM
+      // call of that turn, so the model can revise what it is doing.
+      // Slash commands are not prompts: `/exit` must still quit the CLI while a turn
+      // is running, exactly as it did before, so they take the normal path.
+      if (busyRef.current && !submission.command) {
+        sessionManager.addSupplementaryPrompt(sessionManager.getActiveSessionId(), {
+          text: submission.text,
+          imageUrls: submission.imageUrls,
+          skills: submission.selectedSkills,
+        });
+        // Cutting the streaming answer short is opt-in: `Ctrl+Enter` always asks for
+        // it, and `steerMode: "interrupt"` makes it the default for plain `Enter`.
+        // Running tools are never interrupted either way.
+        if (submission.steer || resolveCurrentSettings(projectRoot).steerMode === "interrupt") {
+          sessionManager.steerActiveSession();
+        }
+        return;
+      }
       void handlePrompt(submission);
     },
-    [handlePrompt]
+    [handlePrompt, projectRoot, sessionManager]
   );
 
   const handlePlanImplementationChoice = useCallback(
@@ -584,6 +633,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
       setActiveAskPermissions(session?.askPermissions);
       setPlanMode(session?.planMode === true);
       setPendingPlanImplementation(null);
+      setPendingSupplementary(sessionManager.listPendingSupplementaryPrompts(sessionId));
       if (pendingPermissionReply && pendingPermissionReply.sessionId !== sessionId) {
         setPendingPermissionReply(null);
       }
@@ -835,6 +885,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const expandedThinkingId = findExpandedThinkingId(messages);
   const pendingQuestion = useMemo(() => findPendingAskUserQuestion(messages, activeStatus), [activeStatus, messages]);
   const shouldShowQuestionPrompt = Boolean(pendingQuestion && !dismissedQuestionIds.has(pendingQuestion.messageId));
+
+  const queuedPrompts = useMemo(() => pendingSupplementary.map(buildQueuedPromptPreview), [pendingSupplementary]);
+
   const loadingText = useMemo(
     () =>
       busy
@@ -1063,6 +1116,8 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           modelConfig={resolvedSettings}
           promptHistory={promptHistory}
           busy={busy}
+          queuedPrompts={queuedPrompts}
+          onRemoveQueuedPrompt={cancelLastQueuedPrompt}
           cursorLayoutKey={promptCursorLayoutKey}
           loadingText={loadingText}
           runningProcesses={runningProcesses}

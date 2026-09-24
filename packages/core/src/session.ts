@@ -81,6 +81,7 @@ import {
   LLM_STREAM_IDLE_TIMEOUT_MS,
   LlmStreamDisconnectedError,
   LlmStreamIdleTimeoutError,
+  LlmSteeredError,
   MAX_LLM_RETRIES,
   waitForLlmRetry,
 } from "./common/llm-retry";
@@ -314,6 +315,10 @@ export type MessageMeta = {
   skillCatalog?: Array<{ name: string; description: string }>;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;
+  /** User guidance that arrived while the turn was already running. */
+  isSupplementary?: boolean;
+  /** Assistant output that was cut short because new guidance superseded it. */
+  interrupted?: boolean;
 };
 
 export type SessionMessage = {
@@ -361,6 +366,24 @@ export type SkillInfo = {
   allowImplicitInvocation?: boolean;
 };
 
+export type SupplementaryPrompt = {
+  id: number;
+  text: string;
+  imageUrls: string[];
+  skills?: SkillInfo[];
+  createTime: string;
+};
+
+/**
+ * Maximum number of prompts that may wait for the next LLM call of a turn.
+ *
+ * The queue drains at the next request boundary, so this only caps how many
+ * instructions can pile up faster than one step of the turn. Every queued prompt
+ * travels with each remaining request of that turn, so the limit keeps a burst
+ * from inflating the context (and any attached images) without bound.
+ */
+export const MAX_SUPPLEMENTARY_PROMPTS = 20;
+
 export type SessionManagerOptions = {
   projectRoot: string;
   createOpenAIClient: CreateOpenAIClient;
@@ -387,6 +410,10 @@ export type SessionManagerOptions = {
   onLlmRetry?: (event: LlmRetryEvent) => void;
   onMcpStatusChanged?: () => void;
   onProcessStdout?: (pid: number, chunk: string) => void;
+  /** Fired when the pending supplemental guidance of a session changes. */
+  onSupplementaryQueueChanged?: (sessionId: string, pending: SupplementaryPrompt[]) => void;
+  /** Fired after a supplemental prompt is appended to the session as a user message. */
+  onSupplementaryPromptInjected?: (message: SessionMessage) => void;
   loadSharp?: SharpLoader;
   nonInteractive?: boolean;
 };
@@ -435,10 +462,19 @@ export class SessionManager {
   private readonly onLlmRetry?: (event: LlmRetryEvent) => void;
   private readonly onMcpStatusChanged?: () => void;
   private readonly onProcessStdout?: (pid: number, chunk: string) => void;
+  private readonly onSupplementaryQueueChanged?: (sessionId: string, pending: SupplementaryPrompt[]) => void;
+  private readonly onSupplementaryPromptInjected?: (message: SessionMessage) => void;
   private readonly nonInteractive: boolean;
   private activeSessionId: string | null = null;
   private activePromptController: AbortController | null = null;
   private readonly sessionControllers = new Map<string, AbortController>();
+  /** Supplemental guidance that arrived while a turn was already running. */
+  private readonly supplementaryPrompts = new Map<string, SupplementaryPrompt[]>();
+  private supplementaryPromptNextId = 1;
+  /** Abort handle of the LLM request each session is currently streaming. */
+  private readonly steerControllers = new Map<string, AbortController>();
+  /** Sessions whose in-flight answer was superseded by new user guidance. */
+  private readonly steeredSessions = new Set<string>();
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
@@ -458,6 +494,8 @@ export class SessionManager {
     this.onLlmRetry = options.onLlmRetry;
     this.onMcpStatusChanged = options.onMcpStatusChanged;
     this.onProcessStdout = options.onProcessStdout;
+    this.onSupplementaryQueueChanged = options.onSupplementaryQueueChanged;
+    this.onSupplementaryPromptInjected = options.onSupplementaryPromptInjected;
     this.nonInteractive = options.nonInteractive === true;
     this.loadSharp = options.loadSharp;
     this.toolExecutor = new ToolExecutor(this.projectRoot, this.createOpenAIClient, this.mcpManager, options.loadSharp);
@@ -699,7 +737,12 @@ export class SessionManager {
       try {
         return await this.createChatCompletionStreamAttempt(client, request, options, sessionId, debug, requestId);
       } catch (error) {
-        if (signal?.aborted || retryCount >= MAX_LLM_RETRIES || !isRetryableLlmError(error)) {
+        if (
+          error instanceof LlmSteeredError ||
+          signal?.aborted ||
+          retryCount >= MAX_LLM_RETRIES ||
+          !isRetryableLlmError(error)
+        ) {
           throw error;
         }
         const attempt = retryCount + 1;
@@ -946,6 +989,11 @@ export class SessionManager {
         throw new LlmStreamDisconnectedError();
       }
     } catch (error) {
+      if (sessionId && this.steeredSessions.has(sessionId)) {
+        // The user sent new guidance while this answer was streaming. Hand the
+        // partial answer to the caller instead of reporting a failure.
+        throw new LlmSteeredError(content, reasoningContent.length > 0 ? reasoningContent : null);
+      }
       const streamError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
@@ -1452,6 +1500,182 @@ ${agentInstructions}
     this.onAssistantMessage(message, false);
   }
 
+  /**
+   * Queue guidance that the user sent while a turn was already running.
+   *
+   * The prompt becomes a user message right before the next LLM call of the
+   * running turn, so the model reads it together with the work it already did and
+   * can override the earlier instructions. Returns the queued entry, or null when
+   * the queue is full, the prompt is empty, or the session is unknown.
+   */
+  addSupplementaryPrompt(
+    sessionId: string | null | undefined,
+    prompt: { text?: string; imageUrls?: string[]; skills?: SkillInfo[] }
+  ): SupplementaryPrompt | null {
+    if (!sessionId || !this.getSession(sessionId)) {
+      return null;
+    }
+
+    const text = (prompt.text ?? "").trim();
+    const imageUrls = (prompt.imageUrls ?? []).filter(Boolean);
+    const skills = prompt.skills && prompt.skills.length > 0 ? prompt.skills : undefined;
+    if (!text && imageUrls.length === 0 && !skills) {
+      return null;
+    }
+
+    const pending = this.supplementaryPrompts.get(sessionId) ?? [];
+    if (pending.length >= MAX_SUPPLEMENTARY_PROMPTS) {
+      return null;
+    }
+
+    const entry: SupplementaryPrompt = {
+      id: this.supplementaryPromptNextId,
+      text,
+      imageUrls,
+      skills,
+      createTime: new Date().toISOString(),
+    };
+    this.supplementaryPromptNextId += 1;
+    this.setSupplementaryPrompts(sessionId, [...pending, entry]);
+    return entry;
+  }
+
+  /** Drop one pending entry; without an id the newest entry is removed. */
+  cancelSupplementaryPrompt(sessionId: string | null | undefined, id?: number): boolean {
+    const pending = sessionId ? this.supplementaryPrompts.get(sessionId) : undefined;
+    if (!sessionId || !pending || pending.length === 0) {
+      return false;
+    }
+
+    const index = id === undefined ? pending.length - 1 : pending.findIndex((entry) => entry.id === id);
+    if (index === -1) {
+      return false;
+    }
+
+    const next = pending.slice();
+    next.splice(index, 1);
+    this.setSupplementaryPrompts(sessionId, next);
+    return true;
+  }
+
+  /** Pending guidance of a session, oldest first. */
+  listPendingSupplementaryPrompts(sessionId: string | null | undefined): SupplementaryPrompt[] {
+    if (!sessionId) {
+      return [];
+    }
+    return (this.supplementaryPrompts.get(sessionId) ?? []).map((entry) => ({ ...entry }));
+  }
+
+  countPendingSupplementaryPrompts(sessionId: string | null | undefined): number {
+    return sessionId ? (this.supplementaryPrompts.get(sessionId)?.length ?? 0) : 0;
+  }
+
+  private setSupplementaryPrompts(sessionId: string, pending: SupplementaryPrompt[]): void {
+    if (pending.length === 0) {
+      this.supplementaryPrompts.delete(sessionId);
+    } else {
+      this.supplementaryPrompts.set(sessionId, pending);
+    }
+    this.onSupplementaryQueueChanged?.(sessionId, this.listPendingSupplementaryPrompts(sessionId));
+  }
+
+  /**
+   * Append every pending supplemental prompt as a user message of the running
+   * turn. Called before each LLM call so the guidance is read inside the same
+   * turn instead of waiting for the next one.
+   */
+  private async flushSupplementaryPrompts(sessionId: string): Promise<number> {
+    const pending = this.supplementaryPrompts.get(sessionId);
+    if (!pending || pending.length === 0) {
+      return 0;
+    }
+
+    this.setSupplementaryPrompts(sessionId, []);
+    for (const entry of pending) {
+      const skills = await this.normalizeSkills(entry.skills, sessionId);
+      this.appendSkillMessages(sessionId, skills);
+      const prepared = this.preparePromptImages(sessionId, { text: entry.text, imageUrls: entry.imageUrls });
+      const message = this.buildUserMessage(sessionId, prepared);
+      message.meta = { ...(message.meta ?? {}), isSupplementary: true };
+      this.appendSessionMessage(sessionId, message);
+      this.onSupplementaryPromptInjected?.(message);
+    }
+    return pending.length;
+  }
+
+  /**
+   * Cut short the answer the model is currently writing so the guidance the user
+   * just sent is read now instead of after that answer finishes.
+   *
+   * Nothing is interrupted when no answer is streaming (for example while a tool
+   * is executing): the guidance then waits for the next request boundary, so a
+   * running command is never killed by normal typing. Returns whether an answer
+   * was cut short.
+   */
+  steerActiveSession(): boolean {
+    const sessionId = this.activeSessionId;
+    if (!sessionId) {
+      return false;
+    }
+
+    const controller = this.steerControllers.get(sessionId);
+    if (!controller) {
+      return false;
+    }
+
+    this.steeredSessions.add(sessionId);
+    if (!controller.signal.aborted) {
+      controller.abort(new Error("Superseded by new user guidance."));
+    }
+    return true;
+  }
+
+  /**
+   * Keep the part of the answer the model produced before it was steered, so the
+   * conversation still shows what it had said when the user changed direction.
+   */
+  private appendSteeredAnswer(sessionId: string, error: LlmSteeredError): void {
+    if (!error.hasPartialAnswer()) {
+      return;
+    }
+
+    const message = this.buildAssistantMessage(sessionId, error.partialContent, null, error.partialThinking ?? "");
+    message.meta = { ...(message.meta ?? {}), interrupted: true };
+    this.appendSessionMessage(sessionId, message);
+    this.onAssistantMessage(message, false);
+  }
+
+  /**
+   * Signal for one LLM request: it aborts when the turn is interrupted or when the
+   * answer is superseded by new guidance, and it is released once the request is
+   * settled so `steerActiveSession` only ever targets a live stream.
+   */
+  private beginRequestSteer(sessionId: string, turnSignal: AbortSignal): { signal: AbortSignal; release: () => void } {
+    const steerController = new AbortController();
+    const forwardTurnAbort = () => {
+      if (!steerController.signal.aborted) {
+        steerController.abort(turnSignal.reason);
+      }
+    };
+    if (turnSignal.aborted) {
+      forwardTurnAbort();
+    } else {
+      turnSignal.addEventListener("abort", forwardTurnAbort, { once: true });
+    }
+    this.steerControllers.set(sessionId, steerController);
+
+    return {
+      signal: steerController.signal,
+      release: () => {
+        turnSignal.removeEventListener("abort", forwardTurnAbort);
+        if (this.steerControllers.get(sessionId) === steerController) {
+          this.steerControllers.delete(sessionId);
+        }
+        this.steeredSessions.delete(sessionId);
+      },
+    };
+  }
+
   async handleUserPrompt(userPrompt: UserPromptContent): Promise<void> {
     const controller = new AbortController();
     this.activePromptController = controller;
@@ -1768,6 +1992,14 @@ ${agentInstructions}
           await this.compactSession(sessionId, sessionController.signal);
         }
 
+        // Guidance sent while this turn was running becomes part of the request
+        // about to be sent, so the model can revise what it is doing instead of
+        // waiting for the next turn.
+        await this.flushSupplementaryPrompts(sessionId);
+        if (this.isInterrupted(sessionId)) {
+          return;
+        }
+
         const sessionMessages = await this.attachPromptImagesForRequest(
           this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId)),
           model,
@@ -1798,6 +2030,7 @@ ${agentInstructions}
               references: [] as DeepSeekFileReference[],
             };
         const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
+        const steer = this.beginRequestSteer(sessionId, sessionController.signal);
         const request = () =>
           this.createChatCompletionStream(
             client,
@@ -1808,7 +2041,7 @@ ${agentInstructions}
               tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
               ...thinkingOptions,
             },
-            { signal: sessionController.signal },
+            { signal: steer.signal },
             sessionId,
             {
               enabled: debugLogEnabled,
@@ -1821,6 +2054,12 @@ ${agentInstructions}
         try {
           response = await request();
         } catch (error) {
+          if (error instanceof LlmSteeredError && !sessionController.signal.aborted) {
+            // The user changed direction while this answer was streaming: keep what
+            // the model already wrote, then let the loop continue with the guidance.
+            this.appendSteeredAnswer(sessionId, error);
+            continue;
+          }
           if (!filesSettings.enabled || prepared.references.length === 0 || !this.isRejectedDeepSeekFile(error)) {
             throw error;
           }
@@ -1835,6 +2074,8 @@ ${agentInstructions}
             sessionController.signal
           );
           response = await request();
+        } finally {
+          steer.release();
         }
 
         const message = response.choices?.[0]?.message;
@@ -1925,6 +2166,16 @@ ${agentInstructions}
         }
 
         if (!toolCalls) {
+          // Keep the turn alive while guidance is still waiting: the next
+          // iteration injects it and asks the model to revise its answer.
+          if (this.countPendingSupplementaryPrompts(sessionId) > 0) {
+            this.updateSessionEntry(sessionId, (entry) => ({
+              ...entry,
+              status: "processing",
+              updateTime: new Date().toISOString(),
+            }));
+            continue;
+          }
           return;
         }
       }
@@ -2655,6 +2906,9 @@ ${agentInstructions}
       controller.abort();
     }
     this.sessionControllers.delete(sessionId);
+    this.setSupplementaryPrompts(sessionId, []);
+    this.steerControllers.delete(sessionId);
+    this.steeredSessions.delete(sessionId);
     if (options.removeMessages) {
       this.removeSessionMessages([sessionId]);
       try {

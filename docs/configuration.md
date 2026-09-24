@@ -33,6 +33,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `thinkingEnabled`    | boolean   | 是否启用思考模式（DeepSeek V4 系列默认启用）                         |
 | `reasoningEffort`    | string    | 推理强度，可选 `"low"`、`"high"` 或 `"max"`（默认 `"max"`）        |
 | `multimodal`         | string    | 多模态（图片）能力开关，可选 `"default"`、`"on"` 或 `"off"`（默认 `"default"`） |
+| `steerMode`          | string    | 模型正在输出时发送新指令是否同时截断该回答：`"queue"`（等到下次请求边界再注入，默认）或 `"interrupt"`（截断当前回复、立即读取新指令）。无论该配置如何，`Ctrl+Enter` 都会截断当前输出 |
 | `filesApiEnabled`    | boolean   | 是否通过 DeepSeek Files API 发送图片（默认 `false`）                       |
 | `filesApiTimeoutMs`  | number    | 单张图片 Files API 处理超时，默认 `60000`，最大 `600000` 毫秒              |
 | `fileExpiresAfterSeconds` | number | 远端文件有效期，默认 `604800` 秒                                      |
@@ -105,6 +106,23 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `off`      | 强制视为非多模态模型，由模型通过识图工具按需读取      |
 
 当使用的模型未内置在已知模型列表中、或其实际能力与默认判定不符时，可通过该配置覆盖。
+
+#### `steerMode` — 模型输出中追加指令
+
+控制模型还在输出回答时你发送新指令，是否同时截断该回答：
+
+| 值          | 说明                                                         |
+| ----------- | ------------------------------------------------------------ |
+| `queue`（默认） | 新指令进入队列，在本轮下一次 LLM 调用前注入                     |
+| `interrupt` | 截断正在流式输出的回答，已生成的内容保留在对话中，新指令立即被读取 |
+
+无论该配置如何，`Ctrl+Enter` 都会为这一条消息截断当前输出，因此无需为了偶尔的转向而改变所有指令的
+默认行为。如果终端不支持上报 `Ctrl+Enter`（需要 modifyOtherKeys 模式），可以把 `steerMode` 设为
+`"interrupt"`。
+
+两种方式都会把新指令作为本轮对话中的 user 消息，模型因此可以修改甚至推翻它原本正在执行的指令。
+正在执行的命令不会被中断：steering 只影响模型输出流，因此工具会先执行完，新指令在下一个请求边界注入。
+按 `Esc` 仍会中断整个轮次。
 
 #### DeepSeek Files API
 
