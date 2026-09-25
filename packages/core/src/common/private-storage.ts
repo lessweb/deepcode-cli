@@ -21,11 +21,20 @@ export const PRIVATE_DIRECTORY_MODE = 0o700;
 /**
  * Resolve the current Windows user as a fully-qualified principal
  * (``DOMAIN\user``) so ACL grants are unambiguous across machines/domains.
+ *
+ * ``USERDOMAIN``/``USERNAME`` win when present: they are set by Windows for
+ * every process, whereas under MSYS/Git-Bash a POSIX ``whoami`` earlier in
+ * PATH answers with a bare, ambiguous name.
+ *
  * Returns null when the identity cannot be resolved (callers no-op).
  */
 export function windowsIdentity(): string | null {
   if (process.platform !== "win32") {
     return null;
+  }
+  const { USERDOMAIN, USERNAME } = process.env;
+  if (USERDOMAIN && USERNAME) {
+    return `${USERDOMAIN}\\${USERNAME}`;
   }
   try {
     const stdout = execFileSync("whoami", {
@@ -51,20 +60,24 @@ export function windowsIdentity(): string | null {
  *  2. ``icacls /grant:r <user>:F`` grants the current user exclusive full
  *     control (``:r`` replaces, does not append).
  *
- * Failures are swallowed (best-effort, like POSIX chmod) — the file is still
- * created; only its ACL may be more permissive than intended.
+ * Returns whether the ACL now grants the current user alone.  Failures are
+ * reported, never thrown: callers decide whether an unprotected path is
+ * acceptable.  Note the argv must not repeat the program name — passing
+ * ``icacls icacls <path>`` makes icacls exit with ERROR_INVALID_PARAMETER (87)
+ * and leave the ACL untouched, which is how this helper silently no-opped
+ * before.
  */
-export function restrictWindowsAcl(targetPath: string): void {
+export function restrictWindowsAcl(targetPath: string): boolean {
   if (process.platform !== "win32") {
-    return;
+    return true;
   }
   const identity = windowsIdentity();
   if (!identity) {
-    return;
+    return false;
   }
   for (const args of [
-    ["icacls", targetPath, "/inheritance:r"],
-    ["icacls", targetPath, "/grant:r", `${identity}:F`],
+    [targetPath, "/inheritance:r"],
+    [targetPath, "/grant:r", `${identity}:F`],
   ]) {
     try {
       execFileSync("icacls", args, {
@@ -74,34 +87,33 @@ export function restrictWindowsAcl(targetPath: string): void {
         stdio: ["ignore", "pipe", "ignore"],
       });
     } catch {
-      return; // best-effort; keep the caller moving
+      return false; // best-effort: keep the caller moving, but do not pretend
     }
   }
+  return true;
 }
 
 /**
  * Write a private file with user-only permissions on every platform.
  *
- * - POSIX: mode 0600 (subject to umask, which typically keeps it at 0600).
+ * - POSIX: mode 0600 (applied by the write itself, subject to umask).
  * - Windows: mode bits are ignored by the OS, so we remove inherited ACEs
  *   and grant the current user exclusive full control.
+ *
+ * Returns true when the platform's permission model was applied as requested.
  */
-export function writePrivateFile(targetPath: string, contents: string): void {
+export function writePrivateFile(targetPath: string, contents: string): boolean {
   fs.writeFileSync(targetPath, contents, { encoding: "utf8", mode: PRIVATE_FILE_MODE });
-  if (process.platform === "win32") {
-    restrictWindowsAcl(targetPath);
-  }
+  return process.platform === "win32" ? restrictWindowsAcl(targetPath) : true;
 }
 
 /**
  * Ensure a directory exists with user-only permissions (0700 on POSIX;
- * current-user-only ACL on Windows).
+ * current-user-only ACL on Windows).  Returns true when applied as requested.
  */
-export function ensurePrivateDirectory(dirPath: string): void {
+export function ensurePrivateDirectory(dirPath: string): boolean {
   fs.mkdirSync(dirPath, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  if (process.platform === "win32") {
-    restrictWindowsAcl(dirPath);
-  }
+  return process.platform === "win32" ? restrictWindowsAcl(dirPath) : true;
 }
 
 /** Home directory used for DeepCode user state. */
