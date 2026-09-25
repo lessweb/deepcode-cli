@@ -1,3 +1,4 @@
+import { createHash } from "crypto";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -72,7 +73,9 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     };
   }
 
-  const cacheKey = `${connection.apiKey}::${connection.baseURL}`;
+  // Cache key hashes the apiKey so the raw secret never lingers in module
+  // state (a heap dump / crash report would otherwise contain it verbatim).
+  const cacheKey = `${createHash("sha256").update(connection.apiKey).digest("hex").slice(0, 16)}::${connection.baseURL}`;
   if (cachedOpenAI && cachedOpenAIKey === cacheKey) {
     return {
       client: cachedOpenAI,

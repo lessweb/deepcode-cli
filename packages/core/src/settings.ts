@@ -2,6 +2,7 @@ import { DEEPSEEK_V4_MODELS, defaultsToThinkingMode, type MultimodalMode } from 
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { ensurePrivateDirectory, writePrivateFile } from "./common/private-storage";
 
 export type DeepcodingEnv = Record<string, string | undefined> & {
   MODEL?: string;
@@ -820,8 +821,8 @@ export function readProjectSettings(projectRoot: string = process.cwd()): Deepco
 }
 
 function writeSettingsFile(settingsPath: string, settings: DeepcodingSettings): void {
-  fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
-  fs.writeFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
+  ensurePrivateDirectory(path.dirname(settingsPath));
+  writePrivateFile(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
 }
 
 export function writeSettings(settings: DeepcodingSettings): void {
