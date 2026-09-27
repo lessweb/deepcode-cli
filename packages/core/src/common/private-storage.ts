@@ -8,7 +8,7 @@
  * current user — matching the 0600 intent.
  */
 
-import { execFileSync } from "child_process";
+import childProcess from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -37,7 +37,7 @@ export function windowsIdentity(): string | null {
     return `${USERDOMAIN}\\${USERNAME}`;
   }
   try {
-    const stdout = execFileSync("whoami", {
+    const stdout = childProcess.execFileSync("whoami", {
       encoding: "utf8",
       timeout: 5000,
       windowsHide: true,
@@ -53,12 +53,19 @@ export function windowsIdentity(): string | null {
 /**
  * Restrict an NTFS path to the current user (Windows only; no-op elsewhere).
  *
- * Two idempotent steps:
- *  1. ``icacls /inheritance:r`` removes inherited ACEs so a permissive parent
+ * Two idempotent steps, ordered fail-safe — grant before strip:
+ *  1. ``icacls /grant:r`` grants the current user exclusive full control
+ *     (``:r`` replaces, does not append).  For a directory the grant carries
+ *     ``(OI)(CI)`` so it is inherited by existing and future children.
+ *  2. ``icacls /inheritance:r`` removes inherited ACEs so a permissive parent
  *     (e.g. the profile root granting ``Authenticated Users``) no longer
- *     applies.
- *  2. ``icacls /grant:r <user>:F`` grants the current user exclusive full
- *     control (``:r`` replaces, does not append).
+ *     applies.  For a directory this propagates to children, which is why the
+ *     grant above must already name this user.
+ *
+ * The order matters: if the grant is issued first and fails, the inherited
+ * ACEs are still in place and the path stays usable.  Stripping first can
+ * leave the path (and, via inheritance, its children) with no ACE at all — the
+ * next open then throws ``EPERM`` and the state file becomes unreachable.
  *
  * Returns whether the ACL now grants the current user alone.  Failures are
  * reported, never thrown: callers decide whether an unprotected path is
@@ -67,7 +74,7 @@ export function windowsIdentity(): string | null {
  * and leave the ACL untouched, which is how this helper silently no-opped
  * before.
  */
-export function restrictWindowsAcl(targetPath: string): boolean {
+export function restrictWindowsAcl(targetPath: string, isDirectory = false): boolean {
   if (process.platform !== "win32") {
     return true;
   }
@@ -75,20 +82,29 @@ export function restrictWindowsAcl(targetPath: string): boolean {
   if (!identity) {
     return false;
   }
-  for (const args of [
-    [targetPath, "/inheritance:r"],
-    [targetPath, "/grant:r", `${identity}:F`],
-  ]) {
+  const grantee = isDirectory ? `${identity}:(OI)(CI)F` : `${identity}:F`;
+  const runIcacls = (args: string[]): boolean => {
     try {
-      execFileSync("icacls", args, {
+      childProcess.execFileSync("icacls", args, {
         encoding: "utf8",
         timeout: 15000,
         windowsHide: true,
         stdio: ["ignore", "pipe", "ignore"],
       });
+      return true;
     } catch {
       return false; // best-effort: keep the caller moving, but do not pretend
     }
+  };
+  // Grant first: if this fails the inherited ACEs are still in place, so the
+  // path stays usable.  Stripping first could leave a path with no ACE at all.
+  if (!runIcacls([targetPath, "/grant:r", grantee])) {
+    return false;
+  }
+  // Then drop the inherited ACEs.  For a directory this propagates to
+  // children, which is why the grant above must already name this user.
+  if (!runIcacls([targetPath, "/inheritance:r"])) {
+    return false;
   }
   return true;
 }
@@ -97,8 +113,8 @@ export function restrictWindowsAcl(targetPath: string): boolean {
  * Write a private file with user-only permissions on every platform.
  *
  * - POSIX: mode 0600 (applied by the write itself, subject to umask).
- * - Windows: mode bits are ignored by the OS, so we remove inherited ACEs
- *   and grant the current user exclusive full control.
+ * - Windows: mode bits are ignored by the OS, so we grant the current user
+ *   exclusive full control first and then remove inherited ACEs.
  *
  * Returns true when the platform's permission model was applied as requested.
  */
@@ -113,7 +129,7 @@ export function writePrivateFile(targetPath: string, contents: string): boolean 
  */
 export function ensurePrivateDirectory(dirPath: string): boolean {
   fs.mkdirSync(dirPath, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
-  return process.platform === "win32" ? restrictWindowsAcl(dirPath) : true;
+  return process.platform === "win32" ? restrictWindowsAcl(dirPath, true) : true;
 }
 
 /** Home directory used for DeepCode user state. */
