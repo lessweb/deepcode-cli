@@ -31,6 +31,26 @@ export class LlmStreamDisconnectedError extends Error {
   }
 }
 
+/**
+ * Raised when a streaming answer is cut short because the user sent new guidance
+ * while the model was still writing. The partial answer is carried along so the
+ * caller can keep it in the conversation before continuing with the guidance.
+ */
+export class LlmSteeredError extends Error {
+  constructor(
+    readonly partialContent: string,
+    readonly partialThinking: string | null
+  ) {
+    super("Model answer was superseded by new user guidance.");
+    this.name = "LlmSteeredError";
+  }
+
+  /** True when the model had already produced something worth keeping. */
+  hasPartialAnswer(): boolean {
+    return this.partialContent.trim().length > 0 || (this.partialThinking ?? "").trim().length > 0;
+  }
+}
+
 export function getLlmRetryDelayMs(attempt: number, random: () => number = Math.random): number {
   const exponentialDelay = BASE_RETRY_DELAY_MS * 2 ** Math.max(0, attempt - 1);
   const jitter = 0.9 + Math.min(1, Math.max(0, random())) * 0.2;

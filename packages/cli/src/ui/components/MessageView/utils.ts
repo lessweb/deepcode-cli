@@ -230,6 +230,9 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   if (message.role === "user") {
     const content = message.content || "(no content)";
     const text = message.meta?.isAnswers ? renderMarkdown(content) : content;
+    if (message.meta?.isSupplementary) {
+      return `${chalk("✧")} ${chalk("Guidance")} ${chalk("sent while the turn was running")}\n${chalk(`> ${text}`)}`;
+    }
     return chalk(`> ${text}`);
   }
 

@@ -44,6 +44,7 @@ import {
 } from "../core/file-mentions";
 import type { FileMentionItem } from "../core/file-mentions";
 import { readClipboardImageAsync } from "../core/clipboard";
+import { formatQueueHint } from "../core/prompt-queue";
 import {
   useTerminalInput,
   usePasteHandling,
@@ -60,6 +61,7 @@ import {
   useTerminalFocusReporting,
 } from "../hooks";
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
+import { MAX_SUPPLEMENTARY_PROMPTS } from "@vegamo/deepcode-core";
 import type { ModelConfigSelection, PermissionScope } from "@vegamo/deepcode-core";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
 import type { SessionEntry, SkillInfo } from "@vegamo/deepcode-core";
@@ -74,6 +76,11 @@ export type PromptSubmission = {
   alwaysAllows?: PermissionScope[];
   planMode?: boolean;
   isAnswers?: boolean;
+  /**
+   * Set by `Ctrl+Enter`: when a turn is running, cut the answer that is streaming
+   * short so this prompt is read immediately, regardless of `steerMode`.
+   */
+  steer?: boolean;
   command?: "new" | "resume" | "fork" | "continue" | "undo" | "mcp" | "exit";
 };
 
@@ -96,6 +103,7 @@ type Props = {
   placeholder?: string;
   runningProcesses?: SessionEntry["processes"];
   promptDraft?: PromptDraft | null;
+  queuedPrompts?: string[];
   statusLineSegments?: StatusSegment[];
   statusLineSeparator?: string;
   planMode: boolean;
@@ -105,10 +113,17 @@ type Props = {
   onPlanModeChange: (enabled: boolean) => void;
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
+  onRemoveQueuedPrompt?: () => void;
   onExitShortcut?: () => void;
 };
 
 const PROMPT_PREFIX_WIDTH = 2;
+
+/** Shared empty value so `queuedPrompts` keeps a stable identity for React.memo. */
+const EMPTY_QUEUED_PROMPTS: string[] = [];
+
+/** Number of queued prompts rendered individually before collapsing into a counter. */
+const MAX_VISIBLE_QUEUED_PROMPTS = 3;
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine(): React.ReactElement {
   return (
@@ -131,6 +146,7 @@ export const PromptInput = React.memo(function PromptInput({
   placeholder,
   runningProcesses,
   promptDraft,
+  queuedPrompts = EMPTY_QUEUED_PROMPTS,
   statusLineSegments,
   statusLineSeparator,
   planMode,
@@ -138,6 +154,7 @@ export const PromptInput = React.memo(function PromptInput({
   onModelConfigChange,
   onInterrupt,
   onToggleProcessStdout,
+  onRemoveQueuedPrompt,
   onExitShortcut,
   onRawModeChange,
   onPlanModeChange,
@@ -205,15 +222,16 @@ export const PromptInput = React.memo(function PromptInput({
       : hasExpandedRegions
         ? " · ctrl+o collapse"
         : "";
+  const queueHint = formatQueueHint(queuedPrompts.length);
   const busyStatusText =
     loadingText && loadingText.trim()
-      ? `${loadingText}${processOrPasteHint}`
-      : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`;
+      ? `${loadingText}${processOrPasteHint}${queueHint ? ` · ${queueHint}` : ""}`
+      : `esc to interrupt · ctrl+enter send & cut · ctrl+c to cancel input${processOrPasteHint}${queueHint ? ` · ${queueHint}` : ""}`;
   const footerText = statusMessage
     ? statusMessage
     : busy
       ? busyStatusText
-      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}`;
+      : `enter send · shift+enter newline · ctrl+enter steer · @ files · ctrl+v image · / commands · ctrl+d exit${processOrPasteHint}${queueHint ? ` · ${queueHint}` : ""}`;
   const showFooterText = useMemo(
     () => showMenu || showSkillsDropdown || openRawModelDropdown || showModelDropdown || showFileMentionMenu,
     [showMenu, showSkillsDropdown, showModelDropdown, openRawModelDropdown, showFileMentionMenu]
@@ -465,8 +483,17 @@ export const PromptInput = React.memo(function PromptInput({
         }
       }
 
-      if (busy && isPlainReturn) {
-        setStatusMessage("wait for the current response or press esc to interrupt");
+      if (busy && (isPlainReturn || returnAction === "steer")) {
+        // While a turn is running, prompts become supplemental guidance for that turn
+        // so the user does not have to wait or interrupt. `Ctrl+Enter` additionally
+        // asks the session to cut the answer that is streaming short. Slash commands
+        // keep the old behaviour because they change view state instead of sending a
+        // prompt.
+        if (findExactCommandForBuffer()) {
+          setStatusMessage("wait for the current response or press esc to interrupt");
+          return;
+        }
+        submitCurrentBuffer({ steer: returnAction === "steer" });
         return;
       }
 
@@ -475,8 +502,14 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
 
-      if (returnAction === "submit") {
-        submitCurrentBuffer();
+      if (returnAction === "submit" || returnAction === "steer") {
+        submitCurrentBuffer({ steer: returnAction === "steer" });
+        return;
+      }
+
+      if (key.backspace && isEmpty(buffer) && queuedPrompts.length > 0 && noModifier) {
+        onRemoveQueuedPrompt?.();
+        setStatusMessage(`Removed the last queued guidance (${queuedPrompts.length - 1} waiting)`);
         return;
       }
 
@@ -743,23 +776,29 @@ export const PromptInput = React.memo(function PromptInput({
     }
   }
 
-  function submitCurrentBuffer(): void {
-    if (busy) {
-      setStatusMessage("wait for the current response or press esc to interrupt");
-      return;
+  function findExactCommandForBuffer(): SlashCommandItem | null {
+    const trimmed = buffer.text.trim();
+    if (!trimmed.startsWith("/")) {
+      return null;
     }
+    return findExactSlashCommand(slashItems, trimmed.split(/\s+/, 1)[0]);
+  }
 
+  function submitCurrentBuffer(options?: { steer?: boolean }): void {
     const trimmed = buffer.text.trim();
     if (!trimmed && imageUrls.length === 0 && selectedSkills.length === 0) {
       return;
     }
 
-    if (trimmed.startsWith("/")) {
-      const exactMatch = findExactSlashCommand(slashItems, trimmed.split(/\s+/, 1)[0]);
-      if (exactMatch) {
-        handleSlashSelection(exactMatch);
-        return;
-      }
+    const exactMatch = findExactCommandForBuffer();
+    if (exactMatch) {
+      handleSlashSelection(exactMatch);
+      return;
+    }
+
+    if (busy && queuedPrompts.length >= MAX_SUPPLEMENTARY_PROMPTS) {
+      setStatusMessage(`Guidance queue is full (${MAX_SUPPLEMENTARY_PROMPTS}) — press esc to interrupt`);
+      return;
     }
 
     onSubmit({
@@ -767,7 +806,17 @@ export const PromptInput = React.memo(function PromptInput({
       imageUrls,
       selectedSkills,
       planMode,
+      // Only carry the flag when the user actually asked to steer, so a plain submit
+      // stays a plain submit.
+      steer: options?.steer ? true : undefined,
     });
+    if (busy) {
+      setStatusMessage(
+        options?.steer
+          ? "Guidance sent — cutting the running answer short"
+          : `Guidance queued — read at the model's next step (${queuedPrompts.length + 1} waiting)`
+      );
+    }
     resetPromptInput();
   }
 
@@ -808,6 +857,21 @@ export const PromptInput = React.memo(function PromptInput({
         <Box width={screenWidth} justifyContent="flex-end">
           <Text color="yellow">💡 Plan mode</Text>
           <Text dimColor> (shift+tab to cycle)</Text>
+        </Box>
+      ) : null}
+      {queuedPrompts.length > 0 ? (
+        <Box flexDirection="column">
+          {queuedPrompts.slice(0, MAX_VISIBLE_QUEUED_PROMPTS).map((preview, index) => (
+            <Box key={`queued-${index}`}>
+              <Text color="yellow">guidance </Text>
+              <Text color="yellow" wrap="truncate-end">{`${index + 1}. ${preview}`}</Text>
+            </Box>
+          ))}
+          {queuedPrompts.length > MAX_VISIBLE_QUEUED_PROMPTS ? (
+            <Box>
+              <Text dimColor>{`guidance … ${queuedPrompts.length - MAX_VISIBLE_QUEUED_PROMPTS} more`}</Text>
+            </Box>
+          ) : null}
         </Box>
       ) : null}
       {/* Input */}
@@ -969,11 +1033,17 @@ export function isRawModeShortcut(input: string, key: Pick<InputKey, "ctrl">): b
   return key.ctrl && (input === "r" || input === "R");
 }
 
-export type PromptReturnKeyAction = "submit" | "newline" | null;
+export type PromptReturnKeyAction = "submit" | "steer" | "newline" | null;
 
-export function getPromptReturnKeyAction(key: Pick<InputKey, "return" | "shift" | "meta">): PromptReturnKeyAction {
+export function getPromptReturnKeyAction(
+  key: Pick<InputKey, "return" | "shift" | "meta" | "ctrl">
+): PromptReturnKeyAction {
   if (!key.return) {
     return null;
+  }
+  if (key.ctrl) {
+    // Ctrl+Enter: send and, while a turn is running, cut the streaming answer short.
+    return "steer";
   }
   if (key.shift || key.meta) {
     return "newline";

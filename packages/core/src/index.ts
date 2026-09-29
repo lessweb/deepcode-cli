@@ -38,13 +38,14 @@ export type {
   PermissionDefaultMode,
   McpServerConfig,
   ReasoningEffort,
+  SteerMode,
   StatusLineSettings,
   ResolvedStatusLineSettings,
   StatusLineProviderConfig,
 } from "./settings";
 
 // Session
-export { SessionManager, getProjectCode, getCompactPromptTokenThreshold } from "./session";
+export { SessionManager, getProjectCode, getCompactPromptTokenThreshold, MAX_SUPPLEMENTARY_PROMPTS } from "./session";
 export type {
   SessionMessage,
   SessionEntry,
@@ -61,6 +62,7 @@ export type {
   LlmStreamProgress,
   LlmRetryEvent,
   SessionManagerOptions,
+  SupplementaryPrompt,
 } from "./session";
 
 // Prompt utilities
