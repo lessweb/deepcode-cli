@@ -76,6 +76,7 @@ async function main(): Promise<void> {
       projectRoot,
       resumeSessionId: typeof resumeSessionId === "string" ? resumeSessionId : undefined,
       forkSessionId: typeof forkSessionId === "string" ? forkSessionId : undefined,
+      outputFormat: parsed.outputFormat,
     });
     return;
   }

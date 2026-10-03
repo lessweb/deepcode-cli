@@ -8,6 +8,7 @@ import Yargs from "yargs";
 import { getCliVersion } from "./utils/version";
 import { writeStderrLine } from "./utils/stdio-helpers";
 import { hideBin } from "yargs/helpers";
+import { EXEC_OUTPUT_FORMATS, isExecOutputFormat, type ExecOutputFormat } from "./exec-json-output";
 
 // UUID v4 regex pattern for validation
 const SESSION_ID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -39,6 +40,8 @@ export interface ParsedCliArgs {
   help: boolean;
   /** True when --last / -l was passed (resume the most recent session for the current project) */
   last: boolean;
+  /** Output format for --exec: "text" (default) or "json" (newline-delimited events). */
+  outputFormat: ExecOutputFormat;
 }
 
 const EPILOG = [
@@ -111,6 +114,13 @@ async function configureYargs(argv?: string[]) {
           default: false,
           describe: "Resume the most recent session for the current project directory.",
         })
+        .option("output-format", {
+          type: "string",
+          choices: EXEC_OUTPUT_FORMATS,
+          default: "text",
+          describe:
+            "Output format for --exec: text prints the assistant reply, json emits newline-delimited events including the session ID",
+        })
         .check((argv: { [x: string]: unknown }) => {
           const query = argv["query"] as string | string[] | undefined;
           const hasPositionalQuery = Array.isArray(query) ? query.length > 0 : !!query;
@@ -151,12 +161,22 @@ async function configureYargs(argv?: string[]) {
           if (exec && argv["resume"] === "") {
             return "--exec cannot use --resume without a session ID.\nUse --exec --resume <sessionId> --prompt <prompt>.";
           }
+          // `--help` runs .check() before defaults are applied, so treat an
+          // absent value as the "text" default rather than a conflict.
+          const outputFormat = argv["output-format"];
+          if (outputFormat !== undefined && outputFormat !== "text" && !exec) {
+            return "--output-format only applies to --exec / -x.";
+          }
           return true;
         })
     )
     .example("deepcode", "Launch the interactive TUI in the current directory")
     .example("deepcode -p <prompt>", "Launch the TUI and submit a prompt")
     .example("deepcode -x -p <prompt>", "Run one prompt without launching the TUI")
+    .example(
+      "deepcode -x -p <prompt> --output-format json",
+      "Emit newline-delimited JSON events, including the session ID for --resume"
+    )
     .example("deepcode -r, --resume [sessionId]", "Resume a session or show session picker")
     .example("deepcode -f, --fork [sessionId]", "Fork a session or the most recent session")
     .example('cat error.log | deepcode -x -p "Explain this error"', "Use piped stdin as additional context")
@@ -217,5 +237,6 @@ export async function parseArguments(argv?: string[]): Promise<ParsedCliArgs> {
     version: parsed.version === true,
     help: parsed.help === true,
     last: parsed.last === true,
+    outputFormat: isExecOutputFormat(parsed["output-format"]) ? parsed["output-format"] : "text",
   };
 }
