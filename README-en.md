@@ -93,6 +93,14 @@ Skills are discovered from these locations, in priority order:
 | `Esc`            | Interrupt the current model turn                         |
 | `Ctrl+D` twice   | Quit Deep Code                                           |
 
+### Queued prompts
+
+While the assistant is working, press `Enter` to queue a follow-up prompt. Prompts run one at a time in submission order, after the active turn finishes. The input stays editable with a visible cursor, and the queue shows its count plus up to three numbered, one-line previews. Image-only and skill-only prompts also have descriptive previews.
+
+Press `Esc` to interrupt the active turn and discard every waiting prompt. A new prompt intentionally submitted after `Esc` waits for the interrupted run to settle and then executes. Slash commands remain blocked while busy, except `/exit`, which exits immediately and discards the queue. Pending prompts are kept in memory for the current CLI instance.
+
+![Queued prompt previews in the CLI, rendered with sample prompts](resources/prompt-queue.png)
+
 ## Supported Models
 
 - `deepseek-flash` (Recommended)

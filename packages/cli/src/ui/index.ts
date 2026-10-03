@@ -29,6 +29,8 @@ export {
   PromptInput,
   IMAGE_ATTACHMENT_CLEAR_HINT,
   formatImageAttachmentStatus,
+  formatQueuedPromptStatus,
+  formatQueuedPromptPreview,
   formatSelectedSkillsStatus,
   addUniqueSkill,
   toggleSkillSelection,
