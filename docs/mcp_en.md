@@ -84,6 +84,43 @@ Lets Deep Code control a browser for screenshots, page interactions, etc.:
 }
 ```
 
+### You.com Web Search & Research
+
+Connects you to You.com's real-time web search, page content extraction, citable multi-source research, and finance research via the hosted You.com MCP server at `https://api.you.com/mcp`. `@youdotcom-oss/mcp` is a minimal STDIO bridge that forwards local MCP traffic to the remote server. After the first message, the model sees tools such as `mcp__ydc__you-search`.
+
+```json
+{
+  "mcpServers": {
+    "ydc": {
+      "command": "npx",
+      "args": ["-y", "@youdotcom-oss/mcp"],
+      "env": {
+        "YDC_API_KEY": "ydc-...",
+        "YDC_ALLOWED_TOOLS": "you-search,you-contents,you-research,you-finance"
+      }
+    }
+  }
+}
+```
+
+To try web search without signing up first, set `YDC_PROFILE` to `free` (no account, no API key; exposes only `you-search`, capped at 100 queries/day):
+
+```json
+{
+  "mcpServers": {
+    "ydc": {
+      "command": "npx",
+      "args": ["-y", "@youdotcom-oss/mcp"],
+      "env": {
+        "YDC_PROFILE": "free"
+      }
+    }
+  }
+}
+```
+
+> Get an API key at https://you.com/platform; see the full tool list and pricing at https://you.com/docs/build-with-agents/mcp-server.
+
 ### File System
 
 Enables Deep Code to read and write files within a specified directory:
