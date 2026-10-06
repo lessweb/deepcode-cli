@@ -98,4 +98,5 @@ export {
   type FileMentionToken,
 } from "./core/file-mentions";
 export { findExpandedThinkingId, isCollapsedThinking } from "./core/thinking-state";
+export { formatQueuedPromptPreview, formatQueueHint } from "./core/prompt-queue";
 export { buildExitSummaryText, buildPluginRateLimitHintText, buildResumeHintText } from "./exit-summary";

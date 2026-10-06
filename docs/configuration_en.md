@@ -33,6 +33,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `thinkingEnabled`  | boolean | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)|
 | `reasoningEffort`  | string  | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)    |
 | `multimodal`       | string  | Multimodal (image) capability override: `"default"`, `"on"`, or `"off"` (default `"default"`) |
+| `steerMode`        | string  | How a prompt sent while the model is writing is handled: `"interrupt"` (cut the answer short so the prompt is read immediately, default) or `"queue"` (wait for the next request boundary) |
 | `filesApiEnabled`  | boolean | Send images through the DeepSeek Files API (default `false`)               |
 | `filesApiTimeoutMs` | number | Per-image Files API timeout; defaults to `60000`, maximum `600000` ms       |
 | `fileExpiresAfterSeconds` | number | Remote file lifetime, default `604800` seconds                       |
@@ -105,6 +106,25 @@ Controls whether the current model is treated as a multimodal model that accepts
 | `off`     | Always treat the model as non-multimodal, images are read on demand via UnderstandImage tool |
 
 Use this to override the default detection when your model is not in the known-model list, or when its actual capability differs from the default.
+
+#### `steerMode` — Steering While the Model Is Writing
+
+Controls whether a prompt sent while the model is still producing an answer also cuts that answer
+short:
+
+| Value               | Description                                                                 |
+| ------------------- | --------------------------------------------------------------------------- |
+| `queue` (default)   | The prompt waits and is injected before the next LLM call of the running turn |
+| `interrupt`         | The answer that is streaming is cut short; its text is kept in the conversation and the prompt is read immediately |
+
+`Ctrl+Enter` cuts the streaming answer short for that one message regardless of this setting, so
+steering stays available without changing the default for every prompt. On terminals that do not
+report `Ctrl+Enter` (it needs modifyOtherKeys mode), set `steerMode: "interrupt"` instead.
+
+Either way the prompt becomes a user message of the running turn, so the model can revise or
+supersede the instructions it was already following. Running commands are never interrupted:
+steering only affects the model stream, so a tool that is executing finishes first and the
+prompt is injected at the next request boundary. Pressing `Esc` still interrupts the whole turn.
 
 #### DeepSeek Files API
 
