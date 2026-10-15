@@ -11,6 +11,7 @@ import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { StatusLine } from "../components/status-line";
 import { buildLoadingText } from "../core/loading-text";
 import { findExpandedThinkingId } from "../core/thinking-state";
+import { createPromptQueue } from "../core/prompt-queue";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
 import { McpStatusList } from "./McpStatusList";
@@ -82,8 +83,10 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
   const writeRef = useRef(write);
   const lastRenderedColumnsRef = useRef<number | null>(null);
   const messagesRef = useRef<SessionMessage[]>([]);
+  const handlePromptRef = useRef<((submission: PromptSubmission) => Promise<void>) | null>(null);
   const [view, setView] = useState<View>("chat");
   const [busy, setBusy] = useState(false);
+  const [queuedPrompts, setQueuedPrompts] = useState<readonly PromptSubmission[]>([]);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -468,9 +471,34 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
     ]
   );
 
+  handlePromptRef.current = handlePrompt;
+
+  const promptQueue = useMemo(
+    () =>
+      createPromptQueue<PromptSubmission>(
+        (submission) => {
+          const handler = handlePromptRef.current;
+          return handler ? handler(submission) : Promise.resolve();
+        },
+        (error) => setErrorLine(error instanceof Error ? error.message : String(error))
+      ),
+    []
+  );
+
+  useEffect(() => {
+    const unsubscribe = promptQueue.subscribe(() => setQueuedPrompts(promptQueue.items));
+    return () => {
+      unsubscribe();
+      promptQueue.interrupt();
+    };
+  }, [promptQueue]);
+
   const handleInterrupt = useCallback(() => {
+    // Interrupting abandons the queued workflow too: drop any prompts the user
+    // submitted while this run was active so they are not executed next.
+    promptQueue.interrupt();
     sessionManager.interruptActiveSession();
-  }, [sessionManager]);
+  }, [promptQueue, sessionManager]);
 
   const handleToggleProcessStdout = useCallback(() => {
     setShowProcessStdout(true);
@@ -533,9 +561,9 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
 
   const handleSubmit = useCallback(
     (submission: PromptSubmission) => {
-      void handlePrompt(submission);
+      promptQueue.submit(submission);
     },
-    [handlePrompt]
+    [promptQueue]
   );
 
   const handlePlanImplementationChoice = useCallback(
@@ -912,13 +940,15 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
 
   const handleQuestionAnswers = useCallback(
     (answers: AskUserQuestionAnswers) => {
-      void handlePrompt({
+      // Routed through handleSubmit so the answer run is serialized with the
+      // prompt queue instead of starting a second concurrent run.
+      handleSubmit({
         text: formatAskUserQuestionAnswers(answers),
         imageUrls: [],
         isAnswers: true,
       });
     },
-    [handlePrompt]
+    [handleSubmit]
   );
 
   const handleQuestionCancel = useCallback(() => {
@@ -945,7 +975,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         sessionManager.denySessionPermission(sessionId);
         return;
       }
-      void handlePrompt({
+      handleSubmit({
         text: "/continue",
         imageUrls: [],
         command: "continue",
@@ -953,16 +983,16 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
         alwaysAllows: result.alwaysAllows,
       });
     },
-    [handlePrompt, sessionManager]
+    [handleSubmit, sessionManager]
   );
 
   const handlePermissionCancel = useCallback(() => {
-    sessionManager.interruptActiveSession();
+    handleInterrupt();
     setActiveStatus("interrupted");
     setActiveAskPermissions(undefined);
     setPromptDraft(null);
     refreshSessionsList();
-  }, [refreshSessionsList, sessionManager]);
+  }, [handleInterrupt, refreshSessionsList]);
 
   if (mode === RawMode.Raw) {
     return <RawModeExitPrompt onExit={(prev) => handleRawModeChange(prev)} />;
@@ -1069,6 +1099,7 @@ function App({ projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRes
           modelConfig={resolvedSettings}
           promptHistory={promptHistory}
           busy={busy}
+          queuedPrompts={queuedPrompts}
           cursorLayoutKey={promptCursorLayoutKey}
           loadingText={loadingText}
           runningProcesses={runningProcesses}

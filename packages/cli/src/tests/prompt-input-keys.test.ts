@@ -10,6 +10,8 @@ import {
   IMAGE_ATTACHMENT_CLEAR_HINT,
   addUniqueSkill,
   formatImageAttachmentStatus,
+  formatQueuedPromptStatus,
+  formatQueuedPromptPreview,
   formatSelectedSkillsStatus,
   getPromptCursorPlacement,
   getPromptReturnKeyAction,
@@ -351,6 +353,30 @@ test("formatImageAttachmentStatus formats the image count label", () => {
   assert.equal(formatImageAttachmentStatus(1), "📎 1 image attached");
   assert.equal(formatImageAttachmentStatus(2), "📎 2 images attached");
   assert.equal(IMAGE_ATTACHMENT_CLEAR_HINT, "ctrl+x clear images");
+});
+
+test("formatQueuedPromptStatus formats the queued prompt count label", () => {
+  assert.equal(formatQueuedPromptStatus(0), "");
+  assert.equal(formatQueuedPromptStatus(-1), "");
+  assert.equal(formatQueuedPromptStatus(1), "⏳ 1 prompt queued");
+  assert.equal(formatQueuedPromptStatus(3), "⏳ 3 prompts queued");
+});
+
+test("formatQueuedPromptPreview collapses whitespace and removes terminal control sequences", () => {
+  assert.equal(
+    formatQueuedPromptPreview({ text: "  Review\n\t\u001B[31mthe changes\u001B[0m  ", imageUrls: [] }),
+    "Review the changes"
+  );
+});
+
+test("formatQueuedPromptPreview describes prompts containing only images or skills", () => {
+  const skill: SkillInfo = { name: "skill-writer", path: "/skills/skill-writer/SKILL.md", description: "Write skills" };
+  assert.equal(formatQueuedPromptPreview({ text: "", imageUrls: ["image"] }), "📎 1 image attached");
+  assert.equal(formatQueuedPromptPreview({ text: "", imageUrls: [], selectedSkills: [skill] }), "⚡ skill-writer");
+  assert.equal(
+    formatQueuedPromptPreview({ text: "", imageUrls: ["image"], selectedSkills: [skill] }),
+    "📎 1 image attached · ⚡ skill-writer"
+  );
 });
 
 test("buildInitPromptSubmission preserves manually selected skills", () => {
