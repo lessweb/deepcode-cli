@@ -84,6 +84,21 @@ Lets Deep Code control a browser for screenshots, page interactions, etc.:
 }
 ```
 
+### Parallel Search
+
+Adds live web search and URL fetching with the `web_search` and `web_fetch` tools. The default endpoint requires no account or API key; `mcp-remote` bridges the remote Streamable HTTP server to stdio:
+
+```json
+{
+  "mcpServers": {
+    "parallel-search": {
+      "command": "npx",
+      "args": ["mcp-remote", "https://search.parallel.ai/mcp"]
+    }
+  }
+}
+```
+
 ### File System
 
 Enables Deep Code to read and write files within a specified directory:
