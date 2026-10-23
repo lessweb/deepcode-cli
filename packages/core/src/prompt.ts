@@ -293,6 +293,41 @@ export function getSystemPrompt(_projectRoot: string, options: PromptToolOptions
   return toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
 }
 
+const OMITTED_IMAGE_DATA_URL = "[image data omitted from compaction prompt]";
+
+function compactContentParams(contentParams: unknown): unknown {
+  if (!contentParams) {
+    return contentParams;
+  }
+
+  const compactPart = (part: unknown): unknown => {
+    if (!part || typeof part !== "object") {
+      return part;
+    }
+    const candidate = part as { type?: unknown; image_url?: unknown };
+    if (candidate.type !== "image_url") {
+      return part;
+    }
+    const imageUrl = candidate.image_url;
+    if (!imageUrl || typeof imageUrl !== "object") {
+      return part;
+    }
+    const url = (imageUrl as { url?: unknown }).url;
+    if (typeof url !== "string" || !url.startsWith("data:")) {
+      return part;
+    }
+    return {
+      ...candidate,
+      image_url: {
+        ...(imageUrl as Record<string, unknown>),
+        url: OMITTED_IMAGE_DATA_URL,
+      },
+    };
+  };
+
+  return Array.isArray(contentParams) ? contentParams.map(compactPart) : compactPart(contentParams);
+}
+
 export function getCompactPrompt(sessionMessages: SessionMessage[]): string {
   const jsonl = sessionMessages
     .map((message) =>
@@ -300,7 +335,7 @@ export function getCompactPrompt(sessionMessages: SessionMessage[]): string {
         id: message.id,
         role: message.role,
         content: message.content,
-        contentParams: message.contentParams,
+        contentParams: compactContentParams(message.contentParams),
         messageParams: message.messageParams,
         createTime: message.createTime,
       })
