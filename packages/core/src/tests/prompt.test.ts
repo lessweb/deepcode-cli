@@ -7,11 +7,13 @@ import { fileURLToPath } from "url";
 import {
   buildSkillCatalogPrompt,
   buildSkillDocumentsPrompt,
+  getCompactPrompt,
   getPlanModePrompt,
   getRuntimeContext,
   getSystemPrompt,
   getTools,
 } from "../prompt";
+import type { SessionMessage } from "../session";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const tempDirs: string[] = [];
@@ -322,4 +324,43 @@ test("deepseek-flash uses native image tools unless multimodal is disabled", () 
     assert.equal(prompt.includes("## ReadImage"), native);
     assert.equal(prompt.includes("## UnderstandImage"), !native);
   }
+});
+
+test("getCompactPrompt omits inline image data payloads", () => {
+  const buildMessage = (overrides: Partial<SessionMessage>): SessionMessage => ({
+    id: "message",
+    sessionId: "session",
+    role: "user",
+    content: null,
+    contentParams: null,
+    messageParams: null,
+    compacted: false,
+    visible: true,
+    createTime: "2026-01-01T00:00:00.000Z",
+    updateTime: "2026-01-01T00:00:00.000Z",
+    ...overrides,
+  });
+
+  const prompt = getCompactPrompt([
+    buildMessage({
+      id: "inline",
+      content: "inline screenshot",
+      contentParams: [
+        {
+          type: "image_url",
+          image_url: { url: "data:image/png;base64,AAAA", detail: "high" },
+        },
+      ],
+    }),
+    buildMessage({
+      id: "remote",
+      content: "remote screenshot",
+      contentParams: [{ type: "image_url", image_url: { url: "https://example.com/a.png" } }],
+    }),
+  ]);
+
+  assert.equal(prompt.includes("data:image"), false);
+  assert.equal(prompt.includes("[image data omitted from compaction prompt]"), true);
+  assert.equal(prompt.includes("https://example.com/a.png"), true);
+  assert.equal(prompt.includes('"detail":"high"'), true);
 });
