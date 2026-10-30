@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { McpClient, createMcpSpawnSpec } from "../mcp/mcp-client";
+import { normalizeMcpInputSchema } from "../mcp/mcp-manager";
 
 test("createMcpSpawnSpec keeps non-Windows MCP launches shell-free", () => {
   assert.deepEqual(createMcpSpawnSpec("npx", ["-y", "@playwright/mcp@latest"], "darwin"), {
@@ -107,4 +108,95 @@ test("McpClient starts a PATH-resolved cmd MCP server on Windows", { skip: proce
     process.env.PATH = originalPath;
     rmSync(serverDir, { recursive: true, force: true });
   }
+});
+
+test("normalizeMcpInputSchema inlines $defs and definitions $ref pointers", () => {
+  const schema = normalizeMcpInputSchema({
+    type: "object",
+    properties: {
+      body: {
+        $ref: "#/$defs/CreateDelegationRequest",
+        type: "object",
+      },
+      tier: {
+        allOf: [{ $ref: "#/definitions/VolumeType" }],
+        description: "Storage tier override.",
+      },
+    },
+    required: ["body"],
+    $defs: {
+      CreateDelegationRequest: {
+        type: "object",
+        additionalProperties: false,
+        required: ["resource"],
+        properties: {
+          resource: {
+            type: "string",
+            description: "ECR resource ARN",
+          },
+        },
+      },
+    },
+    definitions: {
+      VolumeType: {
+        type: "string",
+        description: "Default volume type.",
+        enum: ["STANDARD", "HIGH_PERFORMANCE"],
+      },
+    },
+  });
+
+  assert.deepEqual(schema, {
+    type: "object",
+    properties: {
+      body: {
+        type: "object",
+        additionalProperties: false,
+        required: ["resource"],
+        properties: {
+          resource: {
+            type: "string",
+            description: "ECR resource ARN",
+          },
+        },
+      },
+      tier: {
+        type: "string",
+        description: "Storage tier override.",
+        enum: ["STANDARD", "HIGH_PERFORMANCE"],
+      },
+    },
+    required: ["body"],
+  });
+});
+
+test("normalizeMcpInputSchema preserves $defs when cyclic $ref cannot be fully inlined", () => {
+  const schema = normalizeMcpInputSchema({
+    type: "object",
+    properties: {
+      node: {
+        $ref: "#/$defs/TreeNode",
+      },
+    },
+    $defs: {
+      TreeNode: {
+        type: "object",
+        properties: {
+          child: {
+            $ref: "#/$defs/TreeNode",
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(typeof schema.$defs, "object");
+  assert.deepEqual(schema.properties.node, {
+    type: "object",
+    properties: {
+      child: {
+        $ref: "#/$defs/TreeNode",
+      },
+    },
+  });
 });

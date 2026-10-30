@@ -313,6 +313,8 @@ export class McpManager {
         properties: Record<string, unknown>;
         required?: string[];
         additionalProperties?: boolean;
+        $defs?: Record<string, unknown>;
+        definitions?: Record<string, unknown>;
       };
     };
   }> {
@@ -321,14 +323,7 @@ export class McpManager {
       function: {
         name: t.namespacedName,
         description: this.buildMcpToolDescription(t),
-        parameters: {
-          type: "object" as const,
-          properties: t.definition.inputSchema.properties,
-          required: t.definition.inputSchema.required,
-          ...(t.definition.inputSchema.additionalProperties !== undefined
-            ? { additionalProperties: t.definition.inputSchema.additionalProperties }
-            : {}),
-        },
+        parameters: normalizeMcpInputSchema(t.definition.inputSchema),
       },
     }));
   }
@@ -521,4 +516,104 @@ function fitApiToolNameWithSuffix(name: string, suffix: string): string {
 
 function hashToolName(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+export function normalizeMcpInputSchema(inputSchema?: McpToolDefinition["inputSchema"]): {
+  type: "object";
+  properties: Record<string, unknown>;
+  required?: string[];
+  additionalProperties?: boolean;
+  $defs?: Record<string, unknown>;
+  definitions?: Record<string, unknown>;
+} {
+  if (!inputSchema || typeof inputSchema !== "object") {
+    return { type: "object", properties: {} };
+  }
+
+  const defs: Record<string, unknown> = {
+    ...(isPlainObject(inputSchema.definitions) ? inputSchema.definitions : {}),
+    ...(isPlainObject(inputSchema.$defs) ? inputSchema.$defs : {}),
+  };
+
+  let hasUnresolvedRef = false;
+
+  const deref = (node: unknown, seen: ReadonlySet<string> = new Set()): unknown => {
+    if (Array.isArray(node)) {
+      return node.map((item) => deref(item, seen));
+    }
+    if (!isPlainObject(node)) {
+      return node;
+    }
+
+    if (typeof node.$ref === "string") {
+      const ref = node.$ref;
+      let defKey: string | null = null;
+      if (ref.startsWith("#/$defs/")) {
+        defKey = ref.slice("#/$defs/".length);
+      } else if (ref.startsWith("#/definitions/")) {
+        defKey = ref.slice("#/definitions/".length);
+      }
+
+      if (defKey && Object.prototype.hasOwnProperty.call(defs, defKey) && !seen.has(defKey)) {
+        const nextSeen = new Set(seen);
+        nextSeen.add(defKey);
+        const resolvedTarget = deref(defs[defKey], nextSeen);
+        const rest = { ...node };
+        delete rest.$ref;
+        const resolvedRest = deref(rest, seen);
+        if (isPlainObject(resolvedTarget) && isPlainObject(resolvedRest)) {
+          return { ...resolvedTarget, ...resolvedRest };
+        }
+      }
+
+      hasUnresolvedRef = true;
+    }
+
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(node)) {
+      out[key] = deref(value, seen);
+    }
+
+    if (Array.isArray(out.allOf) && out.allOf.length === 1 && isPlainObject(out.allOf[0])) {
+      const { allOf, ...rest } = out;
+      return { ...allOf[0], ...rest };
+    }
+
+    return out;
+  };
+
+  const resolvedProperties = isPlainObject(inputSchema.properties)
+    ? (deref(inputSchema.properties) as Record<string, unknown>)
+    : {};
+
+  const result: {
+    type: "object";
+    properties: Record<string, unknown>;
+    required?: string[];
+    additionalProperties?: boolean;
+    $defs?: Record<string, unknown>;
+    definitions?: Record<string, unknown>;
+  } = {
+    type: "object",
+    properties: resolvedProperties,
+    ...(inputSchema.required !== undefined ? { required: inputSchema.required } : {}),
+    ...(inputSchema.additionalProperties !== undefined
+      ? { additionalProperties: inputSchema.additionalProperties }
+      : {}),
+  };
+
+  if (hasUnresolvedRef) {
+    if (isPlainObject(inputSchema.$defs)) {
+      result.$defs = inputSchema.$defs;
+    }
+    if (isPlainObject(inputSchema.definitions)) {
+      result.definitions = inputSchema.definitions;
+    }
+  }
+
+  return result;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
