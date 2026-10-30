@@ -31,6 +31,8 @@ export type McpToolDefinition = {
     properties: Record<string, unknown>;
     required?: string[];
     additionalProperties?: boolean;
+    $defs?: Record<string, unknown>;
+    definitions?: Record<string, unknown>;
   };
 };
 
