@@ -1,4 +1,5 @@
 import { spawn, type SpawnOptions } from "child_process";
+import { findGitBashPath, windowsPathToPosixPath } from "./shell-utils";
 
 type NotifyChildProcess = {
   once(event: "error", listener: (error: NodeJS.ErrnoException) => void): NotifyChildProcess;
@@ -8,7 +9,7 @@ type NotifyChildProcess = {
 export type NotifySpawn = (
   command: string,
   args: string[],
-  options: Pick<SpawnOptions, "cwd" | "detached" | "env" | "stdio">
+  options: Pick<SpawnOptions, "cwd" | "detached" | "env" | "stdio" | "windowsHide">
 ) => NotifyChildProcess;
 
 export function formatDurationSeconds(durationMs: number): string {
@@ -58,24 +59,37 @@ export function launchNotifyScript(
   workingDirectory?: string,
   spawnProcess: NotifySpawn = spawn as unknown as NotifySpawn,
   configuredEnv: Record<string, string> = {},
-  context: NotifyContext = {}
+  context: NotifyContext = {},
+  runtime: { platform: NodeJS.Platform; findGitBashPath: () => string } = {
+    platform: process.platform,
+    findGitBashPath,
+  }
 ): void {
   const commandPath = notifyPath?.trim();
   if (!commandPath) {
     return;
   }
 
+  const isWindows = runtime.platform === "win32";
   const options = {
     cwd: workingDirectory,
-    detached: process.platform !== "win32",
+    detached: !isWindows,
     env: buildNotifyEnv(durationMs, { ...process.env, ...configuredEnv }, context),
     stdio: "ignore" as const,
+    ...(isWindows ? { windowsHide: true } : {}),
   };
 
   try {
-    const child = spawnProcess(commandPath, [], options);
+    const useGitBash = isWindows && /\.sh$/i.test(commandPath);
+    const child = useGitBash
+      ? spawnProcess(
+          runtime.findGitBashPath(),
+          ["--noprofile", "--norc", "--", windowsPathToPosixPath(commandPath)],
+          options
+        )
+      : spawnProcess(commandPath, [], options);
     child.once("error", (error) => {
-      if (process.platform === "win32") {
+      if (isWindows) {
         return;
       }
       if (error.code !== "EACCES" && error.code !== "ENOEXEC") {
