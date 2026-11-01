@@ -128,7 +128,7 @@ By default, images are sent inline as base64. With `filesApiEnabled`, Deep Code 
 
 ### How do I enable web search?
 
-Deep Code comes with a built-in, free Web Search tool that works well for most use cases. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
+Deep Code supports the [official DeepSeek web search](https://api-docs.deepseek.com/guides/search) — set `deepseekSearchApiEnabled` to `true` in `~/.deepcode/settings.json` to enable it. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
 
 ### Does it support Coding Plan?
 
