@@ -54,7 +54,7 @@ export async function runPlusSetup(
     try {
       key = normalizePlusApiKey(answer)!;
     } catch {
-      fail('Invalid API Key format. Expected "sk-" followed by 24 or 26 characters.');
+      fail("Invalid API Key format.");
       return 1;
     }
 

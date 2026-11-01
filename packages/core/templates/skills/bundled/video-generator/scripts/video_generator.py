@@ -43,10 +43,10 @@ def resolve_host(api_key=None):
     if api_key is None:
         return 'https://deepcode.vegamo.cn'
     if not isinstance(api_key, str):
-        raise VideoError('Invalid PLUS_API_KEY: expected "sk-" followed by 24 or 26 characters.')
+        raise VideoError('Invalid PLUS_API_KEY.')
     key = api_key.strip()
     if not key.startswith('sk-') or len(key[3:]) not in (24, 26):
-        raise VideoError('Invalid PLUS_API_KEY: expected "sk-" followed by 24 or 26 characters.')
+        raise VideoError('Invalid PLUS_API_KEY.')
     return ('https://www.deepcodeplus.com' if len(key[3:]) == 26
             else 'https://deepcode.vegamo.cn')
 
@@ -68,7 +68,7 @@ def load_key(settings_path, required=True):
     key = env['PLUS_API_KEY']
     try:
         if key is None:
-            raise VideoError('Invalid PLUS_API_KEY: expected "sk-" followed by 24 or 26 characters.')
+            raise VideoError('Invalid PLUS_API_KEY.')
         resolve_host(key)
     except VideoError as exc:
         raise VideoError(f'{exc} Settings: {settings_path}') from exc

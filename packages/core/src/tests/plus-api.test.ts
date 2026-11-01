@@ -82,7 +82,7 @@ test("configured invalid values fail for every subscription plan without reveali
       assert.throws(
         () => readDeepcodePlusSettings(file),
         (error: Error) => {
-          assert.match(error.message, /Invalid PLUS_API_KEY.*settings.json.*24 or 26/);
+          assert.equal(error.message, `Invalid PLUS_API_KEY in ${file}.`);
           if (typeof value === "string" && value.trim()) assert.ok(!error.message.includes(value));
           return true;
         }

@@ -252,7 +252,7 @@ export function inspectSettings(options: {
         status: "FAIL",
         name: "Effective settings",
         detail: message.includes("PLUS_API_KEY")
-          ? `Invalid PLUS_API_KEY at ${(trace.sources["env.PLUS_API_KEY"] ?? []).map(sourceName).join(", ")}. Expected sk- followed by 24 or 26 characters.`
+          ? `Invalid PLUS_API_KEY at ${(trace.sources["env.PLUS_API_KEY"] ?? []).map(sourceName).join(", ")}.`
           : /retain|retention|context window|compaction/i.test(message)
             ? message
             : "Unable to resolve settings. Check field types in the files above.",
@@ -292,7 +292,7 @@ export function inspectSettings(options: {
     checks.push({
       status: "FAIL",
       name: "Plus configuration",
-      detail: `${plusPath}: invalid PLUS_API_KEY. Expected sk- followed by 24 or 26 characters.`,
+      detail: `${plusPath}: invalid PLUS_API_KEY.`,
     });
   }
   // The independent Plus file may be unused, but still diagnose malformed keys in it.

@@ -17,7 +17,7 @@ export function normalizePlusApiKey(
   const key = typeof value === "string" ? value.trim() : "";
   const length = Array.from(key.slice(3)).length;
   if (!key.startsWith("sk-") || (length !== 24 && length !== 26)) {
-    throw new Error(`Invalid PLUS_API_KEY in ${settingsPath}: expected "sk-" followed by 24 or 26 characters.`);
+    throw new Error(`Invalid PLUS_API_KEY in ${settingsPath}.`);
   }
   return key;
 }
