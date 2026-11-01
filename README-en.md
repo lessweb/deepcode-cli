@@ -79,6 +79,7 @@ Skills are discovered from these locations, in priority order:
 | `/continue`      | Continue the active conversation or pick one to resume  |
 | `/compact`       | Manually compact the current conversation context      |
 | `/model`         | Switch model, thinking mode, and reasoning effort       |
+| `/permissions`   | Configure tool permissions                             |
 | `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)    |
 | `/init`          | Initialize an AGENTS.md file (LLM project instructions) |
 | `/skills`        | List available skills                                   |
@@ -91,12 +92,13 @@ Skills are discovered from these locations, in priority order:
 | `Enter`          | Send the prompt                                          |
 | `Shift+Enter`    | Insert a newline (also `Ctrl+J`)                         |
 | `Ctrl+V`         | Paste an image from the clipboard                        |
+| `Ctrl+R`         | Search user input in the current and previous sessions   |
 | `Esc`            | Interrupt the current model turn                         |
 | `Ctrl+D` twice   | Quit Deep Code                                           |
 
 ## Supported Models
 
-- `deepseek-flash` (Recommended)
+- `deepseek-flash` (V4.1 Flash, recommended)
 - `deepseek-v4-pro`
 - `deepseek-v4-flash`
 - `deepseek-v4-flash-vision-exp`
@@ -177,14 +179,18 @@ cd deepcode-cli
 # Install dependencies
 npm install
 
-# Local development (typecheck + lint + format check + bundle)
-npm run build
-
 # Run tests
 npm test
 
-# Link globally (local global install)
+# Local CLI development (typecheck + lint + format check + bundle)
+npm run build
+
+# Link the CLI globally (local global install)
 npm link
+
+# Local VSCode extension development
+npm run build:vscode
+
 ```
 
 - Make sure `npm run check` passes before submitting a PR (typecheck + lint + format check)

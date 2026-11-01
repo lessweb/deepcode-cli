@@ -78,6 +78,7 @@ Skills 会按以下优先级扫描：
 | `/continue` | 继续当前对话，或选择历史对话恢复                 |
 | `/compact`  | 手动压缩当前对话上下文                       |
 | `/model`    | 切换模型、思考模式和推理强度                   |
+| `/permissions` | 配置工具权限                          |
 | `/raw`      | 切换显示模式（Normal / Lite / Raw 滚动回溯） |
 | `/init`     | 初始化 AGENTS.md 文件                 |
 | `/skills`   | 列出可用 skills                      |
@@ -90,12 +91,13 @@ Skills 会按以下优先级扫描：
 | `Enter`       | 发送消息               |
 | `Shift+Enter` | 插入换行（也可用 `Ctrl+J`） |
 | `Ctrl+V`      | 从剪贴板粘贴图片           |
+| `Ctrl+R`      | 搜索当前及历史会话中的用户输入    |
 | `Esc`         | 中断当前模型回复           |
 | 连续 `Ctrl+D`   | 退出                 |
 
 ## 支持的模型
 
-- `deepseek-flash`（推荐使用）
+- `deepseek-flash`（即 V4.1 Flash，推荐使用）
 - `deepseek-v4-pro`
 - `deepseek-v4-flash`
 - `deepseek-v4-flash-vision-exp`
@@ -177,14 +179,18 @@ cd deepcode-cli
 # 安装依赖
 npm install
 
-# 本地开发（类型检查 + lint + 格式检查 + 构建）
-npm run build
-
 # 运行测试
 npm test
 
-# 链接到全局（即本地全局安装）
+# CLI本地开发（类型检查 + lint + 格式检查 + 构建）
+npm run build
+
+# CLI链接到全局（即本地全局安装）
 npm link
+
+# VSCode插件本地开发
+npm run build:vscode
+
 ```
 
 - 提交 PR 前请确保 `npm run check` 通过（类型检查 + lint + 格式检查）
