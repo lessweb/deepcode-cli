@@ -1,10 +1,13 @@
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import type { SessionMessage } from "../session";
 
+export const MAX_REQUEST_BODY_BYTES = 48 * 1024 * 1024;
+
 export type CompactBudget = {
   output: number;
   input: number;
   threshold: number;
+  byteThreshold: number;
   retain: number;
 };
 
@@ -29,12 +32,19 @@ export function compactBudget(
   const input = window - output;
   const threshold = Math.min(configuredThreshold, input - output);
   if (threshold <= 0) throw new Error("The context window leaves no room for conversation input.");
+  // Reserve room for tools and request options without measuring the entire wire payload.
+  const byteThreshold = MAX_REQUEST_BODY_BYTES - window * 2;
+  if (byteThreshold <= 0) throw new Error("The context window leaves no room in the request size budget.");
   const retain = retention.retainTokens ?? Math.floor(input * (retention.retainRatio ?? 0.16));
   if (retain >= threshold)
     throw new Error(
       `The retention budget (${retain}) must be less than the compaction threshold (${threshold}). Adjust retainRatio or retainTokens.`
     );
-  return { output, input, threshold, retain };
+  return { output, input, threshold, byteThreshold, retain };
+}
+
+export function estimateRequestBytes(messages: readonly ChatCompletionMessageParam[]): number {
+  return Buffer.byteLength(JSON.stringify(messages), "utf8");
 }
 
 /** An estimate, not a tokenizer. Never charge binary image encodings as text. */

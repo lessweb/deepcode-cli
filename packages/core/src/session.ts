@@ -82,6 +82,7 @@ import {
 import {
   compactBudget,
   compactPrefixes,
+  estimateRequestBytes,
   estimateRequestTokens,
   imageOffloadCount,
   isContextOverflow,
@@ -2004,7 +2005,7 @@ ${agentInstructions}
       anchor.hashes.length <= hashes.length &&
       anchor.hashes.every((hash, index) => hash === hashes[index]);
     const tokens = anchored ? anchor.tokens + estimate - anchor.estimate : estimate;
-    return { route, hashes, estimate, tokens };
+    return { route, hashes, estimate, tokens, bytes: estimateRequestBytes(messages) };
   }
 
   /** Shared file-reference recovery; it never repeats tool execution. */
@@ -2066,23 +2067,34 @@ ${agentInstructions}
     const budget = this.getCompactionBudget(model);
     let context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
     let measurement = this.measureRequest(sessionId, context.messages, model);
-    for (let attempt = 0; measurement.tokens >= budget.threshold && attempt < 2; attempt++) {
-      if (attempt === 0) {
-        const notice = this.buildAssistantMessage(sessionId, "The conversation is getting long, compacting...", null);
-        notice.meta = { asThinking: true };
-        this.onAssistantMessage(notice, false);
-      }
-      const changed = await this.compactSessionOnce(sessionId, signal, budget.retain);
-      if (!changed) break;
-      context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
-      measurement = this.measureRequest(sessionId, context.messages, model);
-    }
-    if (measurement.tokens >= budget.threshold) {
-      throw new Error("The conversation is too large to compact safely. Shorten the input or start a new session.");
-    }
+    let compactAttempts = 0;
+    let recovering = false;
     let overflowRecovered = false;
     for (;;) {
       signal.throwIfAborted();
+      const needsCompaction = () =>
+        measurement.bytes > budget.byteThreshold || (!recovering && measurement.tokens >= budget.threshold);
+      while (needsCompaction() && compactAttempts < 2) {
+        const attempt = compactAttempts++;
+        if (attempt === 0) {
+          const notice = this.buildAssistantMessage(sessionId, "The conversation is getting long, compacting...", null);
+          notice.meta = { asThinking: true };
+          this.onAssistantMessage(notice, false);
+        }
+        const oversized = measurement.bytes > budget.byteThreshold;
+        const retain = attempt > 0 && oversized ? 0 : budget.retain;
+        const changed = await this.compactSessionOnce(sessionId, signal, retain);
+        if (!changed) {
+          // A token-based retention budget can leave all image-heavy history untouched.
+          if (attempt === 0 && oversized && retain > 0) continue;
+          break;
+        }
+        context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+        measurement = this.measureRequest(sessionId, context.messages, model);
+      }
+      if (needsCompaction()) {
+        throw new Error("The conversation is too large to compact safely. Shorten the input or start a new session.");
+      }
       try {
         const response = await this.sendPreparedCompletion(
           context.sources,
@@ -2121,6 +2133,7 @@ ${agentInstructions}
         measurement = this.measureRequest(sessionId, context.messages, model);
         if (measurement.tokens > budget.input)
           throw new Error("The conversation still exceeds the model context window.");
+        recovering = true;
       }
     }
   }
@@ -2175,11 +2188,15 @@ ${agentInstructions}
             model,
             thinkingEnabled
           );
+          const summaryMessages: ChatCompletionMessageParam[] = [
+            ...candidate.messages,
+            { role: "user", content: getCompactPrompt() },
+          ];
           const cost = estimateRequestTokens(
-            [...candidate.messages, { role: "user", content: getCompactPrompt() }],
+            summaryMessages,
             getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
           );
-          if (cost <= budget.input) {
+          if (cost <= budget.input && estimateRequestBytes(summaryMessages) <= budget.byteThreshold) {
             selected = prefix;
             replay = candidate;
             break;
@@ -2274,7 +2291,16 @@ ${agentInstructions}
           message.id === firstSelectedId ? [summary] : selectedIds.has(message.id) ? [] : [message]
         );
         const next = await this.prepareContext(replacement, model, thinkingEnabled);
-        if (estimateRequestTokens(next.messages) >= estimateRequestTokens(context.messages)) {
+        const tokens = estimateRequestTokens(
+          next.messages,
+          getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
+        );
+        const previousBytes = estimateRequestBytes(context.messages);
+        const reduced =
+          previousBytes > budget.byteThreshold
+            ? estimateRequestBytes(next.messages) < previousBytes && tokens <= budget.input
+            : estimateRequestTokens(next.messages) < estimateRequestTokens(context.messages);
+        if (!reduced) {
           throw new Error("Compaction did not reduce the conversation size. The original conversation was kept.");
         }
         signal.throwIfAborted();
@@ -2288,10 +2314,6 @@ ${agentInstructions}
         });
         this.saveSessionMessages(sessionId, committed);
         this.requestUsageAnchors.delete(sessionId);
-        const tokens = estimateRequestTokens(
-          next.messages,
-          getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
-        );
         this.updateSessionEntry(sessionId, (entry) => ({ ...entry, activeTokens: tokens, updateTime: now }));
         return true;
       }

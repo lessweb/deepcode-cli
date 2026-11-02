@@ -11,9 +11,11 @@ import { getCompactPrompt, frameCompactSummary } from "../prompt";
 import {
   compactBudget,
   compactPrefixes as selectPrefixes,
+  estimateRequestBytes,
   estimateRequestTokens,
   imageOffloadCount,
   isContextOverflow,
+  MAX_REQUEST_BODY_BYTES,
 } from "../common/compaction";
 
 const originalHome = process.env.HOME;
@@ -774,4 +776,179 @@ test("automatic compaction honors the configured tail budget", async () => {
     retained.push(f.read().filter((m) => !m.compacted && !m.meta?.isSummary).length);
   }
   assert.deepEqual(retained, [2, 4]);
+});
+
+function imageMessage(id: string, bytes: number): SessionMessage {
+  return {
+    ...message(id, "user", id),
+    contentParams: [{ type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(bytes)}` } }],
+  };
+}
+
+function setByteBudget(f: ReturnType<typeof fixture>, bytes: number, retainTokens = 0) {
+  // Exercise the real formula with small payloads instead of allocating 48 MiB per test.
+  f.settings.contextWindow = (MAX_REQUEST_BODY_BYTES - bytes) / 2;
+  f.settings.retainTokens = retainTokens;
+}
+
+test("message byte estimates include UTF-8, JSON escaping and image data", () => {
+  const messages = [{ role: "user" as const, content: '中文\n"' }];
+  assert.equal(estimateRequestBytes(messages), new TextEncoder().encode(JSON.stringify(messages)).length);
+  assert.ok(estimateRequestBytes(messages) > JSON.stringify(messages).length);
+  const image = new OpenAIMessageConverter().buildMessages([imageMessage("image", 10000)], true, "test-vision");
+  assert.ok(estimateRequestBytes(image) > 10000);
+  assert.equal(compactBudget(1024 * 1024).byteThreshold, 46 * 1024 * 1024);
+  for (const window of [24 * 1024 * 1024, 25 * 1024 * 1024]) {
+    assert.throws(() => compactBudget(window), /request size budget/);
+  }
+});
+
+for (const delta of [-1, 0, 1]) {
+  test(`automatic compaction checks the byte threshold with a ${delta}-byte difference`, async () => {
+    const history = [imageMessage("old", 20000), message("tail", "user", "continue ".repeat(1000))];
+    const f = fixture(history);
+    const context = await f.internal.prepareContext(f.read(), f.settings.model, true);
+    const bytes = estimateRequestBytes(context.messages);
+    setByteBudget(f, bytes - delta);
+    assert.ok(f.internal.measureRequest("compact-test", context.messages, f.settings.model).tokens < 190000);
+    await f.run();
+    assert.equal(f.requests.length, delta > 0 ? 2 : 1);
+    assert.equal(f.requests[0].tool_choice === "none", delta > 0);
+    assert.ok(f.requests.every((request) => estimateRequestBytes(request.messages) <= bytes - delta));
+    assert.equal(f.read().find((item) => item.id === "tail")?.compacted, false);
+  });
+}
+
+test("oversized summary candidates shrink to the longest prefix within the byte budget", async () => {
+  const f = fixture([
+    ...["first", "second", "third", "fourth"].map((id) => imageMessage(id, 11000)),
+    message("tail", "user", "continue"),
+  ]);
+  setByteBudget(f, 30000);
+  await f.run();
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests[0].tool_choice, "none");
+  assert.equal(f.requests[0].messages.at(-1).content, getCompactPrompt());
+  assert.deepEqual(
+    f
+      .read()
+      .filter((item) => item.compacted)
+      .map((item) => item.id),
+    ["first", "second"]
+  );
+  assert.ok(f.requests.every((request) => estimateRequestBytes(request.messages) <= 30000));
+});
+
+for (const retainTokens of [12000, 100000]) {
+  test(`byte compaction falls back to no extra retention after a ${retainTokens}-token retention pass`, async () => {
+    const f = fixture([
+      message("old", "user", "x".repeat(7000)),
+      ...["first", "second", "third"].map((id) => imageMessage(id, 15000)),
+      message("tail", "user", "continue"),
+    ]);
+    setByteBudget(f, 40000, retainTokens);
+    await f.run();
+    assert.equal(f.requests.length, retainTokens === 12000 ? 3 : 2);
+    assert.ok(f.requests.slice(0, -1).every((request) => request.tool_choice === "none"));
+    assert.notEqual(f.requests.at(-1).tool_choice, "none");
+    assert.ok(f.requests.every((request) => estimateRequestBytes(request.messages) <= 40000));
+    assert.equal(f.read().find((item) => item.id === "tail")?.compacted, false);
+  });
+}
+
+test("byte compaction accepts a smaller payload even when its summary uses more tokens", async () => {
+  const f = fixture(
+    [
+      ...["first", "second", "third"].map((id) => ({
+        ...message(id, "user", id),
+        contentParams: [
+          { type: "image_url", image_url: { url: `data:image/png;base64,${"A".repeat(11000)}`, detail: "low" } },
+        ],
+      })),
+      message("tail", "user", "continue"),
+    ],
+    () => answer("x".repeat(10000))
+  );
+  setByteBudget(f, 30000);
+  // Compacting two images saves bytes, although the text summary costs more tokens.
+  const before = await f.internal.prepareContext(f.read(), f.settings.model, true);
+  assert.equal(await f.compact(), true);
+  assert.equal(f.read().filter((item) => item.compacted).length, 2);
+  const after = await f.internal.prepareContext(f.read(), f.settings.model, true);
+  assert.ok(estimateRequestTokens(after.messages) > estimateRequestTokens(before.messages));
+  assert.ok(estimateRequestBytes(after.messages) < estimateRequestBytes(before.messages));
+});
+
+test("unshrinkable byte-heavy input terminates without sending an oversized request", async () => {
+  for (const kind of ["fixed", "latest", "prefix", "many"] as const) {
+    const huge = imageMessage("huge", 31000);
+    const history =
+      kind === "fixed"
+        ? [{ ...huge, role: "system" as const }, message("old"), message("tail")]
+        : kind === "latest"
+          ? [message("old"), huge]
+          : kind === "prefix"
+            ? [huge, message("tail")]
+            : [...Array.from({ length: 10 }, (_, i) => imageMessage(`image-${i}`, 11000)), message("tail")];
+    const f = fixture(history);
+    setByteBudget(f, 30000);
+    await assert.rejects(f.run(), /too large|did not reduce/);
+    assert.ok(f.requests.length <= 2);
+    assert.ok(
+      f.requests.every((request) => request.tool_choice === "none" && estimateRequestBytes(request.messages) <= 30000)
+    );
+    assert.equal(f.read().at(-1)?.compacted, false);
+    assert.ok(f.read().every((item) => !item.meta?.omittedImages));
+    if (kind === "fixed" || kind === "prefix") assert.deepEqual(f.read(), history);
+  }
+});
+
+test("new tool results trigger byte compaction before the next assistant step", async () => {
+  const call = {
+    ...message("call", "assistant", ""),
+    messageParams: { tool_calls: [{ id: "read", type: "function", function: { name: "Read", arguments: "{}" } }] },
+  };
+  const result = { ...message("result", "tool", "x".repeat(15000)), messageParams: { tool_call_id: "read" } };
+  const f = fixture([imageMessage("old", 20000), call, result]);
+  setByteBudget(f, 30000);
+  await f.run();
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests[0].tool_choice, "none");
+  assert.equal(f.requests[1].messages.filter((item: any) => item.role === "tool").length, 1);
+  assert.equal(f.requests[1].messages.find((item: any) => item.role === "assistant").tool_calls.length, 1);
+  assert.ok(f.requests.every((request) => estimateRequestBytes(request.messages) <= 30000));
+});
+
+test("context-overflow recovery rechecks bytes when the summary grows the payload", async () => {
+  const f = fixture([message("old", "user", "x".repeat(10000)), imageMessage("tail", 18000)], (_, call) => {
+    if (call === 1) throw { status: 400, code: "context_length_exceeded" };
+    return answer("中".repeat(4500));
+  });
+  setByteBudget(f, 30000);
+  await assert.rejects(f.run(), /too large|did not reduce/);
+  assert.equal(f.requests[0].tool_choice, undefined);
+  assert.ok(f.read().some((item) => item.meta?.isSummary));
+  assert.ok(f.requests.slice(1).every((request) => request.tool_choice === "none"));
+  assert.ok(f.requests.every((request) => estimateRequestBytes(request.messages) <= 30000));
+});
+
+test("Files API conservatively checks bytes before uploads and sends references after compaction", async () => {
+  const f = fixture([
+    ...["first", "second", "third"].map((id) => imageMessage(id, 11000)),
+    message("tail", "user", "continue"),
+  ]);
+  setByteBudget(f, 30000);
+  const originalClient = f.internal.createOpenAIClient;
+  f.internal.createOpenAIClient = () => ({ ...originalClient(), apiKey: "test-key" });
+  Object.assign(f.settings, { filesApiEnabled: true });
+  f.internal.deepSeekFiles = {
+    ensureUploaded: async () => ({ fileId: "file-image", imageHash: "a".repeat(64), bytes: 8250 }),
+  };
+  await f.run();
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.requests[0].tool_choice, "none");
+  for (const request of f.requests) {
+    assert.match(JSON.stringify(request.messages), /file-image/);
+    assert.doesNotMatch(JSON.stringify(request.messages), /base64/);
+  }
 });
