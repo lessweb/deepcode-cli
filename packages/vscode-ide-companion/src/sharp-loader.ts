@@ -95,12 +95,13 @@ function findCliAnchors(workspaceRoot: string): string[] {
   }
 
   try {
-    const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-    const globalRoot = execFileSync(npm, ["root", "-g"], {
+    const npm = buildNpmInvocation(["root", "-g"]);
+    const globalRoot = execFileSync(npm.command, npm.args, {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       timeout: 5_000,
       windowsHide: true,
+      shell: npm.shell,
     }).trim();
     if (globalRoot) {
       anchors.push(path.join(globalRoot, "@vegamo", "deepcode-cli", "package.json"));
@@ -141,16 +142,50 @@ export function buildSharpInstallArgs(installRoot: string, version: string): str
   ];
 }
 
+export type NpmInvocation = {
+  command: string;
+  args: string[];
+  shell: boolean;
+};
+
+/**
+ * Node >= 18.20 / 20.12 refuses to spawn `.cmd` / `.bat` files without a shell (CVE-2024-27980) and
+ * throws `EINVAL` synchronously instead, so `npm.cmd` can only run through the shell on Windows.
+ * Arguments are folded into the command string because shell mode concatenates them unescaped
+ * (Node DEP0190) — quoting each one keeps paths with spaces, such as the VS Code storage root, intact.
+ */
+export function buildNpmInvocation(args: string[], platform: NodeJS.Platform = process.platform): NpmInvocation {
+  if (platform !== "win32") {
+    return { command: "npm", args, shell: false };
+  }
+  return {
+    command: ["npm.cmd", ...args.map((arg) => `"${arg}"`)].join(" "),
+    args: [],
+    shell: true,
+  };
+}
+
+function spawnNpm(npm: NpmInvocation) {
+  try {
+    return spawn(npm.command, npm.args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
+      shell: npm.shell,
+    });
+  } catch (error) {
+    // Spawn failures that are raised synchronously never reach `child.on("error")`, so surface them
+    // through the promise instead of letting a bare `EINVAL` escape to the caller.
+    throw new Error(`Failed to start npm: ${(error as Error).message}`, { cause: error });
+  }
+}
+
 async function installSharp(installRoot: string, version: string, report: SharpInstallProgressReporter): Promise<void> {
   fs.mkdirSync(installRoot, { recursive: true });
-  const npm = process.platform === "win32" ? "npm.cmd" : "npm";
+  const npm = buildNpmInvocation(buildSharpInstallArgs(installRoot, version));
   report({ percent: 20, message: "Downloading from npm mirror..." });
 
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(npm, buildSharpInstallArgs(installRoot, version), {
-      stdio: ["ignore", "pipe", "pipe"],
-      windowsHide: true,
-    });
+    const child = spawnNpm(npm);
     let percent = 20;
     let errorOutput = "";
     const reportActivity = (): void => {
