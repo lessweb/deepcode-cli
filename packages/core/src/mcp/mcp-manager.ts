@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
 import { McpClient, type McpToolDefinition, type McpPromptDefinition, type McpResourceDefinition } from "./mcp-client";
 import type { McpServerConfig } from "../settings";
+import type { ToolDefinition } from "../prompt";
+import { prepareMcpInputSchema, type PreparedMcpInputSchema } from "./mcp-schema";
 
 const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
   ? parseInt(process.env.DEEPCODE_MCP_TIMEOUT, 10)
@@ -59,6 +61,7 @@ function buildMcpNamespacedName(
 export class McpManager {
   private clients: McpClient[] = [];
   private tools: McpToolEntry[] = [];
+  private toolSchemas = new WeakMap<McpToolDefinition, PreparedMcpInputSchema>();
   private prompts: Array<{
     serverName: string;
     namespacedName: string;
@@ -303,27 +306,22 @@ export class McpManager {
     return result;
   }
 
-  getMcpToolDefinitions(): Array<{
-    type: "function";
-    function: {
-      name: string;
-      description: string;
-      parameters: {
-        type: "object";
-        properties: Record<string, unknown>;
-        required?: string[];
-        additionalProperties?: boolean;
-        $defs?: Record<string, unknown>;
-        definitions?: Record<string, unknown>;
-      };
-    };
-  }> {
+  private getToolSchema(tool: McpToolDefinition): PreparedMcpInputSchema {
+    let schema = this.toolSchemas.get(tool);
+    if (!schema) {
+      schema = prepareMcpInputSchema(tool.inputSchema);
+      this.toolSchemas.set(tool, schema);
+    }
+    return schema;
+  }
+
+  getMcpToolDefinitions(): ToolDefinition[] {
     return this.tools.map((t) => ({
       type: "function" as const,
       function: {
         name: t.namespacedName,
         description: this.buildMcpToolDescription(t),
-        parameters: normalizeMcpInputSchema(t.definition.inputSchema),
+        parameters: this.getToolSchema(t.definition).parameters,
       },
     }));
   }
@@ -343,6 +341,8 @@ export class McpManager {
     }
 
     try {
+      const validationError = this.getToolSchema(tool.definition).validateArguments?.(args);
+      if (validationError) return { ok: false, name, error: validationError };
       const result = await tool.client.callTool(tool.originalName, args, timeoutMs);
       const text = result.content
         .filter((c) => c.type === "text" && c.text)
@@ -516,104 +516,4 @@ function fitApiToolNameWithSuffix(name: string, suffix: string): string {
 
 function hashToolName(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 8);
-}
-
-export function normalizeMcpInputSchema(inputSchema?: McpToolDefinition["inputSchema"]): {
-  type: "object";
-  properties: Record<string, unknown>;
-  required?: string[];
-  additionalProperties?: boolean;
-  $defs?: Record<string, unknown>;
-  definitions?: Record<string, unknown>;
-} {
-  if (!inputSchema || typeof inputSchema !== "object") {
-    return { type: "object", properties: {} };
-  }
-
-  const defs: Record<string, unknown> = {
-    ...(isPlainObject(inputSchema.definitions) ? inputSchema.definitions : {}),
-    ...(isPlainObject(inputSchema.$defs) ? inputSchema.$defs : {}),
-  };
-
-  let hasUnresolvedRef = false;
-
-  const deref = (node: unknown, seen: ReadonlySet<string> = new Set()): unknown => {
-    if (Array.isArray(node)) {
-      return node.map((item) => deref(item, seen));
-    }
-    if (!isPlainObject(node)) {
-      return node;
-    }
-
-    if (typeof node.$ref === "string") {
-      const ref = node.$ref;
-      let defKey: string | null = null;
-      if (ref.startsWith("#/$defs/")) {
-        defKey = ref.slice("#/$defs/".length);
-      } else if (ref.startsWith("#/definitions/")) {
-        defKey = ref.slice("#/definitions/".length);
-      }
-
-      if (defKey && Object.prototype.hasOwnProperty.call(defs, defKey) && !seen.has(defKey)) {
-        const nextSeen = new Set(seen);
-        nextSeen.add(defKey);
-        const resolvedTarget = deref(defs[defKey], nextSeen);
-        const rest = { ...node };
-        delete rest.$ref;
-        const resolvedRest = deref(rest, seen);
-        if (isPlainObject(resolvedTarget) && isPlainObject(resolvedRest)) {
-          return { ...resolvedTarget, ...resolvedRest };
-        }
-      }
-
-      hasUnresolvedRef = true;
-    }
-
-    const out: Record<string, unknown> = {};
-    for (const [key, value] of Object.entries(node)) {
-      out[key] = deref(value, seen);
-    }
-
-    if (Array.isArray(out.allOf) && out.allOf.length === 1 && isPlainObject(out.allOf[0])) {
-      const { allOf, ...rest } = out;
-      return { ...allOf[0], ...rest };
-    }
-
-    return out;
-  };
-
-  const resolvedProperties = isPlainObject(inputSchema.properties)
-    ? (deref(inputSchema.properties) as Record<string, unknown>)
-    : {};
-
-  const result: {
-    type: "object";
-    properties: Record<string, unknown>;
-    required?: string[];
-    additionalProperties?: boolean;
-    $defs?: Record<string, unknown>;
-    definitions?: Record<string, unknown>;
-  } = {
-    type: "object",
-    properties: resolvedProperties,
-    ...(inputSchema.required !== undefined ? { required: inputSchema.required } : {}),
-    ...(inputSchema.additionalProperties !== undefined
-      ? { additionalProperties: inputSchema.additionalProperties }
-      : {}),
-  };
-
-  if (hasUnresolvedRef) {
-    if (isPlainObject(inputSchema.$defs)) {
-      result.$defs = inputSchema.$defs;
-    }
-    if (isPlainObject(inputSchema.definitions)) {
-      result.definitions = inputSchema.definitions;
-    }
-  }
-
-  return result;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }

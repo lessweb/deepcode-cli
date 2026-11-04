@@ -393,7 +393,7 @@ export type ToolDefinition = {
       type: "object";
       properties: Record<string, unknown>;
       required?: string[];
-      additionalProperties?: boolean;
+      additionalProperties?: boolean | Record<string, unknown>;
       $defs?: Record<string, unknown>;
       definitions?: Record<string, unknown>;
     };
