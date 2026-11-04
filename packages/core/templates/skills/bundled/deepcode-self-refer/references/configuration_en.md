@@ -42,14 +42,14 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `maxRequestFilesBytes`     | number        | Raw image byte limit per request, default `134217728` (128 MiB)                                                      |
 | `debugLogEnabled`          | boolean       | Enable debug log output (default `false`)                                                                            |
 | `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                                    |
-| `notify`                   | string        | Full path to a task-status notification script (e.g., Slack notification script)                                 |
+| `notify`                   | string        | Full path to a task-status notification script (e.g., Slack notification script)                                     |
 | `webSearchTool`            | string        | Full path to a custom web search script                                                                              |
-| `deepseekSearchApiEnabled` | boolean | Use DeepSeek official web search (default `false`) |
+| `deepseekSearchApiEnabled` | boolean       | Use DeepSeek official web search (default `false`)                                                                   |
 | `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                               |
 | `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                        |
 | `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md))       |
 | `enabledSkills`            | object        | Per-skill enable/disable map, keyed by skill name                                                                    |
-| `history`                  | object        | Persistence and size limit for user input history |
+| `history`                  | object        | Persistence and size limit for user input history                                                                    |
 
 #### `env` Sub-fields
 
@@ -135,13 +135,13 @@ Set a full path to a shell script. When a session completes, fails, waits for us
 
 The following context is injected as environment variables when the notify script runs:
 
-| Variable      | Description                                     |
-| ------------- | ----------------------------------------------- |
-| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes           |
-| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval)     |
-| `FAIL_REASON` | Failure reason (only set on failure)            |
-| `BODY`        | The text content of the last AI assistant reply |
-| `TITLE`       | Session title (matches the resume list title)   |
+| Variable      | Description                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes                    |
+| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval) |
+| `FAIL_REASON` | Failure reason (only set on failure)                                                                                                             |
+| `BODY`        | The text content of the last AI assistant reply                                                                                                  |
+| `TITLE`       | Session title (matches the resume list title)                                                                                                    |
 
 ```json
 {

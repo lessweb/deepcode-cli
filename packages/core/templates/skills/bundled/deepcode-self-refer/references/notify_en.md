@@ -8,13 +8,13 @@ Configure the `notify` field in `settings.json` with the full path to an executa
 
 ## Injected Environment Variables
 
-| Variable      | Description                                     |
-| ------------- | ----------------------------------------------- |
-| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes           |
-| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval)     |
-| `FAIL_REASON` | Failure reason (only set on failure)            |
-| `BODY`        | The text content of the last AI assistant reply |
-| `TITLE`       | Session title (matches the resume list title)   |
+| Variable      | Description                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes                    |
+| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval) |
+| `FAIL_REASON` | Failure reason (only set on failure)                                                                                                             |
+| `BODY`        | The text content of the last AI assistant reply                                                                                                  |
+| `TITLE`       | Session title (matches the resume list title)                                                                                                    |
 
 ## Configuration
 
