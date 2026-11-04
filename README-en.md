@@ -134,7 +134,7 @@ Deep Code supports the [official DeepSeek web search](https://api-docs.deepseek.
 
 Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint.
 
-If you have a DeepCode Plus subscription, run `deepcode --plus`, paste your API Key and press Enter. The CLI will save the configuration automatically:
+If you have a [DeepCode Plus subscription](https://www.deepcodeplus.com/plus/plan), run `deepcode --plus`, paste your API Key and press Enter. The CLI will save the configuration automatically:
 
 ```bash
 $ deepcode --plus

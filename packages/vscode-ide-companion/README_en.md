@@ -80,7 +80,7 @@ For detailed configuration instructions, see: https://binfer.net/share/jby5xnc-s
 
 Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint.
 
-If you have a DeepCode Plus subscription, run `deepcode --plus`, paste your API Key when prompted, and press Enter. The CLI will save the configuration automatically, so there is no need to edit the file manually:
+If you have a [DeepCode Plus subscription](https://www.deepcodeplus.com/plus/plan), run `deepcode --plus`, paste your API Key and press Enter. The CLI will save the configuration automatically:
 
 ```bash
 $ deepcode --plus

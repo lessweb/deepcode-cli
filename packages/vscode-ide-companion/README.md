@@ -79,7 +79,7 @@ npm install -g @vegamo/deepcode-cli
 
 支持。只要把 `~/.deepcode/settings.json` 的 `env.BASE_URL` 配置为 OpenAI 兼容的接口地址就行。
 
-如果使用 DeepCode Plus 的订阅套餐，可直接运行`deepcode --plus`，在提示后粘贴你的 API Key 并回车，CLI 会自动写入配置，无需手动编辑文件：
+如果使用 [DeepCode Plus 订阅套餐](https://deepcode.vegamo.cn/plus/plan)，可直接运行`deepcode --plus`，在提示后粘贴你的 API Key 并回车，CLI 会自动写入配置，无需手动编辑文件：
 
 ```bash
 $ deepcode --plus
