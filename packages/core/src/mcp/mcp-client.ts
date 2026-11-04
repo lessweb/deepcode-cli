@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from "child_process";
 import { createInterface, type Interface } from "readline";
 import * as path from "path";
 import { killProcessTree } from "../common/process-tree";
+import type { McpInputSchema } from "./mcp-schema";
 
 type JsonRpcRequest = {
   jsonrpc: "2.0";
@@ -26,12 +27,7 @@ type JsonRpcNotification = {
 export type McpToolDefinition = {
   name: string;
   description?: string;
-  inputSchema: {
-    type: "object";
-    properties: Record<string, unknown>;
-    required?: string[];
-    additionalProperties?: boolean;
-  };
+  inputSchema: McpInputSchema;
 };
 
 type ListToolsResult = {
