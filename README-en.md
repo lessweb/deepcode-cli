@@ -132,17 +132,13 @@ Deep Code supports the [official DeepSeek web search](https://api-docs.deepseek.
 
 ### Does it support Coding Plan?
 
-Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint. Take Volcano Ark's Coding Plan as an example:
+Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint.
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+If you have a DeepCode Plus subscription, run `deepcode --plus`, paste your API Key and press Enter. The CLI will save the configuration automatically:
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-··· (paste and press Enter)
 ```
 
 ### How do I configure MCP?

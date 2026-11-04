@@ -78,17 +78,13 @@ For detailed configuration instructions, see: https://binfer.net/share/jby5xnc-s
 
 ### Does it support Coding Plan?
 
-Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint. Take Volcano Ark's Coding Plan as an example, configure `~/.deepcode/settings.json` as follows:
+Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint.
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+If you have a DeepCode Plus subscription, run `deepcode --plus`, paste your API Key when prompted, and press Enter. The CLI will save the configuration automatically, so there is no need to edit the file manually:
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-··· (paste and press Enter)
 ```
 
 ## Getting Help
