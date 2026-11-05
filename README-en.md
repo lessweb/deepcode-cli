@@ -91,7 +91,7 @@ Skills are discovered from these locations, in priority order:
 |------------------|----------------------------------------------------------|
 | `Enter`          | Send the prompt                                          |
 | `Shift+Enter`    | Insert a newline (also `Ctrl+J`)                         |
-| `Ctrl+V`         | Paste an image from the clipboard                        |
+| `Ctrl+V`         | Paste an image from the clipboard (`Alt+V` on Windows)    |
 | `Ctrl+R`         | Search user input in the current and previous sessions   |
 | `Esc`            | Interrupt the current model turn                         |
 | `Ctrl+D` twice   | Quit Deep Code                                           |
@@ -120,7 +120,7 @@ Yes. Deep Code offers a full-featured VSCode extension, available on the [VSCode
 
 ### Does Deep Code support understanding images?
 
-Yes. The `deepseek-flash` model can read local images directly, or you can paste images from the clipboard with `Ctrl+V`, so the model can see the image content directly.
+Yes. The `deepseek-flash` model can read local images directly, or you can paste images from the clipboard with `Ctrl+V` (`Alt+V` on Windows), so the model can see the image content directly.
 
 Non-multimodal models such as `deepseek-v4-pro` and `deepseek-v4-flash` continue to use the `UnderstandImage` image-understanding tool. Deep Code detects model capabilities automatically; you can also override the detection with the `multimodal` setting.
 

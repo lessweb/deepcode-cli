@@ -7,6 +7,7 @@ import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../ascii-art";
 import { useAppContext } from "../contexts";
 import { formatHomeRelativePath } from "../core/display-path";
+import { getImagePasteShortcutLabel } from "../../utils/image-paste-shortcut";
 
 export { formatHomeRelativePath } from "../core/display-path";
 
@@ -20,10 +21,10 @@ type WelcomeScreenProps = {
 const TITLE_PANEL_WIDTH = 70;
 const PANEL_CONTENT_HEIGHT = 8;
 
-const SHORTCUT_TIPS = [
+const shortcutTips = () => [
   { label: "Enter", description: "Send the prompt" },
   { label: "Shift+Enter", description: "Insert a newline" },
-  { label: "Ctrl+V", description: "Paste an image from the clipboard" },
+  { label: getImagePasteShortcutLabel(), description: "Paste an image from the clipboard" },
   { label: "Ctrl+R", description: "Search prompt history" },
   { label: "Esc", description: "Interrupt the current model turn" },
   { label: "/", description: "Open the skills and commands menu" },
@@ -110,7 +111,7 @@ export function buildWelcomeTips(skills: SkillInfo[]): Array<{ label: string; de
 
   return [
     ...slashTips,
-    ...SHORTCUT_TIPS.filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
+    ...shortcutTips().filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
   ];
 }
 

@@ -9,6 +9,7 @@ import { getCliVersion } from "./utils/version";
 import { writeStderrLine } from "./utils/stdio-helpers";
 import { hideBin } from "yargs/helpers";
 import { isValidSessionId } from "@vegamo/deepcode-core/common/session-id";
+import { getImagePasteShortcutLabel } from "./utils/image-paste-shortcut";
 
 export { isValidSessionId };
 
@@ -60,7 +61,7 @@ const EPILOG = [
   "  home/end         Move within the current line",
   "  alt+left/right   Move by word",
   "  ctrl+w           Delete the previous word",
-  "  ctrl+v           Paste an image from the clipboard",
+  `  ${getImagePasteShortcutLabel().toLowerCase().padEnd(17)}Paste an image from the clipboard`,
   "  ctrl+x           Clear pasted images",
   "  esc              Interrupt the current model turn",
   "  /                Open the skills/commands menu",

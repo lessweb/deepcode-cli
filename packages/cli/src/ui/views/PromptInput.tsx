@@ -51,6 +51,7 @@ import {
 } from "../core/file-mentions";
 import type { FileMentionItem } from "../core/file-mentions";
 import { readClipboardImageAsync } from "../core/clipboard";
+import { getImagePasteShortcutLabel, isImagePasteShortcut } from "../../utils/image-paste-shortcut";
 import {
   useTerminalInput,
   usePasteHandling,
@@ -242,7 +243,7 @@ export const PromptInput = React.memo(function PromptInput({
     ? statusMessage
     : busy
       ? busyStatusText
-      : `enter send · shift+enter newline · @ files · ctrl+v image · / commands · ctrl+d exit${pasteHint}`;
+      : `enter send · shift+enter newline · @ files · ${getImagePasteShortcutLabel().toLowerCase()} image · / commands · ctrl+d exit${pasteHint}`;
   const showFooterText = useMemo(
     () =>
       showMenu ||
@@ -465,7 +466,7 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
 
-      if (key.ctrl && (input === "v" || input === "V")) {
+      if (isImagePasteShortcut(input, key)) {
         setStatusMessage("Reading clipboard...");
         readClipboardImageAsync()
           .then((image) => {
