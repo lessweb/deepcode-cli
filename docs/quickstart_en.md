@@ -122,6 +122,7 @@ Type `/` in the input box to open the command menu.
 | `/resume` | Choose a previous conversation to continue |
 | `/fork` | Fork the current conversation |
 | `/continue` | Continue the current conversation or resume the latest one |
+| `/copy` | Copy the last assistant response's text to the clipboard |
 | `/model` | Switch model, thinking mode, and reasoning effort |
 | `/permissions` | Configure tool permissions interactively |
 | `/init` | Create an `AGENTS.md` instruction file for the current project |
