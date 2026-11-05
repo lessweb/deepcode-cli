@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import os from "node:os";
+import { test, type TestContext } from "node:test";
 import React from "react";
 import { renderToString } from "ink";
 import { getImagePasteShortcutLabel, isImagePasteShortcut } from "../utils/image-paste-shortcut";
@@ -8,15 +9,86 @@ import { PromptInput } from "../ui/views/PromptInput";
 import { buildWelcomeTips } from "../ui/views/WelcomeScreen";
 import { stripTerminalControls } from "./terminal-output";
 
-for (const platform of ["win32", "darwin", "linux"] as const) {
-  const label = platform === "win32" ? "Alt+V" : "Ctrl+V";
-  const otherLabel = platform === "win32" ? "Ctrl+V" : "Alt+V";
+const environments: {
+  name: string;
+  platform: NodeJS.Platform;
+  release?: string;
+  env?: NodeJS.ProcessEnv;
+  label: string;
+  ctrl: boolean;
+  alt: boolean;
+}[] = [
+  { name: "win32", platform: "win32", label: "Alt+V", ctrl: false, alt: true },
+  { name: "darwin", platform: "darwin", label: "Ctrl+V", ctrl: true, alt: false },
+  { name: "linux", platform: "linux", label: "Ctrl+V", ctrl: true, alt: false },
+  {
+    name: "wsl-distro",
+    platform: "linux",
+    env: { WSL_DISTRO_NAME: "Ubuntu" },
+    label: "Ctrl+V / Alt+V",
+    ctrl: true,
+    alt: true,
+  },
+  {
+    name: "wsl-interop",
+    platform: "linux",
+    env: { WSL_INTEROP: "/run/WSL/123_interop" },
+    label: "Ctrl+V / Alt+V",
+    ctrl: true,
+    alt: true,
+  },
+  {
+    name: "wsl1-kernel",
+    platform: "linux",
+    release: "4.4.0-19041-Microsoft",
+    label: "Ctrl+V / Alt+V",
+    ctrl: true,
+    alt: true,
+  },
+  {
+    name: "wsl2-kernel",
+    platform: "linux",
+    release: "6.6.87.2-microsoft-standard-WSL2",
+    label: "Ctrl+V / Alt+V",
+    ctrl: true,
+    alt: true,
+  },
+  {
+    name: "win32-with-wsl-env",
+    platform: "win32",
+    env: { WSL_DISTRO_NAME: "Ubuntu" },
+    label: "Alt+V",
+    ctrl: false,
+    alt: true,
+  },
+];
 
-  test(`${platform}: only the image paste shortcut triggers image reading`, () => {
+function mockEnvironment(t: TestContext, environment: (typeof environments)[number]): void {
+  const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+  Object.defineProperty(process, "platform", { value: environment.platform });
+  t.after(() => Object.defineProperty(process, "platform", descriptor));
+  t.mock.method(os, "release", () => environment.release ?? "6.8.0-generic");
+  for (const key of ["WSL_DISTRO_NAME", "WSL_INTEROP"]) {
+    const original = process.env[key];
+    const value = environment.env?.[key];
+    if (value === undefined) delete process.env[key];
+    else process.env[key] = value;
+    t.after(() => {
+      if (original === undefined) delete process.env[key];
+      else process.env[key] = original;
+    });
+  }
+}
+
+for (const environment of environments) {
+  const { name, platform, label, ctrl, alt } = environment;
+
+  test(`${name}: only the image paste shortcuts trigger image reading`, (t) => {
+    mockEnvironment(t, environment);
     for (const [raw, expected] of [
-      ["\u001bv", platform === "win32"],
-      ["\u001bV", platform === "win32"],
-      ["\u0016", platform !== "win32"],
+      ["\u001bv", alt],
+      ["\u001bV", alt],
+      ["\u0016", ctrl],
       ["v", false],
       ["V", false],
       ["\u001bx", false],
@@ -34,10 +106,8 @@ for (const platform of ["win32", "darwin", "linux"] as const) {
     assert.equal(getImagePasteShortcutLabel(platform), label);
   });
 
-  test(`${platform}: help, welcome tips and prompt footer show ${label}`, async (t) => {
-    const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
-    Object.defineProperty(process, "platform", { value: platform });
-    t.after(() => Object.defineProperty(process, "platform", descriptor));
+  test(`${name}: help, welcome tips and prompt footer show ${label}`, async (t) => {
+    mockEnvironment(t, environment);
 
     assert.equal(getImagePasteShortcutLabel(), label);
     const shortcut = parseTerminalInput(platform === "win32" ? "\u001bv" : "\u0016");
@@ -68,16 +138,18 @@ for (const platform of ["win32", "darwin", "linux"] as const) {
       )
     );
     assert.ok(footer.includes(`${label.toLowerCase()} image`), footer);
-    assert.ok(!footer.includes(`${otherLabel.toLowerCase()} image`), footer);
+    if (!ctrl) assert.ok(!footer.includes("ctrl+v image"), footer);
+    if (!alt) assert.ok(!footer.includes("alt+v image"), footer);
 
     // Reload the module so its static help text uses the simulated platform.
-    const moduleUrl = new URL(`../cli-args.ts?image-paste-platform=${platform}`, import.meta.url).href;
+    const moduleUrl = new URL(`../cli-args.ts?image-paste-platform=${name}`, import.meta.url).href;
     const { parseArguments } = await import(moduleUrl);
     const output: string[] = [];
     t.mock.method(console, "log", (...args: unknown[]) => output.push(args.join(" ")));
     await parseArguments(["--help"]);
     const help = output.join("\n");
     assert.ok(help.includes(`${label.toLowerCase().padEnd(17)}Paste an image from the clipboard`), help);
-    assert.ok(!help.includes(`${otherLabel.toLowerCase().padEnd(17)}Paste an image from the clipboard`), help);
+    if (!ctrl) assert.ok(!help.includes(`${"ctrl+v".padEnd(17)}Paste an image from the clipboard`), help);
+    if (!alt) assert.ok(!help.includes(`${"alt+v".padEnd(17)}Paste an image from the clipboard`), help);
   });
 }

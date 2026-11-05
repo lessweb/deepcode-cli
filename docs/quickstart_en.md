@@ -109,7 +109,7 @@ Before editing files, propose a plan for adding pagination to the user list.
 | Send message | `Enter` |
 | Insert a newline | `Shift+Enter` or `Ctrl+J` |
 | Interrupt the current response | `Esc` |
-| Paste an image | `Ctrl+V` (macOS / Linux) or `Alt+V` (Windows) |
+| Paste an image | `Ctrl+V` (macOS / Linux) or `Alt+V` (Windows); either shortcut on WSL |
 | Quit | Press `Ctrl+D` twice, or use `/exit` |
 
 ## Slash Commands

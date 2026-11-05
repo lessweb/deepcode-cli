@@ -109,7 +109,7 @@ deepcode -p "总结这个项目"
 | 发送消息 | `Enter` |
 | 输入多行 | `Shift+Enter` 或 `Ctrl+J` |
 | 中断当前回复 | `Esc` |
-| 粘贴图片 | `Ctrl+V` (macOS / Linux) 或 `Alt+V` (Windows) |
+| 粘贴图片 | `Ctrl+V` (macOS / Linux) 或 `Alt+V` (Windows)，WSL 两者均可 |
 | 退出 | 连续按两次 `Ctrl+D`，或使用 `/exit` |
 
 ## 斜杠命令
