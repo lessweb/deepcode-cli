@@ -220,10 +220,18 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     return "";
   }
 
+  if (
+    mode === RawMode.Raw &&
+    message.role !== "user" &&
+    (message.role !== "assistant" || message.meta?.asThinking || !message.content?.trim())
+  ) {
+    return "";
+  }
+
   if (message.role === "user") {
     const content = message.content || "(no content)";
     const text = message.meta?.isAnswers ? renderMarkdown(content) : content;
-    return chalk(`> ${text}`);
+    return mode === RawMode.Raw ? chalk.hex("#229ac3")(`> ${text}`) : chalk(`> ${text}`);
   }
 
   if (message.role === "assistant") {

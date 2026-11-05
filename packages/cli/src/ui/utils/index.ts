@@ -9,15 +9,18 @@ import type { SessionManager } from "@vegamo/deepcode-core";
 import type { MessageMeta } from "@vegamo/deepcode-core";
 
 /**
- * Render all messages directly to stdout for Raw mode display.
- * Writes each message followed by the "Press ESC to exit raw mode" footer.
+ * Render eligible messages directly to stdout, followed by the Raw mode exit footer.
  */
 export function renderRawModeMessages(allMessages: SessionMessage[], mode: string | RawMode): void {
+  let hasMessages = false;
   for (const msg of allMessages) {
+    const rendered = renderMessageToStdout(msg, mode as RawMode);
+    if (!rendered) continue;
+    hasMessages = true;
     process.stdout.write("\n");
-    process.stdout.write(renderMessageToStdout(msg, mode as RawMode) + "\n\n");
+    process.stdout.write(rendered + "\n\n");
   }
-  if (allMessages.length > 0) {
+  if (hasMessages) {
     process.stdout.write("\n\n");
     process.stdout.write(chalk.dim("Press ESC to exit raw mode"));
   } else {

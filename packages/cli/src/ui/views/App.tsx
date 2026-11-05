@@ -148,8 +148,11 @@ function App({
       onAssistantMessage: (message: SessionMessage) => {
         setMessages((prev) => [...prev, message]);
         if (rawModeRef.current === RawMode.Raw) {
-          writeStdoutLine("\n");
-          writeStdoutLine(renderMessageToStdout(message, rawModeRef.current) + "\n\n");
+          const rendered = renderMessageToStdout(message, rawModeRef.current);
+          if (rendered) {
+            writeStdoutLine("\n");
+            writeStdoutLine(rendered + "\n\n");
+          }
         }
       },
       onSessionEntryUpdated: (entry) => {

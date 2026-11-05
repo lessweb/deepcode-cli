@@ -10,6 +10,7 @@ import { stripTerminalControls } from "./terminal-output";
 import React from "react";
 import { render } from "ink";
 import { SessionManager } from "@vegamo/deepcode-core";
+import type { SessionManagerOptions, SessionMessage } from "@vegamo/deepcode-core";
 import App from "../ui/views/App";
 import { RawMode, RawModeProvider, useRawModeContext } from "../ui/contexts";
 
@@ -26,7 +27,11 @@ async function harness(t: TestContext, config?: string) {
   fs.writeFileSync(path.join(directory, "settings.json"), JSON.stringify({ statusline: { enabled: false } }));
   t.mock.method(SessionManager.prototype, "initMcpServers", async () => {});
   t.mock.method(SessionManager.prototype, "listSkills", async () => []);
-  t.mock.method(SessionManager.prototype, "listSessions", () => []);
+  let emitMessage: SessionManagerOptions["onAssistantMessage"];
+  t.mock.method(SessionManager.prototype, "listSessions", function (this: SessionManager) {
+    emitMessage = (this as unknown as Pick<SessionManagerOptions, "onAssistantMessage">).onAssistantMessage;
+    return [];
+  });
   const frames: string[] = [];
   const output = Object.assign(
     new Writable({
@@ -86,12 +91,48 @@ async function harness(t: TestContext, config?: string) {
     mode: () => currentMode,
     previous: () => previousMode,
     latest: () => frames.at(-1) ?? "",
+    emitMessage(message: SessionMessage) {
+      emitMessage(message, true);
+    },
     async submit(value: string) {
       await send(value);
       await send("\r");
     },
   };
 }
+
+test("raw scrollback filters incoming messages without writing blank lines", async (t) => {
+  const h = await harness(t);
+  await h.submit("/raw raw-scrollback");
+  assert.equal(h.mode(), RawMode.Raw, h.latest());
+  let output = "";
+  const stdout = t.mock.method(process.stdout, "write", (chunk: string) => {
+    output += chunk;
+    return true;
+  });
+  const message: SessionMessage = {
+    id: "incoming",
+    sessionId: "raw-test",
+    role: "assistant",
+    content: "Answer",
+    visible: true,
+    compacted: false,
+    contentParams: null,
+    messageParams: null,
+    createTime: "2026-01-01T00:00:00Z",
+    updateTime: "2026-01-01T00:00:00Z",
+  };
+  h.emitMessage({ ...message, meta: { asThinking: true } });
+  h.emitMessage({ ...message, role: "tool" });
+  h.emitMessage({ ...message, role: "system", meta: { isModelChange: true } });
+  h.emitMessage({ ...message, content: " \n" });
+  h.emitMessage({ ...message, visible: false });
+  assert.equal(output, "");
+  h.emitMessage({ ...message, role: "user", content: "Question" });
+  h.emitMessage(message);
+  assert.equal(stripTerminalControls(output), "\n> Question\n\n\n✦ Answer\n\n");
+  stdout.mock.restore();
+});
 
 test("commands save normal and lite, including explicitly selecting the default", async (t) => {
   const h = await harness(t);

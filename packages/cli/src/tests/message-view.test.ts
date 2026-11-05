@@ -15,6 +15,7 @@ import {
   parseToolPayload,
 } from "../ui/components/MessageView/utils";
 import { RawMode } from "../ui/contexts";
+import { renderRawModeMessages } from "../ui/utils";
 import type { SessionMessage } from "@vegamo/deepcode-core";
 import type { ToolSummary } from "../ui/components/MessageView/types";
 
@@ -200,12 +201,73 @@ test("renderMessageToStdout renders assistant non-thinking messages with ✦", (
   assert.ok(output.includes("Here is the fix"));
 });
 
+test("raw scrollback renders only assistant body even when reasoning and tool calls are present", () => {
+  const msg = makeSessionMessage({
+    role: "assistant",
+    content: "**Here is the fix**\n\n```sh\necho hello\n```",
+    messageParams: {
+      reasoning_content: "Hidden reasoning",
+      tool_calls: [{ id: "call-1", type: "function", function: { name: "bash", arguments: "{}" } }],
+    },
+  });
+  assert.equal(stripAnsi(renderMessageToStdout(msg, RawMode.Raw)), `✦ ${msg.content}`);
+});
+
+test("raw scrollback excludes empty assistant bodies and reasoning-only messages", () => {
+  for (const content of [null, "", " \n\t"]) {
+    const msg = makeSessionMessage({
+      role: "assistant",
+      content,
+      messageParams: { reasoning_content: "Hidden reasoning" },
+    });
+    assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  }
+});
+
+test("raw scrollback history skips filtered messages without extra spacing", (t) => {
+  let output = "";
+  t.mock.method(process.stdout, "write", (chunk: string) => {
+    output += chunk;
+    return true;
+  });
+  renderRawModeMessages(
+    [
+      makeSessionMessage({ role: "user", content: "Question" }),
+      makeSessionMessage({ role: "assistant", content: "Thinking", meta: { asThinking: true } }),
+      makeSessionMessage({ role: "tool", content: "Tool output" }),
+      makeSessionMessage({ role: "system", content: "Model changed", meta: { isModelChange: true } }),
+      makeSessionMessage({ role: "assistant", content: "Hidden", visible: false }),
+      makeSessionMessage({ role: "assistant", content: "  " }),
+      makeSessionMessage({ role: "assistant", content: "Answer" }),
+    ],
+    RawMode.Raw
+  );
+  assert.equal(stripAnsi(output), "\n> Question\n\n\n✦ Answer\n\n\n\nPress ESC to exit raw mode");
+});
+
+test("raw scrollback shows empty state when every message is filtered", (t) => {
+  let output = "";
+  t.mock.method(process.stdout, "write", (chunk: string) => {
+    output += chunk;
+    return true;
+  });
+  renderRawModeMessages(
+    [makeSessionMessage({ role: "assistant", content: "Thinking", meta: { asThinking: true } })],
+    RawMode.Raw
+  );
+  assert.equal(
+    stripAnsi(output),
+    "\n(No messages in this session yet. Start chatting to see them here.)\n\nPress ESC to exit raw mode"
+  );
+});
+
 test("renderMessageToStdout renders assistant thinking messages with ✧ Thinking", () => {
   const msg = makeSessionMessage({
     role: "assistant",
     content: "Plan:\nAnalyze the code",
     meta: { asThinking: true },
   });
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
   const output = renderMessageToStdout(msg, RawMode.Lite);
   assert.ok(output.includes("✧"));
   assert.ok(output.includes("Thinking"));
@@ -215,7 +277,8 @@ test("renderMessageToStdout renders assistant thinking messages with ✧ Thinkin
 test("renderMessageToStdout renders tool messages with ✧ and tool name", () => {
   const payload = JSON.stringify({ name: "read", ok: true });
   const msg = makeSessionMessage({ role: "tool", content: payload });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("✧"));
   assert.ok(output.includes("Read"));
 });
@@ -227,7 +290,8 @@ test("renderMessageToStdout renders tool messages with resultMd output", () => {
     content: payload,
     meta: { resultMd: "File content:\n  line 1\n  line 2" },
   });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("✧"));
   assert.ok(output.includes("Read"));
   assert.ok(output.includes("└ Result"));
@@ -242,7 +306,8 @@ test("renderMessageToStdout compacts multi-line Bash params", () => {
     content: payload,
     meta: { paramsMd: 'python3 -c "\nprint(1)\nprint(2)\n"  # Run inline script' },
   });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes('python3 -c " ... "  # Run inline script'));
   assert.ok(!output.includes("print(1)"));
 });
@@ -258,7 +323,8 @@ test("renderMessageToStdout renders UpdatePlan tool messages with Plan preview a
     content: payload,
     meta: { resultMd: "Plan updated successfully" },
   });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("UpdatePlan"));
   assert.ok(output.includes("└ Plan"));
   assert.ok(output.includes("Step 1: Analyze"));
@@ -273,7 +339,8 @@ test("renderMessageToStdout renders UpdatePlan tool messages with Plan preview",
     metadata: { plan: "Step 1: Analyze\nStep 2: Implement\nStep 3: Test" },
   });
   const msg = makeSessionMessage({ role: "tool", content: payload });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("UpdatePlan"));
   assert.ok(output.includes("└ Plan"));
   assert.ok(output.includes("Step 1: Analyze"));
@@ -288,7 +355,8 @@ test("renderMessageToStdout renders system model change messages", () => {
     content: "Switched to deepseek-v4-pro",
     meta: { isModelChange: true },
   });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("> Switched to deepseek-v4-pro"));
 });
 
@@ -298,7 +366,8 @@ test("renderMessageToStdout renders system skill load messages", () => {
     content: "",
     meta: { skill: { name: "code-review", path: "", description: "" } },
   });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("⚡ Loaded skill: code-review"));
 });
 
@@ -311,7 +380,8 @@ test("MessageView renders tool skill load messages with the existing skill statu
   const output = renderToString(React.createElement(MessageView, { message: msg }), { columns: 80 });
 
   assert.ok(output.includes("⚡ Loaded skill: code-review"));
-  assert.equal(renderMessageToStdout(msg, RawMode.Raw).includes("⚡ Loaded skill: code-review"), true);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  assert.equal(renderMessageToStdout(msg, RawMode.None).includes("⚡ Loaded skill: code-review"), true);
   assert.equal(output.includes("full skill document"), false);
 });
 
@@ -321,7 +391,8 @@ test("renderMessageToStdout renders system summary messages", () => {
     content: "",
     meta: { isSummary: true },
   });
-  const output = renderMessageToStdout(msg, RawMode.Raw);
+  assert.equal(renderMessageToStdout(msg, RawMode.Raw), "");
+  const output = renderMessageToStdout(msg, RawMode.None);
   assert.ok(output.includes("(conversation summary inserted)"));
 });
 
