@@ -3,6 +3,7 @@ import { Box, Text } from "ink";
 import { BASH_TIMEOUT_DECREMENT_MS, BASH_TIMEOUT_INCREMENT_MS } from "@vegamo/deepcode-core";
 import type { BashTimeoutAdjustment } from "@vegamo/deepcode-core";
 import { useTerminalInput } from "../hooks";
+import { writeClipboardTextAsync } from "../core/clipboard";
 
 import {
   wrapProcessOutputTitle,
@@ -41,6 +42,7 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   const [scrollOffset, setScrollOffset] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyRequestRef = useRef(0);
 
   const panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(screenHeight - 1, MAX_PANEL_HEIGHT));
   const titleLines = useMemo(
@@ -60,6 +62,10 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   useEffect(() => {
     setScrollOffset(0);
     setStatusMessage("");
+    return () => {
+      copyRequestRef.current += 1;
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    };
   }, [selected?.id]);
 
   useEffect(() => {
@@ -73,14 +79,6 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
     const interval = setInterval(updateStdout, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
   }, [processStdoutRef, selected?.id, selected?.running, selected?.pid]);
-
-  useEffect(() => {
-    return () => {
-      if (statusTimerRef.current) {
-        clearTimeout(statusTimerRef.current);
-      }
-    };
-  }, []);
 
   const lines = useMemo(
     () => [...(pinTitle ? [] : titleLines), ...(selected ? wrapProcessOutputLines(stdoutText, screenWidth - 2) : [])],
@@ -111,11 +109,27 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   useTerminalInput(
     (input, key) => {
       if ((key.ctrl && (input === "o" || input === "O")) || key.escape) {
+        copyRequestRef.current++;
         onDismiss();
         return;
       }
       if (key.leftArrow || key.rightArrow) {
-        setSelectedId(moveProcessOutputSelection(items, selected?.id ?? null, key.leftArrow ? -1 : 1));
+        const nextId = moveProcessOutputSelection(items, selected?.id ?? null, key.leftArrow ? -1 : 1);
+        if (nextId !== selected?.id) copyRequestRef.current++;
+        setSelectedId(nextId);
+        return;
+      }
+      if (input === "y" && !key.ctrl && !key.meta && !key.paste) {
+        if (!selected?.command) return;
+        const request = ++copyRequestRef.current;
+        const reportCopy = (success: boolean) => {
+          if (request === copyRequestRef.current) {
+            setTemporaryStatus(success ? "Copied to clipboard" : "Failed to copy");
+          }
+        };
+        void writeClipboardTextAsync(selected.command)
+          .then(reportCopy)
+          .catch(() => reportCopy(false));
         return;
       }
       if (input === "+" && canAdjustTimeout && selected?.pid) {
@@ -164,7 +178,7 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
         <Text
           dimColor
           wrap="truncate-end"
-        >{` (${canAdjustTimeout ? `timeout ${formatDuration(selected.timeoutMs!)} · +/- adjust · ` : ""}←→ history · Ctrl+O or Esc close · ↑↓ PgUp/PgDn scroll)`}</Text>
+        >{` (${canAdjustTimeout ? `timeout ${formatDuration(selected.timeoutMs!)} · +/- adjust · ` : ""}←→ history · Ctrl+O or Esc close · ↑↓ PgUp/PgDn scroll · y copy command)`}</Text>
       </Box>
       <Box flexDirection="column" flexShrink={0} paddingX={1} overflow="hidden">
         {pinTitle && <Text wrap="hard">{titleLines.join("\n")}</Text>}
