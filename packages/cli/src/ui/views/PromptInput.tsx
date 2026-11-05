@@ -112,7 +112,7 @@ type Props = {
   statusLineSegments?: StatusSegment[];
   statusLineSeparator?: string;
   planMode: boolean;
-  onSubmit: (submission: PromptSubmission) => void;
+  onSubmit: (submission: PromptSubmission) => void | Promise<string | void>;
   onPromptDraftApplied: (nonce: number) => void;
   onModelConfigChange: (selection: ModelConfigSelection, target: SettingsTarget) => string | Promise<string>;
   onPermissionSettingsChange: (
@@ -822,7 +822,11 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
     if (item.kind === "copy") {
-      onSubmit({ text: "", imageUrls: [], command: "copy" });
+      Promise.resolve(onSubmit({ text: "", imageUrls: [], command: "copy" }))
+        .then((message) => {
+          if (message) setStatusMessage(message);
+        })
+        .catch(() => setStatusMessage("Failed to copy"));
       resetPromptInput();
       return;
     }

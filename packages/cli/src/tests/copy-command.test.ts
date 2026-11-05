@@ -124,6 +124,14 @@ async function harness(
       await flush();
       assert.equal(prompt.mock.callCount(), 0);
       assert.deepEqual(history, before);
+      const frame = frames.at(-1) ?? "";
+      const inputIndex = frame.lastIndexOf("Type your message...");
+      assert.ok(inputIndex >= 0, "input is visible after submitting /copy");
+      const notices = frame.match(
+        /Copied to clipboard|Failed to copy|No assistant messages to copy yet\.|No text to copy from the last assistant message\./g
+      );
+      assert.equal(notices?.length, 1, "copy status appears only once");
+      assert.ok(frame.indexOf(notices![0]) > inputIndex, "copy status appears below the input");
     },
   };
 }

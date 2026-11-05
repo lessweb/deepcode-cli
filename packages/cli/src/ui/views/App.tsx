@@ -383,20 +383,17 @@ function App({
           ? [...sessionManager.listSessionMessages(sessionId)].reverse().find((message) => message.role === "assistant")
           : undefined;
         if (!lastAssistant) {
-          setCommandNotice("No assistant messages to copy yet.");
-          return;
+          return "No assistant messages to copy yet.";
         }
         if (lastAssistant.meta?.asThinking || !lastAssistant.content?.trim()) {
-          setCommandNotice("No text to copy from the last assistant message.");
-          return;
+          return "No text to copy from the last assistant message.";
         }
         try {
           const success = await writeClipboardTextAsync(lastAssistant.content);
-          setCommandNotice(success ? "Copied to clipboard" : "Failed to copy");
+          return success ? "Copied to clipboard" : "Failed to copy";
         } catch {
-          setCommandNotice("Failed to copy");
+          return "Failed to copy";
         }
-        return;
       }
       if (submission.command === "compact") {
         if (busy) return;
@@ -668,7 +665,7 @@ function App({
 
   const handleSubmit = useCallback(
     (submission: PromptSubmission) => {
-      void handlePrompt(submission);
+      return handlePrompt(submission);
     },
     [handlePrompt]
   );

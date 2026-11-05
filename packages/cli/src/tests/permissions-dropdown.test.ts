@@ -406,7 +406,7 @@ test("slash command opens the editor, persists settings, and isolates menu keys 
       promptHistory: [],
       busy: false,
       planMode: false,
-      onSubmit: (submission) => submissions.push(submission),
+      onSubmit: (submission) => void submissions.push(submission),
       onPromptDraftApplied() {},
       onModelConfigChange: (selection, target) => {
         modelSaves.push({ selection, target });
