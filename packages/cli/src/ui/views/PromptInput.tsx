@@ -88,7 +88,7 @@ export type PromptSubmission = PermissionReply & {
   selectedSkills?: SkillInfo[];
   planMode?: boolean;
   isAnswers?: boolean;
-  command?: "new" | "resume" | "fork" | "continue" | "compact" | "undo" | "mcp" | "exit";
+  command?: "new" | "resume" | "fork" | "continue" | "compact" | "copy" | "undo" | "mcp" | "exit";
 };
 
 export type PromptDraft = {
@@ -818,6 +818,11 @@ export const PromptInput = React.memo(function PromptInput({
     }
     if (item.kind === "compact") {
       onSubmit({ text: "", imageUrls: [], command: "compact" });
+      resetPromptInput();
+      return;
+    }
+    if (item.kind === "copy") {
+      onSubmit({ text: "", imageUrls: [], command: "copy" });
       resetPromptInput();
       return;
     }

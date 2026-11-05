@@ -105,6 +105,17 @@ test("raw Ctrl+Y is parsed as the copy shortcut", () => {
   assert.equal(key.paste, false);
 });
 
+test("/copy waits for the current response before submitting", async (t) => {
+  const h = await harness(t, true);
+  await h.send("/copy");
+  await h.send("\r");
+  assert.equal(h.submissions.length, 0);
+  assert.equal(h.copies.length, 0);
+  await h.update({ busy: false });
+  await h.send("\r");
+  assert.deepEqual(h.submissions, [{ text: "", imageUrls: [], command: "copy" }]);
+});
+
 test("Ctrl+Y preserves input, cursor and undo while the model is busy", async (t) => {
   const h = await harness(t, true);
   await h.send("hello");

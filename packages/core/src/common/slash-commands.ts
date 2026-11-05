@@ -12,6 +12,7 @@ export type SlashCommandKind =
   | "fork"
   | "continue"
   | "compact"
+  | "copy"
   | "undo"
   | "mcp"
   | "raw"
@@ -86,6 +87,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "compact",
     label: "/compact",
     description: "Compact the current conversation",
+  },
+  {
+    kind: "copy",
+    name: "copy",
+    label: "/copy",
+    description: "Copy the last assistant message",
   },
   {
     kind: "undo",

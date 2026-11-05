@@ -11,6 +11,7 @@ import { SessionList } from "./SessionList";
 import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
 import { StatusLine } from "../components/status-line";
 import { buildLoadingText } from "../core/loading-text";
+import { writeClipboardTextAsync } from "../core/clipboard";
 import { findExpandedThinkingId } from "../core/thinking-state";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { AskUserQuestionPrompt } from "./AskUserQuestionPrompt";
@@ -374,6 +375,29 @@ function App({
       }
       if (compactionControllerRef.current) return;
       setCommandNotice(null);
+      if (submission.command === "copy") {
+        if (busy) return;
+        setErrorLine(null);
+        const sessionId = sessionManager.getActiveSessionId();
+        const lastAssistant = sessionId
+          ? [...sessionManager.listSessionMessages(sessionId)].reverse().find((message) => message.role === "assistant")
+          : undefined;
+        if (!lastAssistant) {
+          setCommandNotice("No assistant messages to copy yet.");
+          return;
+        }
+        if (lastAssistant.meta?.asThinking || !lastAssistant.content?.trim()) {
+          setCommandNotice("No text to copy from the last assistant message.");
+          return;
+        }
+        try {
+          const success = await writeClipboardTextAsync(lastAssistant.content);
+          setCommandNotice(success ? "Copied to clipboard" : "Failed to copy");
+        } catch {
+          setCommandNotice("Failed to copy");
+        }
+        return;
+      }
       if (submission.command === "compact") {
         if (busy) return;
         setErrorLine(null);

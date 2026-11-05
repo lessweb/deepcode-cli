@@ -31,11 +31,21 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
     "fork",
     "continue",
     "compact",
+    "copy",
     "undo",
     "mcp",
     "raw",
     "exit",
   ]);
+});
+
+test("/copy is suggested, takes precedence over a skill and ignores trailing text", () => {
+  const items = buildSlashCommands([{ name: "copy", path: "/skills/copy/SKILL.md", description: "A skill" }]);
+  assert.ok(filterSlashCommands(items, "/cop").some((item) => item.kind === "copy"));
+  assert.equal(findExactSlashCommand(items, "/copy")?.kind, "copy");
+  const result = resolveSlashSubmission(items, "/copy extra text");
+  assert.equal(result?.kind, "command");
+  assert.equal(result?.kind === "command" ? result.item.kind : "", "copy");
 });
 
 test("filterSlashCommands matches partial prefixes", () => {
