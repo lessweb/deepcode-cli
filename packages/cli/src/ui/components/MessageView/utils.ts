@@ -252,7 +252,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
 
     const planLines = getUpdatePlanPreviewLines(summary);
     if (planLines.length > 0) {
-      const planText = planLines.map((line) => `  ${line}`).join("\n");
+      const planText = planLines.map((line) => `  ${formatPlanPreviewLine(line)}`).join("\n");
       return `${statusLine}\n${chalk.dim("  └ Plan")}\n${planText}${result}`;
     }
 
@@ -270,6 +270,22 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   }
 
   return "";
+}
+
+export function formatPlanPreviewLine(line: string): string {
+  const match = /^([ \t]*)- \[([x> ])\](?:[ \t]+(.*))?$/.exec(line);
+  if (!match) {
+    return line;
+  }
+
+  const [, indent, status, text = ""] = match;
+  if (status === "x") {
+    return `${indent}${chalk.green("✔")} ${text}`;
+  }
+  if (status === ">") {
+    return `${indent}${chalk.yellow("●")} ${chalk.bold(text)}`;
+  }
+  return `${indent}○ ${text}`;
 }
 
 export function getUpdatePlanPreviewLines(summary: ToolSummary): string[] {

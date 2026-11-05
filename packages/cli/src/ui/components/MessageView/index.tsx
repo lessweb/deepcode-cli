@@ -6,6 +6,7 @@ import { renderMarkdown, renderMarkdownSegments } from "./markdown";
 import {
   buildThinkingSummary,
   buildToolSummary,
+  formatPlanPreviewLine,
   formatStatusName,
   formatToolStatusParams,
   getToolDiffPreviewLines,
@@ -257,7 +258,7 @@ function PlanPreview({ lines }: { lines: string[] }): React.ReactElement {
       <Box flexDirection="column" marginLeft={2}>
         {lines.map((line, index) => (
           <Text key={`${index}-${line}`} wrap="wrap">
-            {line}
+            {formatPlanPreviewLine(line)}
           </Text>
         ))}
       </Box>
