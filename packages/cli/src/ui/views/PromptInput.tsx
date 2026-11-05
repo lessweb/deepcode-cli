@@ -50,7 +50,7 @@ import {
   scanFileMentionItems,
 } from "../core/file-mentions";
 import type { FileMentionItem } from "../core/file-mentions";
-import { readClipboardImageAsync } from "../core/clipboard";
+import { readClipboardImageAsync, writeClipboardTextAsync } from "../core/clipboard";
 import { getImagePasteShortcutLabel, isImagePasteShortcut } from "../../utils/image-paste-shortcut";
 import {
   useTerminalInput,
@@ -186,6 +186,7 @@ export const PromptInput = React.memo(function PromptInput({
   const wasBusyRef = React.useRef(busy);
   const hadFileMentionTokenRef = React.useRef(false);
   const appliedDraftNonceRef = React.useRef<number | null>(null);
+  const copyingRef = useRef(false);
 
   const { historyCursor, navigateHistory, exitHistoryBrowsing } = useHistoryNavigation(
     buffer,
@@ -454,6 +455,20 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
+        return;
+      }
+
+      if (key.ctrl && !key.meta && !key.paste && (input === "y" || input === "Y")) {
+        const text = expandPasteMarkers(buffer.text, pastesRef.current);
+        if (text.length > 0 && !copyingRef.current) {
+          copyingRef.current = true;
+          writeClipboardTextAsync(text)
+            .then((success) => setStatusMessage(success ? "Copied to clipboard" : "Failed to copy"))
+            .catch(() => setStatusMessage("Failed to copy"))
+            .finally(() => {
+              copyingRef.current = false;
+            });
+        }
         return;
       }
 

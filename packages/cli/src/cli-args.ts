@@ -63,6 +63,7 @@ const EPILOG = [
   "  ctrl+w           Delete the previous word",
   `  ${getImagePasteShortcutLabel().toLowerCase().padEnd(17)}Paste an image from the clipboard`,
   "  ctrl+x           Clear pasted images",
+  "  ctrl+y           Copy input text to clipboard",
   "  esc              Interrupt the current model turn",
   "  /                Open the skills/commands menu",
   "  /skills          List available skills",

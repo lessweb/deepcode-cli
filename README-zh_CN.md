@@ -91,6 +91,7 @@ Skills 会按以下优先级扫描：
 | `Enter`       | 发送消息               |
 | `Shift+Enter` | 插入换行（也可用 `Ctrl+J`） |
 | `Ctrl+V`      | 从剪贴板粘贴图片（Windows系统是`Alt+V`）           |
+| `Ctrl+Y`      | 将输入框中的文本复制到剪贴板 |
 | `Ctrl+R`      | 搜索当前及历史会话中的用户输入    |
 | `Esc`         | 中断当前模型回复           |
 | 连续 `Ctrl+D`   | 退出                 |

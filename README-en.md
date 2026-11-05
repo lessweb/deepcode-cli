@@ -92,6 +92,7 @@ Skills are discovered from these locations, in priority order:
 | `Enter`          | Send the prompt                                          |
 | `Shift+Enter`    | Insert a newline (also `Ctrl+J`)                         |
 | `Ctrl+V`         | Paste an image from the clipboard (`Alt+V` on Windows)    |
+| `Ctrl+Y`         | Copy input text to clipboard       |
 | `Ctrl+R`         | Search user input in the current and previous sessions   |
 | `Esc`            | Interrupt the current model turn                         |
 | `Ctrl+D` twice   | Quit Deep Code                                           |

@@ -1,4 +1,4 @@
-import { spawnSync } from "child_process";
+import { spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -7,6 +7,49 @@ export type ClipboardImage = {
   dataUrl: string;
   mimeType: string;
 };
+
+function writeClipboardCommand(command: string, args: string[], text: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      const child = spawn(command, args, { stdio: ["pipe", "ignore", "ignore"], windowsHide: true });
+      let settled = false;
+      const timer = setTimeout(() => finish(false), 3000);
+      function finish(success: boolean): void {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (!success) child.kill("SIGKILL");
+        resolve(success);
+      }
+      child.once("error", () => finish(false));
+      child.once("exit", (code) => finish(code === 0));
+      child.stdin!.once("error", () => finish(false));
+      child.stdin!.end(text, "utf8");
+    } catch {
+      resolve(false);
+    }
+  });
+}
+
+export async function writeClipboardTextAsync(text: string): Promise<boolean> {
+  if (text.length === 0) return false;
+
+  if (process.platform === "darwin") {
+    return writeClipboardCommand("pbcopy", [], text);
+  }
+  if (process.platform === "linux") {
+    if (await writeClipboardCommand("wl-copy", ["--type", "text/plain;charset=utf-8"], text)) return true;
+    return writeClipboardCommand("xclip", ["-selection", "clipboard", "-in"], text);
+  }
+  if (process.platform === "win32") {
+    const script =
+      "[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false);" +
+      "$ErrorActionPreference = 'Stop';" +
+      "Set-Clipboard -Value ([Console]::In.ReadToEnd())";
+    return writeClipboardCommand("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], text);
+  }
+  return false;
+}
 
 const PNG_MIME = "image/png";
 const IMAGE_MIME_BY_EXT = new Map([
