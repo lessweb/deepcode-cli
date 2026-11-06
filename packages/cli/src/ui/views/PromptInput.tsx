@@ -5,6 +5,7 @@ import { Box, Text, useStdout } from "ink";
 import type { DOMElement } from "ink";
 import chalk from "chalk";
 import { ARGS_SEPARATOR } from "../constants";
+import { PromptText } from "../components/PromptText";
 import {
   EMPTY_BUFFER,
   PASTE_MARKER_REGEX,
@@ -974,7 +975,7 @@ export const PromptInput = React.memo(function PromptInput({
       >
         <PromptPrefixLine />
         <Box ref={inputTextRef} flexGrow={1} flexShrink={1} width={inputContentWidth}>
-          <Text wrap="wrap">
+          <PromptText width={inputContentWidth}>
             {search?.preview !== null && search?.preview !== undefined ? (
               <HistoryPreview text={search.preview} query={search.query} />
             ) : (
@@ -986,7 +987,7 @@ export const PromptInput = React.memo(function PromptInput({
                 !busy && !terminalCursorActive && !search
               )
             )}
-          </Text>
+          </PromptText>
           {inlineHint ? <Text dimColor>{inlineHint}</Text> : null}
         </Box>
       </Box>

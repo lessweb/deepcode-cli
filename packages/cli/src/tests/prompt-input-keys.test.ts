@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
-import { Box, Text, renderToString } from "ink";
+import { Box, renderToString } from "ink";
 import stringWidth from "string-width";
+import { PromptText } from "../ui/components/PromptText";
 
 const ANSI_RE = /\u001b\[[0-9;]*m/g;
 function stripAnsi(text: string): string {
@@ -507,7 +508,7 @@ test("prompt cursor follows the whole word after its source offset", () => {
   }
 });
 
-test("prompt cursor cells agree with Ink word wrapping and inline ANSI styling", () => {
+test("prompt cursor cells agree with prompt wrapping and inline ANSI styling", () => {
   for (const [text, width] of [
     ["", 10],
     ["hello world", 10],
@@ -517,6 +518,11 @@ test("prompt cursor cells agree with Ink word wrapping and inline ANSI styling",
     ["hello  world  ", 10],
     ["你好世界", 5],
     ["hi 你好 world", 10],
+    ["aaaaaa 君不见高堂明镜悲白发", 10],
+    ["中文hello世界", 10],
+    ["请使用 hello world 测试中文换行", 12],
+    ["hello你好\n世界 cafe\u0301 👩‍💻", 10],
+    ["你好 [paste #1 1234 chars] 世界", 10],
     ["cafe\u0301 😀 👩‍💻 world", 10],
     ["abc", 0],
     ["hello [paste #1 1234 chars]", 10],
@@ -530,8 +536,8 @@ test("prompt cursor cells agree with Ink word wrapping and inline ANSI styling",
           Box,
           { width: columns },
           React.createElement(
-            Text,
-            { wrap: "wrap" },
+            PromptText,
+            { width: columns },
             renderBufferWithCursor(state, true, undefined, new Map([[1, "paste"]]))
           )
         ),

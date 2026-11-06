@@ -236,6 +236,21 @@ test("MessageView keeps prompt words together in user and model-change echoes", 
   }
 });
 
+test("MessageView fills remaining columns with Chinese while preserving English words", () => {
+  for (const role of ["user", "system"] as const) {
+    for (const [content, expected] of [
+      ["aaaaaa 君不见高堂明镜悲白发", " > aaaaaa 君\n   不见高堂明\n   镜悲白发\n"],
+      ["中文hello世界", " > 中文hello\n   世界\n"],
+      ["中文 hello world", " > 中文 hello\n    world\n"],
+      ["君不见黄河之水天上来\n君不见高堂明镜悲白发", " > 君不见黄河\n   之水天上来\n   君不见高堂\n   明镜悲白发\n"],
+    ]) {
+      const message = makeSessionMessage({ role, content, meta: { isModelChange: true } });
+      const output = renderToString(React.createElement(MessageView, { message, width: 13 }), { columns: 13 });
+      assert.equal(stripAnsi(output), expected);
+    }
+  }
+});
+
 test("MessageView echoes model changes with submitted prompt wrapping", () => {
   const msg = makeSessionMessage({
     role: "system",

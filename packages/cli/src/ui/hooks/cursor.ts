@@ -1,10 +1,10 @@
 import { useCursor, useBoxMetrics } from "ink";
 import stringWidth from "string-width";
-import wrapAnsi from "wrap-ansi";
 import { useLayoutEffect, useState } from "react";
 import type { RefObject } from "react";
 import type { DOMElement } from "ink";
 import type { PromptBufferState } from "../core/prompt-buffer";
+import { wrapPromptText } from "../core/prompt-wrap";
 
 export type CursorPlacement = {
   row: number;
@@ -86,10 +86,9 @@ function measurePromptCursor(state: PromptBufferState, screenWidth: number, init
       }
     }
 
-    // Match Ink's Text wrap="wrap", including preserved spaces and hard
-    // breaks for oversized words. The suffix matters even before the cursor:
+    // Use the same CJK-aware wrapping as PromptText. The suffix matters even before the cursor:
     // it can move the entire word containing that cursor onto the next row.
-    const rows = wrapAnsi(normalized, contentWidth, { trim: false, hard: true }).split("\n");
+    const rows = wrapPromptText(normalized, contentWidth).split("\n");
     if (cursor > sourceStart + line.length) {
       row += rows.length;
       sourceStart += line.length + 1;

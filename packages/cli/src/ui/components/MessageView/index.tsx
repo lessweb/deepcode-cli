@@ -2,6 +2,7 @@ import { getDiffDetails, getDiffFilePath } from "@vegamo/deepcode-core";
 import { formatDisplayPath } from "../../core/display-path";
 import React from "react";
 import { Box, Text } from "ink";
+import { PromptText } from "../PromptText";
 import { renderMarkdown, renderMarkdownSegments } from "./markdown";
 import {
   buildThinkingSummary,
@@ -172,9 +173,9 @@ function PromptEchoLine({
         <Text color="#229ac3">{"> "}</Text>
       </Box>
       <Box flexGrow={1} flexShrink={1} width={contentWidth}>
-        <Text color="#229ac3" wrap="wrap">
+        <PromptText color="#229ac3" width={contentWidth}>
           {text}
-        </Text>
+        </PromptText>
         {attachmentCount > 0 ? <Text color="#229ac3">{`  📎 ${attachmentCount} image attachment(s)`}</Text> : null}
       </Box>
     </Box>
