@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useInput } from "ink";
 import DropdownMenu from "../DropdownMenu";
 import { RAW_COMMAND_MODELS, useRawModeContext } from "../../contexts";
@@ -11,6 +11,17 @@ const RawModelDropdown: React.FC<{
 }> = ({ open = false, screenWidth, onSelect, onClose }) => {
   const { mode } = useRawModeContext();
   const [index, setIndex] = useState(0);
+  useEffect(() => {
+    if (open) {
+      setIndex(
+        Math.max(
+          0,
+          RAW_COMMAND_MODELS.findIndex((model) => model.key === mode)
+        )
+      );
+    }
+  }, [open, mode]);
+
   useInput(
     (input, key) => {
       if (key.upArrow) {
