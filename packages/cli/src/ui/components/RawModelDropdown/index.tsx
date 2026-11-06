@@ -11,6 +11,8 @@ const RawModelDropdown: React.FC<{
 }> = ({ open = false, screenWidth, onSelect, onClose }) => {
   const { mode } = useRawModeContext();
   const [index, setIndex] = useState(0);
+  const [ready, setReady] = useState(false);
+
   useEffect(() => {
     if (open) {
       setIndex(
@@ -19,6 +21,9 @@ const RawModelDropdown: React.FC<{
           RAW_COMMAND_MODELS.findIndex((model) => model.key === mode)
         )
       );
+      setReady(true);
+    } else {
+      setReady(false);
     }
   }, [open, mode]);
 
@@ -42,9 +47,9 @@ const RawModelDropdown: React.FC<{
         return;
       }
     },
-    { isActive: open }
+    { isActive: open && ready }
   );
-  if (!open) {
+  if (!open || !ready) {
     return null;
   }
   return (
