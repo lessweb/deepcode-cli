@@ -68,6 +68,58 @@ test("MessageView shows full reasoning content in Normal/Raw mode", () => {
   );
 });
 
+test("thinking views prefer metadata summaries over raw reasoning only when the original content is empty", () => {
+  for (const content of [null, "", " \n", "Original assistant text"]) {
+    const message = makeSessionMessage({
+      role: "assistant",
+      content,
+      messageParams: { reasoning_content: "Full original reasoning" },
+      meta: { asThinking: true, reasoningSummary: "Display summary" },
+    });
+    const expected = content?.trim() || "Display summary";
+    for (const collapsed of [true, false]) {
+      const rendered = renderToString(React.createElement(MessageView, { message, collapsed, width: 100 }));
+      assert.ok(rendered.includes(expected));
+      assert.ok(!rendered.includes("Full original reasoning"));
+      if (content?.trim()) assert.ok(!rendered.includes("Display summary"));
+    }
+    for (const mode of [RawMode.Lite, RawMode.None]) {
+      const rendered = renderMessageToStdout(message, mode);
+      assert.ok(rendered.includes(expected));
+      assert.ok(!rendered.includes("Full original reasoning"));
+      if (content?.trim()) assert.ok(!rendered.includes("Display summary"));
+    }
+    assert.equal(renderMessageToStdout(message, RawMode.Raw), "");
+    assert.equal(message.content, content);
+  }
+});
+
+test("thinking views keep existing reasoning fallback when no metadata summary is available", () => {
+  for (const reasoningSummary of [undefined, "", " \n"]) {
+    const message = makeSessionMessage({
+      role: "assistant",
+      content: "",
+      messageParams: { reasoning_content: "Full original reasoning" },
+      meta: { asThinking: true, reasoningSummary },
+    });
+    for (const collapsed of [true, false]) {
+      assert.match(renderToString(React.createElement(MessageView, { message, collapsed })), /\(reasoning\.\.\.\)/);
+    }
+    assert.match(renderMessageToStdout(message, RawMode.Lite), /\(reasoning\.\.\.\)/);
+    assert.match(renderMessageToStdout(message, RawMode.None), /Full original reasoning/);
+  }
+});
+
+test("ordinary assistant replies do not use reasoning summaries as their body", () => {
+  const message = makeSessionMessage({
+    role: "assistant",
+    content: "",
+    meta: { reasoningSummary: "Display summary" },
+  });
+  assert.doesNotMatch(renderToString(React.createElement(MessageView, { message })), /Display summary/);
+  assert.doesNotMatch(renderMessageToStdout(message, RawMode.Lite), /Display summary/);
+});
+
 test("formatBashStatusParams compacts multi-line commands and keeps the final description", () => {
   assert.equal(
     formatBashStatusParams('python3 -c "\nprint(1)\nprint(2)\n"  # Run inline script'),

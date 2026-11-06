@@ -361,6 +361,8 @@ test("Ctrl+O opens output for an empty prompt and expands pasted text in a nonem
     React.createElement(PromptInput, {
       projectRoot: process.cwd(),
       skills: [],
+      reasoningSummary: "off" as const,
+      onReasoningSummaryChange: () => "",
       modelConfig: { model: "test", thinkingEnabled: false, reasoningEffort: "high" },
       screenWidth: 120,
       promptHistory: [],

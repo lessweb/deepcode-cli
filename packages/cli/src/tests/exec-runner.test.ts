@@ -25,6 +25,7 @@ function createSettings(
 ): ResolvedDeepcodingSettings {
   return {
     env: {},
+    experimental: { reasoningSummary: "off", reasoningSummaryModel: "deepseek-flash" },
     history: { persistence: "none", maxBytes: 10485760 },
     baseURL: "https://example.invalid",
     model: "test-model",

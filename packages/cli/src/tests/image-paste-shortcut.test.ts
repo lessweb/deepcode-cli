@@ -122,6 +122,8 @@ for (const environment of environments) {
           projectRoot: process.cwd(),
           screenWidth: 160,
           skills: [],
+          reasoningSummary: "off" as const,
+          onReasoningSummaryChange: () => "",
           modelConfig: { model: "test", thinkingEnabled: false, reasoningEffort: "high" },
           promptHistory: [],
           busy: false,

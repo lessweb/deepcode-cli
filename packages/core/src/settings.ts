@@ -88,7 +88,17 @@ export type ResolvedStatusLineSettings = {
   providers: StatusLineProviderConfig[];
 };
 
+export type ReasoningSummaryMode = "on" | "off";
+
+export type ExperimentalSettings = {
+  reasoningSummary?: ReasoningSummaryMode;
+  reasoningSummaryModel?: string;
+};
+
+export type ResolvedExperimentalSettings = Required<ExperimentalSettings>;
+
 export type DeepcodingSettings = {
+  experimental?: ExperimentalSettings;
   history?: HistorySettings;
   env?: DeepcodingEnv;
   contextWindow?: number | string;
@@ -118,6 +128,7 @@ export type DeepcodingSettings = {
 };
 
 export type ResolvedDeepcodingSettings = {
+  experimental: ResolvedExperimentalSettings;
   history: ResolvedHistorySettings;
   env: Record<string, string>;
   apiKey?: string;
@@ -191,6 +202,10 @@ function parseTokenWindow(value: unknown): number | undefined {
   const multiplier = match[2]?.toLowerCase() === "m" ? 1024 * 1024 : 1024;
   const tokens = amount * multiplier;
   return Number.isSafeInteger(tokens) && tokens > 0 ? tokens : undefined;
+}
+
+function resolveReasoningSummaryMode(value: unknown): ReasoningSummaryMode | undefined {
+  return value === "on" || value === "off" ? value : undefined;
 }
 
 function resolveReasoningEffort(value: unknown): ReasoningEffort | undefined {
@@ -864,6 +879,32 @@ export function resolveSettingsSources(
     ""
   );
 
+  const reasoningSummary = choose<ReasoningSummaryMode>(
+    "experimental.reasoningSummary",
+    [
+      [
+        "project.experimental.reasoningSummary",
+        resolveReasoningSummaryMode(projectSettings?.experimental?.reasoningSummary),
+      ],
+      ["user.experimental.reasoningSummary", resolveReasoningSummaryMode(userSettings?.experimental?.reasoningSummary)],
+    ],
+    "off"
+  );
+  const reasoningSummaryModel = choose(
+    "experimental.reasoningSummaryModel",
+    [
+      [
+        "project.experimental.reasoningSummaryModel",
+        trimString(projectSettings?.experimental?.reasoningSummaryModel) || undefined,
+      ],
+      [
+        "user.experimental.reasoningSummaryModel",
+        trimString(userSettings?.experimental?.reasoningSummaryModel) || undefined,
+      ],
+    ],
+    "deepseek-flash"
+  );
+
   const deepseekSearchApiEnabled = choose(
     "deepseekSearchApiEnabled",
     [
@@ -992,6 +1033,7 @@ export function resolveSettingsSources(
 
   return {
     env,
+    experimental: { reasoningSummary, reasoningSummaryModel },
     apiKey: trimString(env.API_KEY) || undefined,
     baseURL,
     model,
@@ -1123,6 +1165,9 @@ export function readEditableSettings(settingsPath: string): DeepcodingSettings {
   if (settings.env !== undefined && !isPlainObject(settings.env)) {
     throw new Error(`Invalid env in ${settingsPath}`);
   }
+  if (settings.experimental !== undefined && !isPlainObject(settings.experimental)) {
+    throw new Error(`Invalid experimental settings in ${settingsPath}`);
+  }
   return settings;
 }
 
@@ -1196,6 +1241,37 @@ export function writeModelConfigSelection(
   }
   if (projectChanged) writeProjectSettings(projectSettings!, projectRoot);
   return { ...result, changed: result.changed || projectChanged };
+}
+
+export function writeReasoningSummarySelection(
+  selection: ReasoningSummaryMode,
+  projectRoot: string = process.cwd(),
+  target: SettingsTarget = getDefaultSettingsTarget(projectRoot)
+): { changed: boolean; settings: DeepcodingSettings } {
+  const projectPath = getProjectSettingsPath(projectRoot);
+  const userPath = getUserSettingsPath();
+  const previous = readEditableSettings(target === "project" ? projectPath : userPath);
+  const settings: DeepcodingSettings = {
+    ...previous,
+    experimental: { ...previous.experimental, reasoningSummary: selection },
+  };
+  const changed = previous.experimental?.reasoningSummary !== selection;
+  let projectSettings: DeepcodingSettings | undefined;
+  let projectChanged = false;
+  if (target === "user" && path.resolve(projectPath) !== path.resolve(userPath)) {
+    const project = readEditableSettings(projectPath);
+    if (project.experimental?.reasoningSummary !== undefined) {
+      projectSettings = { ...project, experimental: { ...project.experimental } };
+      delete projectSettings.experimental!.reasoningSummary;
+      projectChanged = true;
+    }
+  }
+  if (changed) {
+    if (target === "project") writeProjectSettings(settings, projectRoot);
+    else writeSettings(settings);
+  }
+  if (projectChanged) writeProjectSettings(projectSettings!, projectRoot);
+  return { changed: changed || projectChanged, settings };
 }
 
 /** Explicit input files fail loudly; diagnostics must not include JSON contents. */

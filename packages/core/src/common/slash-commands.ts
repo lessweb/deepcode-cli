@@ -4,6 +4,7 @@ export type SlashCommandKind =
   | "skill"
   | "skills"
   | "model"
+  | "experimental"
   | "permissions"
   | "plan"
   | "new"
@@ -39,6 +40,12 @@ export const BUILTIN_SLASH_COMMANDS: SlashCommandItem[] = [
     name: "model",
     label: "/model",
     description: "Select model, thinking mode and effort control",
+  },
+  {
+    kind: "experimental",
+    name: "experimental",
+    label: "/experimental",
+    description: "Configure experimental features",
   },
   {
     kind: "permissions",

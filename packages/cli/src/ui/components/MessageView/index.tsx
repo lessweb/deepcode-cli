@@ -11,6 +11,7 @@ import {
   formatToolStatusParams,
   getToolDiffPreviewLines,
   getUpdatePlanPreviewLines,
+  getThinkingDisplayContent,
 } from "./utils";
 import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
@@ -46,7 +47,8 @@ export function MessageView({
     const content = (message.content || "").trim();
 
     if (isThinking) {
-      const summary = buildThinkingSummary(content, message.messageParams, mode);
+      const thinkingContent = getThinkingDisplayContent(message);
+      const summary = buildThinkingSummary(thinkingContent, message.messageParams, mode);
       if (collapsed !== false) {
         return (
           <Box marginLeft={1} marginBottom={1} marginY={0}>
@@ -56,9 +58,9 @@ export function MessageView({
       }
       return (
         <Box marginLeft={1} flexDirection="column" marginBottom={1} marginY={0}>
-          <StatusLine width={width} bulletColor="gray" name="Thinking" params={content ? "" : summary} />
+          <StatusLine width={width} bulletColor="gray" name="Thinking" params={thinkingContent ? "" : summary} />
           <Box flexDirection="column" marginLeft={2}>
-            {content ? <Text dimColor>{renderMarkdown(content)}</Text> : null}
+            {thinkingContent ? <Text dimColor>{renderMarkdown(thinkingContent)}</Text> : null}
           </Box>
         </Box>
       );

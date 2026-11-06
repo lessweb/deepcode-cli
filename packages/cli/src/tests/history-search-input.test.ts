@@ -38,6 +38,8 @@ async function harness(t: TestContext, busy = false) {
     projectRoot: root,
     screenWidth: 100,
     skills: [],
+    reasoningSummary: "off" as const,
+    onReasoningSummaryChange: () => "",
     modelConfig: { model: "test", thinkingEnabled: false, reasoningEffort: "high" as const },
     promptHistory: ["older needle", "newer NEEDLE", "newer NEEDLE"],
     busy,

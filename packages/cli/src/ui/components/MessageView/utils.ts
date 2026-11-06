@@ -35,6 +35,11 @@ export function firstNonEmptyLine(value: string): string {
   return "";
 }
 
+/** Prefer the assistant's own text, using the generated summary only for display. */
+export function getThinkingDisplayContent(message: SessionMessage): string {
+  return message.content?.trim() || message.meta?.reasoningSummary?.trim() || "";
+}
+
 /**
  * Builds a one-line summary of thinking / reasoning content.
  * Falls back to "(reasoning...)" when only reasoning_content params are present.
@@ -239,7 +244,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     const content = (message.content || "").trim();
 
     if (isThinking) {
-      const summary = buildThinkingSummary(content, message.messageParams, mode);
+      const summary = buildThinkingSummary(getThinkingDisplayContent(message), message.messageParams, mode);
       return `${chalk("✧")} ${chalk("Thinking")}${summary ? ` ${chalk(summary)}` : ""}`;
     }
 
