@@ -50,8 +50,9 @@ import {
   scanFileMentionItems,
 } from "../core/file-mentions";
 import type { FileMentionItem } from "../core/file-mentions";
-import { readClipboardImageAsync, writeClipboardTextAsync } from "../core/clipboard";
-import { getImagePasteShortcutLabel, isImagePasteShortcut } from "../../utils/image-paste-shortcut";
+import { readClipboardHtmlAsync, readClipboardImageAsync, writeClipboardTextAsync } from "../core/clipboard";
+import { htmlToMarkdown } from "../core/html-to-markdown";
+import { getClipboardPasteShortcutLabel, isClipboardPasteShortcut } from "../../utils/clipboard-paste-shortcut";
 import {
   useTerminalInput,
   usePasteHandling,
@@ -259,7 +260,7 @@ export const PromptInput = React.memo(function PromptInput({
     ? statusMessage
     : busy
       ? busyStatusText
-      : `enter send · shift+enter newline · @ files · ${getImagePasteShortcutLabel().toLowerCase()} image · / commands · ctrl+d exit${pasteHint}`;
+      : `enter send · shift+enter newline · @ files · ${getClipboardPasteShortcutLabel().toLowerCase()} image / rich text · / commands · ctrl+d exit${pasteHint}`;
   const showFooterText = useMemo(
     () =>
       showMenu ||
@@ -505,13 +506,20 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
 
-      if (isImagePasteShortcut(input, key)) {
+      if (isClipboardPasteShortcut(input, key)) {
         setStatusMessage("Reading clipboard...");
         readClipboardImageAsync()
-          .then((image) => {
+          .then(async (image) => {
             if (image) {
               setImageUrls((prev) => [...prev, image.dataUrl]);
               setStatusMessage("Attached image from clipboard");
+              return;
+            }
+            const html = await readClipboardHtmlAsync();
+            const markdown = html ? htmlToMarkdown(html) : "";
+            if (markdown.trim()) {
+              handlePaste(markdown);
+              setStatusMessage(null);
             } else {
               setStatusMessage("No image found in clipboard");
             }

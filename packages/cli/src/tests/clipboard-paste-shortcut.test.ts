@@ -3,7 +3,7 @@ import os from "node:os";
 import { test, type TestContext } from "node:test";
 import React from "react";
 import { renderToString } from "ink";
-import { getImagePasteShortcutLabel, isImagePasteShortcut } from "../utils/image-paste-shortcut";
+import { getClipboardPasteShortcutLabel, isClipboardPasteShortcut } from "../utils/clipboard-paste-shortcut";
 import { dispatchTerminalInput, parseTerminalInput } from "../ui/hooks/useTerminalInput";
 import { PromptInput } from "../ui/views/PromptInput";
 import { buildWelcomeTips } from "../ui/views/WelcomeScreen";
@@ -83,7 +83,7 @@ function mockEnvironment(t: TestContext, environment: (typeof environments)[numb
 for (const environment of environments) {
   const { name, platform, label, ctrl, alt } = environment;
 
-  test(`${name}: only the image paste shortcuts trigger image reading`, (t) => {
+  test(`${name}: only the clipboard paste shortcuts trigger clipboard reading`, (t) => {
     mockEnvironment(t, environment);
     for (const [raw, expected] of [
       ["\u001bv", alt],
@@ -96,25 +96,28 @@ for (const environment of environments) {
       ["pasted text", false],
     ] as const) {
       const events: boolean[] = [];
-      dispatchTerminalInput(raw, (input, key) => events.push(isImagePasteShortcut(input, key, platform)));
+      dispatchTerminalInput(raw, (input, key) => events.push(isClipboardPasteShortcut(input, key, platform)));
       assert.deepEqual(events, [expected], JSON.stringify(raw));
     }
 
     const shortcut = parseTerminalInput(platform === "win32" ? "\u001bv" : "\u0016");
-    assert.equal(isImagePasteShortcut(shortcut.input, { ...shortcut.key, paste: true }, platform), false);
-    assert.equal(isImagePasteShortcut("v", { ctrl: true, meta: true, paste: false }, platform), false);
-    assert.equal(getImagePasteShortcutLabel(platform), label);
+    assert.equal(isClipboardPasteShortcut(shortcut.input, { ...shortcut.key, paste: true }, platform), false);
+    assert.equal(isClipboardPasteShortcut("v", { ctrl: true, meta: true, paste: false }, platform), false);
+    assert.equal(getClipboardPasteShortcutLabel(platform), label);
   });
 
   test(`${name}: help, welcome tips and prompt footer show ${label}`, async (t) => {
     mockEnvironment(t, environment);
 
-    assert.equal(getImagePasteShortcutLabel(), label);
+    assert.equal(getClipboardPasteShortcutLabel(), label);
     const shortcut = parseTerminalInput(platform === "win32" ? "\u001bv" : "\u0016");
-    assert.equal(isImagePasteShortcut(shortcut.input, shortcut.key), true);
+    assert.equal(isClipboardPasteShortcut(shortcut.input, shortcut.key), true);
 
     const tips = buildWelcomeTips([]);
-    assert.equal(tips.find((tip) => tip.description === "Paste an image from the clipboard")?.label, label);
+    assert.equal(
+      tips.find((tip) => tip.description === "Paste an image or rich text from the clipboard")?.label,
+      label
+    );
 
     const footer = stripTerminalControls(
       renderToString(
@@ -139,9 +142,9 @@ for (const environment of environments) {
         { columns: 160 }
       )
     );
-    assert.ok(footer.includes(`${label.toLowerCase()} image`), footer);
-    if (!ctrl) assert.ok(!footer.includes("ctrl+v image"), footer);
-    if (!alt) assert.ok(!footer.includes("alt+v image"), footer);
+    assert.ok(footer.includes(`${label.toLowerCase()} image / rich text`), footer);
+    if (!ctrl) assert.ok(!footer.includes("ctrl+v image / rich text"), footer);
+    if (!alt) assert.ok(!footer.includes("alt+v image / rich text"), footer);
 
     // Reload the module so its static help text uses the simulated platform.
     const moduleUrl = new URL(`../cli-args.ts?image-paste-platform=${name}`, import.meta.url).href;
@@ -150,8 +153,8 @@ for (const environment of environments) {
     t.mock.method(console, "log", (...args: unknown[]) => output.push(args.join(" ")));
     await parseArguments(["--help"]);
     const help = output.join("\n");
-    assert.ok(help.includes(`${label.toLowerCase().padEnd(17)}Paste an image from the clipboard`), help);
-    if (!ctrl) assert.ok(!help.includes(`${"ctrl+v".padEnd(17)}Paste an image from the clipboard`), help);
-    if (!alt) assert.ok(!help.includes(`${"alt+v".padEnd(17)}Paste an image from the clipboard`), help);
+    assert.ok(help.includes(`${label.toLowerCase().padEnd(17)}Paste an image or rich text from the clipboard`), help);
+    if (!ctrl) assert.ok(!help.includes(`${"ctrl+v".padEnd(17)}Paste an image or rich text from the clipboard`), help);
+    if (!alt) assert.ok(!help.includes(`${"alt+v".padEnd(17)}Paste an image or rich text from the clipboard`), help);
   });
 }

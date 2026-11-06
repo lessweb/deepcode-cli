@@ -8,12 +8,12 @@ function isWsl(platform: NodeJS.Platform): boolean {
   );
 }
 
-export function getImagePasteShortcutLabel(platform: NodeJS.Platform = process.platform): string {
+export function getClipboardPasteShortcutLabel(platform: NodeJS.Platform = process.platform): string {
   if (platform === "win32") return "Alt+V";
   return isWsl(platform) ? "Ctrl+V / Alt+V" : "Ctrl+V";
 }
 
-export function isImagePasteShortcut(
+export function isClipboardPasteShortcut(
   input: string,
   key: Pick<InputKey, "ctrl" | "meta" | "paste">,
   platform: NodeJS.Platform = process.platform

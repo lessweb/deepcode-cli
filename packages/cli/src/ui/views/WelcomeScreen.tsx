@@ -7,7 +7,7 @@ import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../ascii-art";
 import { useAppContext } from "../contexts";
 import { formatHomeRelativePath } from "../core/display-path";
-import { getImagePasteShortcutLabel } from "../../utils/image-paste-shortcut";
+import { getClipboardPasteShortcutLabel } from "../../utils/clipboard-paste-shortcut";
 
 export { formatHomeRelativePath } from "../core/display-path";
 
@@ -24,7 +24,7 @@ const PANEL_CONTENT_HEIGHT = 8;
 const shortcutTips = () => [
   { label: "Enter", description: "Send the prompt" },
   { label: "Shift+Enter", description: "Insert a newline" },
-  { label: getImagePasteShortcutLabel(), description: "Paste an image from the clipboard" },
+  { label: getClipboardPasteShortcutLabel(), description: "Paste an image or rich text from the clipboard" },
   { label: "Ctrl+R", description: "Search prompt history" },
   { label: "Esc", description: "Interrupt the current model turn" },
   { label: "/", description: "Open the skills and commands menu" },
