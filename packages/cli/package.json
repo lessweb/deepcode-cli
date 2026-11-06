@@ -44,10 +44,13 @@
     "read-package-up": "^12.0.0",
     "sharp": "^0.35.5",
     "string-width": "^8.2.1",
+    "turndown": "^7.2.5",
+    "turndown-plugin-gfm": "^1.0.2",
     "wrap-ansi": "^10.0.0",
     "yargs": "^18.0.0"
   },
   "devDependencies": {
+    "@types/turndown": "^5.0.6",
     "@types/yargs": "^17.0.35"
   }
 }
