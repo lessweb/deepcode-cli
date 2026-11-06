@@ -228,6 +228,14 @@ test("MessageView echoes submitted user prompts with live prompt wrapping width"
   );
 });
 
+test("MessageView keeps prompt words together in user and model-change echoes", () => {
+  for (const role of ["user", "system"] as const) {
+    const message = makeSessionMessage({ role, content: "hello world", meta: { isModelChange: true } });
+    const output = renderToString(React.createElement(MessageView, { message, width: 13 }), { columns: 13 });
+    assert.equal(stripAnsi(output), " > hello\n   world\n");
+  }
+});
+
 test("MessageView echoes model changes with submitted prompt wrapping", () => {
   const msg = makeSessionMessage({
     role: "system",

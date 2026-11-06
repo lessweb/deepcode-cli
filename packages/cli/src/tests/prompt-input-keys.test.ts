@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import React from "react";
+import { Box, Text, renderToString } from "ink";
+import stringWidth from "string-width";
 
 const ANSI_RE = /\u001b\[[0-9;]*m/g;
 function stripAnsi(text: string): string {
@@ -489,4 +492,66 @@ test("dispatchTerminalInput preserves text coalesced after history search shortc
       ["s", true],
     ]
   );
+});
+
+test("prompt cursor follows the whole word after its source offset", () => {
+  for (const [cursor, row, column] of [
+    [0, 0, 0],
+    [5, 0, 5],
+    [6, 1, 0],
+    [8, 1, 2],
+    [11, 1, 5],
+  ]) {
+    assert.deepEqual(getPromptCursorPlacement({ text: "hello world", cursor }, 10), { row, column });
+    assert.equal(isPromptCursorAtWrapBoundary({ text: "hello world", cursor }, 10), row > 0);
+  }
+});
+
+test("prompt cursor cells agree with Ink word wrapping and inline ANSI styling", () => {
+  for (const [text, width] of [
+    ["", 10],
+    ["hello world", 10],
+    ["hi abcdefghijkl", 5],
+    ["hello world", 5],
+    ["hello\nworld\n", 5],
+    ["hello  world  ", 10],
+    ["你好世界", 5],
+    ["hi 你好 world", 10],
+    ["cafe\u0301 😀 👩‍💻 world", 10],
+    ["abc", 0],
+    ["hello [paste #1 1234 chars]", 10],
+    ["Please wrap this sentence before the following long word: " + "x".repeat(80), 118],
+  ] as const) {
+    const columns = Math.max(1, width);
+    for (let cursor = 0; cursor <= text.length; cursor++) {
+      const state = { text, cursor };
+      const rendered = renderToString(
+        React.createElement(
+          Box,
+          { width: columns },
+          React.createElement(
+            Text,
+            { wrap: "wrap" },
+            renderBufferWithCursor(state, true, undefined, new Map([[1, "paste"]]))
+          )
+        ),
+        { columns }
+      );
+      const marker = rendered.indexOf("\u001B[7m");
+      assert.ok(marker >= 0, JSON.stringify({ text, cursor, rendered }));
+      const before = stripAnsi(rendered.slice(0, marker)).split("\n");
+      assert.deepEqual(
+        getPromptCursorPlacement(state, width),
+        {
+          row: before.length - 1,
+          column: stringWidth(before.at(-1)!),
+        },
+        JSON.stringify({ text, cursor, rendered })
+      );
+      assert.equal((rendered.match(/\u001B\[7m/g) ?? []).length, 1, JSON.stringify({ text, cursor, rendered }));
+    }
+  }
+  assert.deepEqual(getPromptCursorPlacement({ text: "hello world", cursor: -1 }, 10), { row: 0, column: 0 });
+  assert.deepEqual(getPromptCursorPlacement({ text: "hello world", cursor: 99 }, 10), { row: 1, column: 5 });
+  assert.deepEqual(getPromptCursorPlacement({ text: "hello world", cursor: 8 }, 12, 2), { row: 1, column: 4 });
 });
