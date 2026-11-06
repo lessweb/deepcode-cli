@@ -34,6 +34,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `model`              | string    | 模型名称。优先级高于 `env.MODEL`                                    |
 | `thinkingEnabled`    | boolean   | 是否启用思考模式（DeepSeek V4 系列默认启用）                         |
 | `reasoningEffort`    | string    | 推理强度，可选 `"low"`、`"high"` 或 `"max"`（默认 `"max"`）        |
+| `experimental`       | object    | 实验功能配置，如思维链摘要（见下方说明）                            |
 | `multimodal`         | string    | 多模态（图片）能力开关，可选 `"default"`、`"on"` 或 `"off"`（默认 `"default"`） |
 | `filesApiEnabled`    | boolean   | 是否通过 DeepSeek Files API 发送图片（默认 `false`）                       |
 | `filesApiTimeoutMs`  | number    | 单张图片 Files API 处理超时，默认 `60000`，最大 `600000` 毫秒              |
@@ -114,6 +115,30 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `max`  | 最大推理深度（默认值）              |
 | `high` | 较高推理深度，token消耗相对较小      |
 | `low`  | 较低推理深度，token消耗更少          |
+
+#### `experimental` — 实验功能
+
+通过 `/experimental` 选择 **Reasoning summary**，再选择 `on` / `off`，即可启用或关闭思维链摘要。
+
+也可以直接编辑 `settings.json`，以下示例启用思维链摘要：
+
+```json
+{
+  "experimental": {
+    "reasoningSummary": "on",
+    "reasoningSummaryModel": "deepseek-flash"
+  }
+}
+```
+
+| 子字段 | 类型 | 默认值 | 说明 |
+| ------ | ---- | ------ | ---- |
+| `reasoningSummary` | string | `"off"` | 思维链摘要开关，可选 `"on"` 或 `"off"` |
+| `reasoningSummaryModel` | string | `"deepseek-flash"` | 用于生成摘要的模型，通过设置文件修改 |
+
+启用后，当模型仅返回至少 400 个字符的推理内容、没有正文，且当前会话标题非空时，会额外调用摘要模型，将推理压缩为一两句话。CLI 显示 thinking 消息时，正文为空则优先显示摘要。摘要仅用于显示，不会作为助手正文发送回模型。
+
+摘要请求始终关闭思考模式，不跟随主会话的思考设置。生成失败、超时或返回空文本时，会继续原有会话流程。
 
 #### `multimodal` — 多模态（图片）能力
 

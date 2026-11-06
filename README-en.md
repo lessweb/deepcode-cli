@@ -80,6 +80,7 @@ Skills are discovered from these locations, in priority order:
 | `/compact`       | Manually compact the current conversation context      |
 | `/copy`          | Copy the last assistant response's text to the clipboard |
 | `/model`         | Switch model, thinking mode, and reasoning effort       |
+| `/experimental`  | Configure experimental features, such as reasoning summaries |
 | `/permissions`   | Configure tool permissions                             |
 | `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)    |
 | `/init`          | Initialize an AGENTS.md file (LLM project instructions) |

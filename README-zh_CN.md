@@ -79,6 +79,7 @@ Skills 会按以下优先级扫描：
 | `/compact`  | 手动压缩当前对话上下文                       |
 | `/copy`     | 将最近一条助手回复的文本复制到剪贴板               |
 | `/model`    | 切换模型、思考模式和推理强度                   |
+| `/experimental` | 配置实验功能，如思维链摘要                  |
 | `/permissions` | 配置工具权限                          |
 | `/raw`      | 切换显示模式（Normal / Lite / Raw 滚动回溯） |
 | `/init`     | 初始化 AGENTS.md 文件                 |
