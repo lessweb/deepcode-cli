@@ -10,6 +10,7 @@ import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
+import { summarizeReasoning } from "./common/reasoning-summary";
 import { firstMessageTitlePrompt, recentConversationTitlePrompt, generateSessionTitle } from "./common/session-title";
 import { assertSessionIdAvailable, isValidSessionId } from "./common/session-id";
 import { readTextFileWithMetadata } from "./common/file-utils";
@@ -47,6 +48,7 @@ import {
   getDefaultAutoCompactWindow,
   getDefaultContextWindow,
   type McpServerConfig,
+  type ResolvedExperimentalSettings,
   type PermissionScope,
   type PermissionSettings,
 } from "./settings";
@@ -335,6 +337,8 @@ export type MessageMeta = {
   skillCatalog?: Array<{ name: string; description: string }>;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;
+  /** Display-only reasoning summary; never sent back as assistant content. */
+  reasoningSummary?: string;
 };
 
 export type SessionMessage = {
@@ -401,6 +405,7 @@ export type SessionManagerOptions = {
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
     history?: ResolvedHistorySettings;
+    experimental?: ResolvedExperimentalSettings;
   };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
@@ -453,6 +458,7 @@ export class SessionManager {
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
     history?: ResolvedHistorySettings;
+    experimental?: ResolvedExperimentalSettings;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
@@ -1842,7 +1848,19 @@ ${agentInstructions}
         if (this.isInterrupted(sessionId)) {
           return;
         }
+        const reasoningSummary = await summarizeReasoning(
+          this.createOpenAIClient,
+          this.getResolvedSettings().experimental,
+          content,
+          thinking,
+          this.getSession(sessionId)?.summary,
+          sessionController.signal
+        );
+        if (this.isInterrupted(sessionId)) return;
         const assistantMessage = this.buildAssistantMessage(sessionId, content, toolCalls, thinking);
+        if (reasoningSummary !== undefined) {
+          assistantMessage.meta = { ...assistantMessage.meta, reasoningSummary };
+        }
         const permissionPlan = toolCalls
           ? computeToolCallPermissions({
               sessionId,

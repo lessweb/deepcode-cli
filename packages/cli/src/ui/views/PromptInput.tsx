@@ -71,10 +71,12 @@ import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import {
   readPermissionSettingsEdit,
   type ModelConfigSelection,
+  type ReasoningSummaryMode,
   type SettingsTarget,
   type PermissionSettingsEdit,
   type PermissionSettingsChanges,
 } from "@vegamo/deepcode-core";
+import ExperimentalDropdown from "../components/ExperimentalDropdown";
 import PermissionsDropdown from "../components/PermissionsDropdown";
 import { FileMentionMenu, ModelsDropdown, RawModelDropdown, SkillsDropdown } from "../components";
 import { RawMode } from "../contexts";
@@ -101,6 +103,7 @@ type Props = {
   projectRoot: string;
   skills: SkillInfo[];
   modelConfig: ModelConfigSelection;
+  reasoningSummary: ReasoningSummaryMode;
   screenWidth: number;
   promptHistory: string[];
   busy: boolean;
@@ -114,6 +117,7 @@ type Props = {
   planMode: boolean;
   onSubmit: (submission: PromptSubmission) => void | Promise<string | void>;
   onPromptDraftApplied: (nonce: number) => void;
+  onReasoningSummaryChange: (selection: ReasoningSummaryMode, target: SettingsTarget) => string | Promise<string>;
   onModelConfigChange: (selection: ModelConfigSelection, target: SettingsTarget) => string | Promise<string>;
   onPermissionSettingsChange: (
     target: PermissionSettingsEdit["target"],
@@ -140,6 +144,7 @@ export const PromptInput = React.memo(function PromptInput({
   projectRoot,
   skills,
   modelConfig,
+  reasoningSummary,
   screenWidth,
   promptHistory,
   busy,
@@ -154,6 +159,7 @@ export const PromptInput = React.memo(function PromptInput({
   onSubmit,
   onPromptDraftApplied,
   onModelConfigChange,
+  onReasoningSummaryChange,
   onPermissionSettingsChange,
   onInterrupt,
   onToggleProcessStdout,
@@ -176,6 +182,7 @@ export const PromptInput = React.memo(function PromptInput({
   const [menuIndex, setMenuIndex] = useState(0);
   const [showSkillsDropdown, setShowSkillsDropdown] = useState(false);
   const [openRawModelDropdown, setOpenRawModelDropdown] = useState(false);
+  const [showExperimentalDropdown, setShowExperimentalDropdown] = useState(false);
   const [showModelDropdown, setShowModelDropdown] = useState(false);
   const [permissionEdit, setPermissionEdit] = useState<PermissionSettingsEdit | null>(null);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
@@ -208,6 +215,7 @@ export const PromptInput = React.memo(function PromptInput({
     !search &&
     !showSkillsDropdown &&
     !showModelDropdown &&
+    !showExperimentalDropdown &&
     !permissionEdit &&
     !openRawModelDropdown &&
     fileMentionToken !== null &&
@@ -216,7 +224,13 @@ export const PromptInput = React.memo(function PromptInput({
   const slashToken = getCurrentSlashToken(buffer);
   const slashMenu = React.useMemo(
     () =>
-      search || showSkillsDropdown || showModelDropdown || permissionEdit || openRawModelDropdown || showFileMentionMenu
+      search ||
+      showSkillsDropdown ||
+      showModelDropdown ||
+      showExperimentalDropdown ||
+      permissionEdit ||
+      openRawModelDropdown ||
+      showFileMentionMenu
         ? []
         : slashToken
           ? filterSlashCommands(slashItems, slashToken)
@@ -225,6 +239,7 @@ export const PromptInput = React.memo(function PromptInput({
       search,
       showSkillsDropdown,
       showModelDropdown,
+      showExperimentalDropdown,
       permissionEdit,
       openRawModelDropdown,
       showFileMentionMenu,
@@ -251,9 +266,18 @@ export const PromptInput = React.memo(function PromptInput({
       showSkillsDropdown ||
       openRawModelDropdown ||
       showModelDropdown ||
+      showExperimentalDropdown ||
       Boolean(permissionEdit) ||
       showFileMentionMenu,
-    [showMenu, showSkillsDropdown, showModelDropdown, permissionEdit, openRawModelDropdown, showFileMentionMenu]
+    [
+      showMenu,
+      showSkillsDropdown,
+      showModelDropdown,
+      showExperimentalDropdown,
+      permissionEdit,
+      openRawModelDropdown,
+      showFileMentionMenu,
+    ]
   );
   const inputContentWidth = Math.max(1, screenWidth - PROMPT_PREFIX_WIDTH);
 
@@ -384,7 +408,7 @@ export const PromptInput = React.memo(function PromptInput({
       // Wait for the new draft to render before normal submission sees those keys.
       if (search) return;
 
-      if (permissionEdit) {
+      if (permissionEdit || showExperimentalDropdown) {
         return;
       }
 
@@ -760,6 +784,12 @@ export const PromptInput = React.memo(function PromptInput({
       setShowSkillsDropdown(true);
       return;
     }
+    if (item.kind === "experimental") {
+      clearSlashToken();
+      setShowSkillsDropdown(false);
+      setShowExperimentalDropdown(true);
+      return;
+    }
     if (item.kind === "model") {
       clearSlashToken();
       setShowSkillsDropdown(false);
@@ -982,6 +1012,15 @@ export const PromptInput = React.memo(function PromptInput({
           onStatusMessage={setStatusMessage}
         />
       ) : null}
+      <ExperimentalDropdown
+        projectRoot={projectRoot}
+        open={showExperimentalDropdown}
+        reasoningSummary={reasoningSummary}
+        width={screenWidth}
+        onClose={() => setShowExperimentalDropdown(false)}
+        onSave={onReasoningSummaryChange}
+        onStatusMessage={setStatusMessage}
+      />
       <ModelsDropdown
         projectRoot={projectRoot}
         open={showModelDropdown}

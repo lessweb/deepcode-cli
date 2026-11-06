@@ -401,6 +401,8 @@ test("slash command opens the editor, persists settings, and isolates menu keys 
     React.createElement(PromptInput, {
       projectRoot,
       skills: [],
+      reasoningSummary: "off" as const,
+      onReasoningSummaryChange: () => "",
       modelConfig: { model: "test", thinkingEnabled: false, reasoningEffort: "high" },
       screenWidth: 80,
       promptHistory: [],

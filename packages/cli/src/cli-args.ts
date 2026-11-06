@@ -68,6 +68,7 @@ const EPILOG = [
   "  /                Open the skills/commands menu",
   "  /skills          List available skills",
   "  /model           Select model, thinking mode and effort control",
+  "  /experimental    Configure experimental features",
   "  /plan            Switch the input to Plan Mode",
   "  /new             Start a fresh conversation",
   "  /init            Initialize an AGENTS.md file with instructions for LLM",

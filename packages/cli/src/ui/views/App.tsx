@@ -4,7 +4,7 @@ import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
 import { createOpenAIClientFactory } from "@vegamo/deepcode-core";
 import type { PermissionSettingsEdit, PermissionSettingsChanges } from "@vegamo/deepcode-core";
-import { type ModelConfigSelection, type SettingsTarget } from "@vegamo/deepcode-core";
+import { type ReasoningSummaryMode, type ModelConfigSelection, type SettingsTarget } from "@vegamo/deepcode-core";
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
@@ -45,6 +45,7 @@ import {
 import {
   resolveCurrentSettings,
   writeModelConfigSelection,
+  writeReasoningSummarySelection,
   writePermissionSettingsChanges,
 } from "@vegamo/deepcode-core";
 import { useStatusLine } from "../hooks";
@@ -613,6 +614,17 @@ function App({
       return changed
         ? `Permissions saved (${target === "project" ? "This Project" : "All Projects"})`
         : "Permissions unchanged";
+    },
+    [projectRoot, settingsFile]
+  );
+
+  const handleReasoningSummaryChange = useCallback(
+    (selection: ReasoningSummaryMode, target: SettingsTarget): string => {
+      const { changed } = writeReasoningSummarySelection(selection, projectRoot, target);
+      setResolvedSettings(resolveCurrentSettings(projectRoot, settingsFile));
+      return changed
+        ? `Experimental settings saved (${target === "project" ? "This Project" : "All Projects"})`
+        : "Experimental settings unchanged";
     },
     [projectRoot, settingsFile]
   );
@@ -1224,6 +1236,7 @@ function App({
           screenWidth={screenWidth}
           skills={skills}
           modelConfig={resolvedSettings}
+          reasoningSummary={resolvedSettings.experimental.reasoningSummary}
           promptHistory={promptHistory}
           busy={busy}
           cursorLayoutKey={promptCursorLayoutKey}
@@ -1232,6 +1245,7 @@ function App({
           onPromptDraftApplied={handlePromptDraftApplied}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
+          onReasoningSummaryChange={handleReasoningSummaryChange}
           onPermissionSettingsChange={handlePermissionSettingsChange}
           onRawModeChange={handleRawModeChange}
           onInterrupt={handleInterrupt}

@@ -177,6 +177,7 @@ export function inspectSettings(options: {
       "enabledSkills",
       "statusline",
       "history",
+      "experimental",
     ]);
     for (const key of Object.keys(file.value))
       if (!knownFields.has(key))
@@ -185,6 +186,28 @@ export function inspectSettings(options: {
           name: "Unknown configuration field",
           detail: `${file.path}: ${key} is not a recognized top-level setting and is ignored.`,
         });
+    if (isObject(file.value.experimental)) {
+      const experimental = file.value.experimental;
+      if (
+        experimental.reasoningSummary !== undefined &&
+        experimental.reasoningSummary !== "on" &&
+        experimental.reasoningSummary !== "off"
+      )
+        checks.push({
+          status: "WARN",
+          name: "Experimental configuration",
+          detail: `${file.path}: experimental.reasoningSummary must be "on" or "off".`,
+        });
+      if (
+        experimental.reasoningSummaryModel !== undefined &&
+        (typeof experimental.reasoningSummaryModel !== "string" || !experimental.reasoningSummaryModel.trim())
+      )
+        checks.push({
+          status: "WARN",
+          name: "Experimental configuration",
+          detail: `${file.path}: experimental.reasoningSummaryModel must be a non-empty string.`,
+        });
+    }
     if (isObject(file.value.mcpServers))
       for (const [name, server] of Object.entries(file.value.mcpServers)) {
         if (
@@ -200,7 +223,7 @@ export function inspectSettings(options: {
             detail: `${file.path}: mcpServers.${name} has an invalid command, args, or env. Check its field types.`,
           });
       }
-    for (const key of ["permissions", "enabledSkills", "mcpServers", "statusline"]) {
+    for (const key of ["permissions", "enabledSkills", "mcpServers", "statusline", "experimental"]) {
       if (file.value[key] !== undefined && !isObject(file.value[key]))
         checks.push({
           status: "WARN",
