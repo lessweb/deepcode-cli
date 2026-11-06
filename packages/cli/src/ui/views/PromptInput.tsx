@@ -131,6 +131,7 @@ type Props = {
 };
 
 const PROMPT_PREFIX_WIDTH = 2;
+const promptGraphemes = new Intl.Segmenter();
 
 const PromptPrefixLine = React.memo(function PromptPrefixLine(): React.ReactElement {
   return (
@@ -973,7 +974,7 @@ export const PromptInput = React.memo(function PromptInput({
       >
         <PromptPrefixLine />
         <Box ref={inputTextRef} flexGrow={1} flexShrink={1} width={inputContentWidth}>
-          <Text wrap="hard">
+          <Text wrap="wrap">
             {search?.preview !== null && search?.preview !== undefined ? (
               <HistoryPreview text={search.preview} query={search.query} />
             ) : (
@@ -1285,7 +1286,7 @@ function renderTextSegmentWithCursor(
   const cursorRel = cursor - start; // relative cursor position inside this segment
 
   // Cursor not in this segment – just return the text.
-  if (cursorRel < 0 || cursorRel > segText.length) {
+  if (cursorRel < 0 || cursorRel > segText.length || (cursorRel === segText.length && end < text.length)) {
     return highlighted ? chalk.yellow(segText) : segText;
   }
 
@@ -1295,17 +1296,19 @@ function renderTextSegmentWithCursor(
   }
 
   // Cursor is somewhere inside the segment.
-  const at = segText[cursorRel];
+  const grapheme = promptGraphemes.segment(segText).containing(cursorRel)!;
+  const at = grapheme.segment;
+  const cellStart = grapheme.index;
 
   if (at === "\n") {
     // Render newline as a space in the cursor cell, then output the actual newline.
-    const before = segText.slice(0, cursorRel);
-    const after = segText.slice(cursorRel + 1);
+    const before = segText.slice(0, cellStart);
+    const after = segText.slice(cellStart + at.length);
     return before + renderCursorCell(" ") + "\n" + after;
   }
 
-  const before = segText.slice(0, cursorRel);
-  const after = segText.slice(cursorRel + 1);
+  const before = segText.slice(0, cellStart);
+  const after = segText.slice(cellStart + at.length);
   if (highlighted) {
     return chalk.yellow(before) + renderCursorCell(at) + chalk.yellow(after);
   }

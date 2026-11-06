@@ -172,7 +172,7 @@ function PromptEchoLine({
         <Text color="#229ac3">{"> "}</Text>
       </Box>
       <Box flexGrow={1} flexShrink={1} width={contentWidth}>
-        <Text color="#229ac3" wrap="hard">
+        <Text color="#229ac3" wrap="wrap">
           {text}
         </Text>
         {attachmentCount > 0 ? <Text color="#229ac3">{`  📎 ${attachmentCount} image attachment(s)`}</Text> : null}
