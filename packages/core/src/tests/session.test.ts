@@ -1815,13 +1815,14 @@ test(
       notifyOutput
     );
 
-    await manager.createSession({ text: "notify success" });
+    const sessionId = await manager.createSession({ text: "notify success" });
 
     const records = await waitForNotifyRecords(notifyOutput, 1);
     assert.equal(records[0]?.STATUS, "completed");
     assert.equal(records[0]?.FAIL_REASON, null);
     assert.equal(records[0]?.BODY, "final answer");
     assert.equal(records[0]?.TITLE, "notify success");
+    assert.equal(records[0]?.SESSION_ID, sessionId);
     assert.match(String(records[0]?.DURATION), /^\d+$/);
   }
 );
@@ -1852,6 +1853,8 @@ test(
 
     const records = await waitForNotifyRecords(notifyOutput, 2);
     const failedRecord = records[1];
+    assert.equal(records[0]?.SESSION_ID, sessionId);
+    assert.equal(failedRecord?.SESSION_ID, sessionId);
     assert.equal(failedRecord?.STATUS, "failed");
     assert.equal(failedRecord?.FAIL_REASON, "second request failed");
     assert.equal(failedRecord?.BODY, "first answer");
@@ -5071,6 +5074,7 @@ function createNotifyingSessionManager(
       notify: notifyPath,
       env: {
         NOTIFY_OUTPUT: notifyOutput,
+        SESSION_ID: "stale-session-id",
         STATUS: "stale-status",
         FAIL_REASON: "stale-failure",
         BODY: "stale-body",
@@ -5244,7 +5248,7 @@ function createNotifyRecorderScript(dir: string): string {
     scriptPath,
     `#!/usr/bin/env node
 const fs = require("fs");
-const keys = ["DURATION", "STATUS", "FAIL_REASON", "BODY", "TITLE"];
+const keys = ["DURATION", "STATUS", "FAIL_REASON", "BODY", "TITLE", "SESSION_ID"];
 const record = {};
 for (const key of keys) {
   record[key] = Object.prototype.hasOwnProperty.call(process.env, key) ? process.env[key] : null;

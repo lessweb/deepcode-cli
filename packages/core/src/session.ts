@@ -3726,6 +3726,7 @@ ${agentInstructions}
     }
 
     launchNotifyScript(notifyCommand, Date.now() - startedAt, this.projectRoot, undefined, configuredEnv, {
+      sessionId,
       status: session.status,
       failReason: session.failReason ?? undefined,
       body,

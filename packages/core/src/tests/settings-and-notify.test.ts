@@ -776,22 +776,25 @@ test("buildNotifyEnv injects DURATION without context", () => {
   assert.equal(env.FAIL_REASON, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
+  assert.equal(env.SESSION_ID, undefined);
 });
 
-test("buildNotifyEnv injects STATUS, FAIL_REASON, BODY, and TITLE from context", () => {
+test("buildNotifyEnv injects STATUS, FAIL_REASON, BODY, TITLE, and SESSION_ID from context", () => {
   const context: NotifyContext = {
+    sessionId: "session-123",
     status: "failed",
     failReason: "API key not found",
     body: "Hello, this is the last assistant message.",
     title: "Fix login bug",
   };
-  const env = buildNotifyEnv(5000, { HOME: "/tmp/home" }, context);
+  const env = buildNotifyEnv(5000, { HOME: "/tmp/home", SESSION_ID: "stale-session-id" }, context);
   assert.equal(env.HOME, "/tmp/home");
   assert.equal(env.DURATION, "5");
   assert.equal(env.STATUS, "failed");
   assert.equal(env.FAIL_REASON, "API key not found");
   assert.equal(env.BODY, "Hello, this is the last assistant message.");
   assert.equal(env.TITLE, "Fix login bug");
+  assert.equal(env.SESSION_ID, "session-123");
 });
 
 test("buildNotifyEnv omits optional context fields when not provided", () => {
@@ -803,6 +806,7 @@ test("buildNotifyEnv omits optional context fields when not provided", () => {
       FAIL_REASON: "stale-failure",
       BODY: "stale-body",
       TITLE: "stale-title",
+      SESSION_ID: "stale-session-id",
     },
     { status: "completed" }
   );
@@ -810,23 +814,26 @@ test("buildNotifyEnv omits optional context fields when not provided", () => {
   assert.equal(env.FAIL_REASON, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
+  assert.equal(env.SESSION_ID, undefined);
 });
 
 test("buildNotifyEnv ignores empty strings in context", () => {
   const env = buildNotifyEnv(
     1000,
-    { HOME: "/tmp/home" },
+    { HOME: "/tmp/home", SESSION_ID: "stale-session-id" },
     {
       status: "",
       failReason: "",
       body: "",
       title: "",
+      sessionId: "",
     }
   );
   assert.equal(env.STATUS, undefined);
   assert.equal(env.FAIL_REASON, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
+  assert.equal(env.SESSION_ID, undefined);
 });
 
 test("buildNotifyEnv preserves special characters in body and title", () => {
@@ -867,6 +874,7 @@ test(
 
     const context: NotifyContext = {
       status: "completed",
+      sessionId: "session-123",
       body: "Task finished successfully.",
       title: "Fix login bug",
     };
@@ -883,6 +891,7 @@ test(
     assert.equal(calls[0]?.options.env?.FAIL_REASON, undefined);
     assert.equal(calls[0]?.options.env?.BODY, "Task finished successfully.");
     assert.equal(calls[0]?.options.env?.TITLE, "Fix login bug");
+    assert.equal(calls[0]?.options.env?.SESSION_ID, "session-123");
     assert.equal(calls[1]?.command, "/bin/sh");
     assert.deepEqual(calls[1]?.args, ["/tmp/notify.sh"]);
     assert.equal(calls[1]?.options.cwd, "/tmp/project");
@@ -890,6 +899,7 @@ test(
     assert.equal(calls[1]?.options.env?.STATUS, "completed");
     assert.equal(calls[1]?.options.env?.BODY, "Task finished successfully.");
     assert.equal(calls[1]?.options.env?.TITLE, "Fix login bug");
+    assert.equal(calls[1]?.options.env?.SESSION_ID, "session-123");
   }
 );
 

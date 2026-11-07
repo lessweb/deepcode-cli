@@ -34,7 +34,7 @@ The following are all the top-level fields supported in `settings.json`, along w
 | `model`                    | string        | Model name. Defaults to `deepseek-v4-flash` and takes precedence over `env.MODEL`                                    |
 | `thinkingEnabled`          | boolean       | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)                                          |
 | `reasoningEffort`          | string        | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)                                                 |
-| `experimental` | object | Experimental features, such as reasoning summaries (see below) |
+| `experimental`             | object        | Experimental features, such as reasoning summaries (see below)                                                       |
 | `filesApiEnabled`          | boolean       | Send images through the DeepSeek Files API (default `false`)                                                         |
 | `filesApiTimeoutMs`        | number        | Per-image Files API timeout; defaults to `60000`, maximum `600000` ms                                                |
 | `fileExpiresAfterSeconds`  | number        | Remote file lifetime, default `604800` seconds                                                                       |
@@ -128,9 +128,9 @@ You can also edit `settings.json` directly. This example enables reasoning summa
 }
 ```
 
-| Sub-field | Type | Default | Description |
-| --------- | ---- | ------- | ----------- |
-| `reasoningSummary` | string | `"off"` | Enable or disable reasoning summaries with `"on"` or `"off"` |
+| Sub-field               | Type   | Default            | Description                                                       |
+| ----------------------- | ------ | ------------------ | ----------------------------------------------------------------- |
+| `reasoningSummary`      | string | `"off"`            | Enable or disable reasoning summaries with `"on"` or `"off"`      |
 | `reasoningSummaryModel` | string | `"deepseek-flash"` | Model used to generate summaries; configured in the settings file |
 
 When enabled, if the model returns at least 400 characters of reasoning with no response body and the current session title is non-empty, an additional model request condenses the reasoning into one or two sentences. When displaying thinking messages, the CLI prefers the summary if the response body is empty. Summaries are only used for display and are not sent back to the model as assistant response text.
@@ -167,6 +167,7 @@ The following context is injected as environment variables when the notify scrip
 | `FAIL_REASON` | Failure reason (only set on failure)                                                                                                             |
 | `BODY`        | The text content of the last AI assistant reply                                                                                                  |
 | `TITLE`       | Session title (matches the resume list title)                                                                                                    |
+| `SESSION_ID` | ID of the session that triggered the notification |
 
 ```json
 {

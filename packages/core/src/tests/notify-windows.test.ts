@@ -38,7 +38,7 @@ test("Windows shell notifications pass the script as one Git Bash argument and p
       "C:\\project",
       capture.spawn,
       { NOTIFY_CUSTOM: "value" },
-      { status: "failed", failReason: "error", body: "a\nb", title: "test" },
+      { status: "failed", failReason: "error", body: "a\nb", title: "test", sessionId: "session-123" },
       runtime
     );
     assert.equal(capture.calls.length, 1);
@@ -55,6 +55,7 @@ test("Windows shell notifications pass the script as one Git Bash argument and p
     assert.equal(options.env?.FAIL_REASON, "error");
     assert.equal(options.env?.BODY, "a\nb");
     assert.equal(options.env?.TITLE, "test");
+    assert.equal(options.env?.SESSION_ID, "session-123");
     assert.equal(capture.unrefs(), 1);
   }
 });

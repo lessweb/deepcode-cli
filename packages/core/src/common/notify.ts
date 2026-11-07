@@ -18,6 +18,7 @@ export function formatDurationSeconds(durationMs: number): string {
 }
 
 export type NotifyContext = {
+  sessionId?: string;
   status?: string;
   failReason?: string;
   body?: string;
@@ -37,7 +38,11 @@ export function buildNotifyEnv(
   delete env.FAIL_REASON;
   delete env.BODY;
   delete env.TITLE;
+  delete env.SESSION_ID;
 
+  if (context.sessionId) {
+    env.SESSION_ID = context.sessionId;
+  }
   if (context.status) {
     env.STATUS = context.status;
   }

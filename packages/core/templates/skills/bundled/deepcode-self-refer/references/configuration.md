@@ -34,7 +34,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `model`                    | string        | 模型名称。默认 `deepseek-v4-flash`，优先级高于 `env.MODEL`                            |
 | `thinkingEnabled`          | boolean       | 是否启用思考模式（DeepSeek V4 系列默认启用）                                          |
 | `reasoningEffort`          | string        | 推理强度，可选 `"low"`、`"high"` 或 `"max"`（默认 `"max"`）                           |
-| `experimental`       | object    | 实验功能配置，如思维链摘要（见下方说明）                            |
+| `experimental`             | object        | 实验功能配置，如思维链摘要（见下方说明）                                              |
 | `filesApiEnabled`          | boolean       | 是否通过 DeepSeek Files API 发送图片（默认 `false`）                                  |
 | `filesApiTimeoutMs`        | number        | 单张图片 Files API 处理超时，默认 `60000`，最大 `600000` 毫秒                         |
 | `fileExpiresAfterSeconds`  | number        | 远端文件有效期，默认 `604800` 秒                                                      |
@@ -130,10 +130,10 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 }
 ```
 
-| 子字段 | 类型 | 默认值 | 说明 |
-| ------ | ---- | ------ | ---- |
-| `reasoningSummary` | string | `"off"` | 思维链摘要开关，可选 `"on"` 或 `"off"` |
-| `reasoningSummaryModel` | string | `"deepseek-flash"` | 用于生成摘要的模型，通过设置文件修改 |
+| 子字段                  | 类型   | 默认值             | 说明                                   |
+| ----------------------- | ------ | ------------------ | -------------------------------------- |
+| `reasoningSummary`      | string | `"off"`            | 思维链摘要开关，可选 `"on"` 或 `"off"` |
+| `reasoningSummaryModel` | string | `"deepseek-flash"` | 用于生成摘要的模型，通过设置文件修改   |
 
 启用后，当模型仅返回至少 400 个字符的推理内容、没有正文，且当前会话标题非空时，会额外调用摘要模型，将推理压缩为一两句话。CLI 显示 thinking 消息时，正文为空则优先显示摘要。摘要仅用于显示，不会作为助手正文发送回模型。
 
@@ -169,6 +169,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `FAIL_REASON` | 失败原因（仅失败时设置）                                                                                                   |
 | `BODY`        | 最后一条 AI 助手回复的文本内容                                                                                             |
 | `TITLE`       | 会话标题（对应 resume 列表中的标题）                                                                                       |
+| `SESSION_ID` | 触发本次通知的会话 ID |
 
 ```json
 {
