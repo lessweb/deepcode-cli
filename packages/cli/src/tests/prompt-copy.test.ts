@@ -13,8 +13,10 @@ import { render } from "ink";
 import { PromptInput, type PromptDraft, type PromptSubmission } from "../ui/views/PromptInput";
 import { parseTerminalInput } from "../ui/hooks";
 import { stripTerminalControls } from "./terminal-output";
+import { isolateSshEnvironment, mockClipboardTerminal } from "./clipboard-test-helpers";
 
 async function harness(t: TestContext, busy = false) {
+  isolateSshEnvironment(t);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-copy-input-"));
   const frames: string[] = [];
   const output = Object.assign(
@@ -214,4 +216,15 @@ test("copy failure shows a short status and preserves the draft", async (t) => {
   assert.match(h.latest(), /Failed to copy/);
   await h.send("\r");
   assert.equal(h.submissions[0].text, "keep me");
+});
+
+test("Ctrl+Y copies input through OSC 52 over SSH", async (t) => {
+  const h = await harness(t);
+  const { writes } = mockClipboardTerminal(t);
+  process.env.SSH_TTY = "/dev/pts/0";
+  await h.send("中文 hello");
+  await h.send("\x19");
+  assert.deepEqual(writes, [`\x1b]52;c;${Buffer.from("中文 hello").toString("base64")}\x07`]);
+  assert.equal(h.copies.length, 0);
+  assert.match(h.latest(), /Copied to clipboard/);
 });

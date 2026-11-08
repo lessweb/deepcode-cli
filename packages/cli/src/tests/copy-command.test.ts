@@ -13,6 +13,7 @@ import { render } from "ink";
 import { SessionManager, type SessionEntry, type SessionMessage } from "@vegamo/deepcode-core";
 import App from "../ui/views/App";
 import { stripTerminalControls } from "./terminal-output";
+import { isolateSshEnvironment, mockClipboardTerminal } from "./clipboard-test-helpers";
 
 function message(overrides: Partial<SessionMessage> = {}): SessionMessage {
   return {
@@ -35,6 +36,7 @@ async function harness(
   history: SessionMessage[],
   { active = true, outcome = "success" }: { active?: boolean; outcome?: "success" | "failure" | "throw" } = {}
 ) {
+  isolateSshEnvironment(t);
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-copy-command-"));
   const originalEnv = process.env;
   const platform = Object.getOwnPropertyDescriptor(process, "platform")!;
@@ -104,7 +106,6 @@ async function harness(
     app.cleanup();
     t.mock.restoreAll();
     syncBuiltinESMExports();
-    process.env = originalEnv;
     Object.defineProperty(process, "platform", platform);
     fs.rmSync(root, { recursive: true, force: true });
   });
@@ -196,5 +197,16 @@ test("/copy can be selected from completion and ignores trailing arguments", asy
   await h.submit("/cop");
   await h.submit("/copy extra text");
   assert.deepEqual(h.copies, [{ text: "Earlier reply" }, { text: "Earlier reply" }]);
+  assert.match(h.latest(), /Copied to clipboard/);
+});
+
+test("/copy copies the assistant reply through OSC 52 over SSH", async (t) => {
+  const text = "  中文 😀\nassistant reply\n";
+  const h = await harness(t, [message({ content: text })]);
+  const { writes } = mockClipboardTerminal(t);
+  process.env.SSH_CONNECTION = "ssh-test";
+  await h.submit();
+  assert.deepEqual(writes, [`\x1b]52;c;${Buffer.from(text).toString("base64")}\x07`]);
+  assert.equal(h.copies.length, 0);
   assert.match(h.latest(), /Copied to clipboard/);
 });

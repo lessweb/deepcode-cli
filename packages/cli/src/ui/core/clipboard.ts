@@ -31,8 +31,33 @@ function writeClipboardCommand(command: string, args: string[], text: string): P
   });
 }
 
+function writeClipboardOsc52(text: string): Promise<boolean> {
+  const output = process.stdout;
+  if (!output.isTTY) return Promise.resolve(false);
+  const sequence = `\x1b]52;c;${Buffer.from(text, "utf8").toString("base64")}\x07`;
+  return new Promise((resolve) => {
+    const onError = () => finish(false);
+    function finish(success: boolean): void {
+      // A failed write may emit an error after invoking its callback.
+      setImmediate(() => output.removeListener("error", onError));
+      resolve(success);
+    }
+    output.once("error", onError);
+    try {
+      // The callback also waits for writes accepted under backpressure.
+      output.write(sequence, (error) => finish(!error));
+    } catch {
+      finish(false);
+    }
+  });
+}
+
 export async function writeClipboardTextAsync(text: string): Promise<boolean> {
   if (text.length === 0) return false;
+
+  if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) {
+    return writeClipboardOsc52(text);
+  }
 
   if (process.platform === "darwin") {
     return writeClipboardCommand("pbcopy", [], text);

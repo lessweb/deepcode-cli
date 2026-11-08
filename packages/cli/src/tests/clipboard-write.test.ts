@@ -5,10 +5,12 @@ import { syncBuiltinESMExports } from "node:module";
 import { PassThrough } from "node:stream";
 import { test, type TestContext } from "node:test";
 import { writeClipboardTextAsync } from "../ui/core/clipboard";
+import { isolateSshEnvironment, mockClipboardTerminal } from "./clipboard-test-helpers";
 
 type Outcome = "success" | "failure" | "missing" | "pipe-error" | "timeout" | "throw";
 
 function mockWriter(t: TestContext, platform: NodeJS.Platform, outcomes: Outcome[] = ["success"]) {
+  isolateSshEnvironment(t);
   const descriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
   Object.defineProperty(process, "platform", { value: platform });
   const calls: { command: string; args: string[]; text: string; killed: boolean }[] = [];
@@ -110,3 +112,59 @@ test("unsupported platforms report failure without spawning", async (t) => {
   assert.equal(await writeClipboardTextAsync(TEXT), false);
   assert.equal(calls.length, 0);
 });
+
+for (const variable of ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"]) {
+  test(`${variable}: sends exact UTF-8 text via OSC 52 without a helper`, async (t) => {
+    const calls = mockWriter(t, "darwin");
+    const { writes } = mockClipboardTerminal(t);
+    process.env[variable] = "ssh-test";
+    assert.equal(await writeClipboardTextAsync(TEXT), true);
+    assert.deepEqual(writes, [`\x1b]52;c;${Buffer.from(TEXT).toString("base64")}\x07`]);
+    assert.equal(calls.length, 0);
+  });
+}
+
+test("SSH does not copy empty input or write to redirected stdout", async (t) => {
+  const calls = mockWriter(t, "linux");
+  const { output, writes } = mockClipboardTerminal(t, false);
+  process.env.SSH_TTY = "/dev/pts/0";
+  assert.equal(await writeClipboardTextAsync(TEXT), false);
+  output.isTTY = true;
+  assert.equal(await writeClipboardTextAsync(""), false);
+  assert.deepEqual(writes, []);
+  assert.equal(calls.length, 0);
+  assert.equal(await writeClipboardTextAsync(" \n"), true);
+  assert.deepEqual(writes, ["\x1b]52;c;IAo=\x07"]);
+});
+
+for (const outcome of ["throw", "callback-error", "event-error", "backpressure"] as const) {
+  test(`SSH handles ${outcome} without falling back to a helper`, async (t) => {
+    const calls = mockWriter(t, "darwin");
+    const { output } = mockClipboardTerminal(t);
+    process.env.SSH_CLIENT = "ssh-test";
+    let complete!: (error?: Error) => void;
+    t.mock.method(output, "write", (_chunk: string, callback: (error?: Error) => void) => {
+      if (outcome === "throw") throw new Error("write failed");
+      complete = callback;
+      return false;
+    });
+    let settled = false;
+    const pending = writeClipboardTextAsync(TEXT).then((value) => {
+      settled = true;
+      return value;
+    });
+    if (outcome !== "throw") {
+      await Promise.resolve();
+      assert.equal(settled, false);
+      if (outcome === "event-error") output.emit("error", new Error("write failed"));
+      else if (outcome === "callback-error") {
+        complete(new Error("write failed"));
+        output.emit("error", new Error("write failed"));
+      } else complete();
+    }
+    assert.equal(await pending, outcome === "backpressure");
+    assert.equal(calls.length, 0);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.equal(output.listenerCount("error"), 0);
+  });
+}
