@@ -1712,10 +1712,13 @@ ${agentInstructions}
     }
     const sessionId = requestedSessionId?.toLowerCase() ?? crypto.randomUUID();
     if (!isValidSessionId(sessionId)) throw new Error(`Invalid session ID: "${sessionId}". Must be a valid UUID.`);
-    assertSessionIdAvailable(sessionId);
+    if (requestedSessionId !== undefined) assertSessionIdAvailable(sessionId);
     this.activeSessionId = sessionId;
     const runtime = this.getRuntime(sessionId);
-    runtime.initialize = (signal) => this.initializeSession(sessionId, userPrompt, signal);
+    runtime.initialize = (signal) => {
+      if (requestedSessionId !== undefined) assertSessionIdAvailable(sessionId);
+      return this.initializeSession(sessionId, userPrompt, signal);
+    };
     const special = userPrompt.isAnswers || hasUserPermissionReplies(userPrompt);
     const running = this.activateSession(sessionId, controller, special ? userPrompt : undefined);
     if (!special) runtime.queue.enqueue(userPrompt);
@@ -1729,7 +1732,6 @@ ${agentInstructions}
     signal: AbortSignal
   ): Promise<void> {
     signal.throwIfAborted();
-    assertSessionIdAvailable(sessionId);
     const originalSummary = userPrompt.text ? userPrompt.text.slice(0, 100) : "[Image Prompt]";
     this.ensureFileHistorySession(sessionId);
     const now = new Date().toISOString();
@@ -1807,6 +1809,7 @@ ${agentInstructions}
       const abort = () => this.interruptSession(sessionId);
       controller?.signal.addEventListener("abort", abort, { once: true });
       try {
+        if (this.getSession(sessionId)?.status === "waiting_for_user") this.resumeSession(sessionId);
         this.enqueuePrompt(sessionId, userPrompt);
         await this.waitForSessionIdle(sessionId);
       } finally {

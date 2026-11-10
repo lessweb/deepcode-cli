@@ -497,6 +497,25 @@ for (const source of ["same-project-index", "other-project-index", "other-projec
 }
 
 for (const contents of ["{", "{}", '{"entries":[{}]}']) {
+  test(`createSession with a generated ID ignores another project's invalid index: ${contents}`, async (t) => {
+    const workspace = createTempDir("deepcode-generated-id-workspace-");
+    const home = createTempDir("deepcode-generated-id-home-");
+    setHomeDir(home);
+    const otherProject = path.join(home, ".deepcode", "projects", "other-project");
+    fs.mkdirSync(otherProject, { recursive: true });
+    const indexPath = path.join(otherProject, "sessions-index.json");
+    fs.writeFileSync(indexPath, contents);
+    const manager = createMockedClientSessionManager(workspace, [{ choices: [{ message: { content: "done" } }] }]);
+    t.after(() => manager.dispose());
+
+    await manager.handleUserPrompt({ text: "new task" });
+
+    const id = manager.getActiveSessionId()!;
+    assert.equal(manager.getSession(id)?.status, "completed");
+    assert.ok(manager.listSessionMessages(id).some((message) => message.content === "new task"));
+    assert.equal(fs.readFileSync(indexPath, "utf8"), contents);
+  });
+
   test(`createSession refuses a custom ID when another project's index is invalid: ${contents}`, async (t) => {
     const workspace = createTempDir("deepcode-invalid-index-workspace-");
     const home = createTempDir("deepcode-invalid-index-home-");

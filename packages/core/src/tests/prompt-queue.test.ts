@@ -14,6 +14,27 @@ function deferred() {
   return { promise, resolve };
 }
 const completion = () => ({ choices: [{ message: { content: "done" } }] });
+const question = () => ({
+  choices: [
+    {
+      message: {
+        content: "",
+        tool_calls: [
+          {
+            id: "question",
+            type: "function",
+            function: {
+              name: "AskUserQuestion",
+              arguments: JSON.stringify({
+                questions: [{ question: "Which settings?", options: [{ label: "Default" }] }],
+              }),
+            },
+          },
+        ],
+      },
+    },
+  ],
+});
 
 async function fixture(t: TestContext) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-queue-"));
@@ -274,6 +295,84 @@ test("awaiting user and inactive sessions do not consume ordinary input", async 
   manager.setActiveSessionId(id);
   assert.equal(manager.getQueuePausedReason(id), "awaiting_user");
   await manager.replySession(id, { text: "answer", isAnswers: true });
+  assert.deepEqual(manager.listQueuedMessages(id), []);
+});
+
+test("a plain input answers AskUserQuestion, resumes queued work, and is persisted", async (t) => {
+  const { manager, id, internal } = await fixture(t);
+  const requests: SessionMessage[][] = [];
+  internal.requestSessionCompletion = async () => {
+    requests.push(manager.listSessionMessages(id));
+    return requests.length === 1 ? question() : completion();
+  };
+  await manager.handleUserPrompt({ text: "Ask which settings to use." });
+  assert.equal(manager.getSession(id)?.status, "waiting_for_user");
+  manager.enqueuePrompt(id, { text: "also keep existing files" });
+  assert.equal(requests.length, 1);
+  assert.equal(manager.isSessionRunning(id), false);
+
+  await manager.handleUserPrompt({ text: "Use the defaults." });
+
+  assert.equal(requests.length, 2);
+  assert.equal(manager.getSession(id)?.status, "completed");
+  assert.deepEqual(manager.listQueuedMessages(id), []);
+  assert.deepEqual(
+    requests[1]
+      .filter((message) => message.role === "user")
+      .slice(-2)
+      .map((message) => message.content),
+    ["also keep existing files", "Use the defaults."]
+  );
+  const persisted = fs.readFileSync(path.join(internal.getProjectStorage().projectDir, `${id}.jsonl`), "utf8");
+  assert.match(persisted, /Use the defaults\./);
+});
+
+test("a plain answer resumes questions but cannot approve a subsequent write", async (t) => {
+  const { manager, id, internal } = await fixture(t);
+  const filePath = path.join(internal.projectRoot, "result.txt");
+  internal.getResolvedSettings = () => ({
+    model: "test",
+    permissions: { allow: [], deny: [], ask: ["write-in-cwd"], defaultMode: "allowAll", addWorkingDirs: [] },
+    history: { persistence: "none", maxBytes: 0 },
+  });
+  let requests = 0;
+  internal.requestSessionCompletion = async () => {
+    if (++requests === 1) return question();
+    if (requests === 2)
+      return {
+        choices: [
+          {
+            message: {
+              content: "",
+              tool_calls: [
+                {
+                  id: "write",
+                  type: "function",
+                  function: { name: "Write", arguments: JSON.stringify({ file_path: filePath, content: "result" }) },
+                },
+              ],
+            },
+          },
+        ],
+      };
+    return completion();
+  };
+  await manager.handleUserPrompt({ text: "Ask which settings to write." });
+  assert.equal(manager.getSession(id)?.status, "waiting_for_user");
+  await manager.handleUserPrompt({ text: "Use the defaults." });
+  assert.equal(requests, 2);
+  assert.equal(manager.getSession(id)?.status, "ask_permission");
+  for (const status of ["ask_permission", "permission_denied"] as const) {
+    if (status === "permission_denied") manager.denySessionPermission(id);
+    await manager.handleUserPrompt({ text: "yes" });
+    await manager.handleUserPrompt({ text: "/continue" });
+    assert.equal(manager.getSession(id)?.status, status);
+    assert.equal(requests, 2);
+    assert.equal(fs.existsSync(filePath), false);
+  }
+  await manager.handleUserPrompt({ text: "/continue", permissions: [{ toolCallId: "write", permission: "allow" }] });
+  assert.equal(fs.readFileSync(filePath, "utf8"), "result");
+  assert.equal(manager.getSession(id)?.status, "completed");
   assert.deepEqual(manager.listQueuedMessages(id), []);
 });
 
