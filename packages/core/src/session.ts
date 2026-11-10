@@ -1855,7 +1855,7 @@ ${agentInstructions}
     const needsInput = !permissionPrompt && Boolean(runtime.initialize || runtime.queue.executable().length);
     return runtime.run(async (controller) => {
       try {
-        if (needsInput && !this.hasTrailingPendingToolCalls(sessionId)) {
+        if (needsInput) {
           runtime.preparingPrompt = runtime.queue.executable()[0];
           this.notifyRuntimeChanged();
         }
@@ -1873,7 +1873,9 @@ ${agentInstructions}
           this.applyPermissionGrants(sessionId, permissionPrompt);
           this.setPromptPlanMode(sessionId, permissionPrompt);
         }
-        if (!this.hasTrailingPendingToolCalls(sessionId)) {
+        // New instructions supersede unfinished tool calls. Only explicit continuation or
+        // permission replies may resume those calls before accepting more input.
+        if (!permissionPrompt || !this.hasTrailingPendingToolCalls(sessionId)) {
           if (permissionPrompt && !this.isContinuePrompt(permissionPrompt))
             await this.appendUserPrompt(sessionId, permissionPrompt, controller.signal);
           const consumed = await this.consumeQueuedMessages(sessionId, controller.signal);

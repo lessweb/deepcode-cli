@@ -156,10 +156,10 @@ test("busy commands are exactly the supported whitelist; forbidden direct input 
     BUILTIN_SLASH_COMMANDS.filter((command) => isBusyCommandAllowed(command.kind))
       .map((c) => c.kind)
       .sort(),
-    ["copy", "experimental", "mcp", "model", "permissions", "raw", "skills", "undo"]
+    ["copy", "exit", "experimental", "mcp", "model", "permissions", "raw", "skills", "undo"]
   );
   const h = await input(t);
-  for (const command of ["/exit", "/new", "/continue", "/plan do something", "/compact"]) {
+  for (const command of ["/new", "/continue", "/plan do something", "/compact"]) {
     await h.send("\x15" + command);
     await h.send("\r");
   }
@@ -170,14 +170,17 @@ test("busy commands are exactly the supported whitelist; forbidden direct input 
   await h.send("/undo");
   await h.send("\r");
   assert.equal(h.submissions[1]?.command, "undo");
+  await h.send("/exit");
+  await h.send("\r");
+  assert.equal(h.submissions[2]?.command, "exit");
 });
 
-test("double Ctrl+D interrupts before exiting; a single press does neither", async (t) => {
+test("double Ctrl+D requests exit only on the second press", async (t) => {
   const h = await input(t);
   await h.send("\x04");
   assert.deepEqual(h.events, []);
   await h.send("\x04");
-  assert.deepEqual(h.events, ["interrupt", "exit"]);
+  assert.deepEqual(h.events, ["exit"]);
 });
 
 test("Esc cancels a queue edit without interrupting the model", async (t) => {

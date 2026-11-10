@@ -472,7 +472,6 @@ export const PromptInput = React.memo(function PromptInput({
         }
         const now = Date.now();
         if (pendingExit && now - lastCtrlDAt.current < 2000) {
-          if (busy) onInterrupt();
           onExitShortcut?.();
           return;
         }

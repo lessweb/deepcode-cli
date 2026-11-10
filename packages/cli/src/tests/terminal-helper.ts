@@ -44,6 +44,7 @@ export async function terminal(t: TestContext, element: React.ReactElement, colu
     frame: () => frame,
     rawFrame: () => rawFrame,
     rerender: app.rerender,
+    waitUntilExit: app.waitUntilExit,
     async send(input: string) {
       stdin.write(input);
       await flush();

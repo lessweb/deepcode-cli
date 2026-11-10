@@ -3045,7 +3045,7 @@ test("replySession turns denied permission replies into tool errors before appen
   assert.equal(userMessage?.content, "Do not write outside the workspace.");
 });
 
-test("replySession completes pending tools before consuming queued user messages", async () => {
+test("replySession appends new instructions without executing pending tools", async () => {
   const workspace = createTempDir("deepcode-pending-tool-workspace-");
   const home = createTempDir("deepcode-pending-tool-home-");
   setHomeDir(home);
@@ -3076,26 +3076,23 @@ test("replySession completes pending tools before consuming queued user messages
   (manager as any).appendSessionMessage(sessionId, assistantMessage);
 
   (manager as any).runSessionIterations = activate;
-  (manager as any).toolExecutor.executeToolCalls = async () => [
-    {
-      toolCallId: "call-1",
-      content: "done",
-      result: { name: "bash" },
-    },
-  ];
+  let executions = 0;
+  (manager as any).toolExecutor.executeToolCalls = async () => {
+    executions++;
+    return [{ toolCallId: "call-1", content: "done", result: { name: "bash" } }];
+  };
   (manager as any).requestSessionCompletion = async () => ({ choices: [{ message: { content: "done" } }] });
   await manager.replySession(sessionId, { text: "second prompt" });
 
   const messages = manager.listSessionMessages(sessionId);
   const assistantIndex = messages.findIndex((message) => message.id === assistantMessage.id);
   assert.notEqual(assistantIndex, -1);
-  assert.equal(messages[assistantIndex + 1]?.role, "tool");
-  assert.equal(messages[assistantIndex + 2]?.role, "user");
-  assert.equal(messages[assistantIndex + 2]?.content, "second prompt");
-  assert.equal(
-    messages.some((message) => String(message.content).includes("Previous tool call did not complete.")),
-    false
-  );
+  assert.equal(executions, 0);
+  assert.equal(messages[assistantIndex + 1]?.role, "user");
+  assert.equal(messages[assistantIndex + 1]?.content, "second prompt");
+  const context = manager.buildOpenAIMessages(messages, false, "test");
+  const toolResult = context.find((message) => message.role === "tool");
+  assert.equal(JSON.parse(String(toolResult?.content)).metadata.interrupted, true);
 });
 
 test("buildOpenAIMessages inserts interrupted results for missing tool messages", () => {
@@ -5460,7 +5457,7 @@ test("interrupt settles an active prompt waiting for an internal tool request", 
     },
   ]);
   internals.appendSessionMessage(sessionId, pendingTool);
-  const prompt = manager.handleUserPrompt({ text: "continue" });
+  const prompt = manager.handleUserPrompt({ text: "/continue" });
   await started;
   manager.interruptActiveSession();
   await prompt;

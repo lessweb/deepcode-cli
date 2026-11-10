@@ -407,10 +407,15 @@ function App({
 
   writeRef.current = write;
   const handleExit = useCallback(
-    ({ showCommand, showSummary }: { showCommand: boolean; showSummary: boolean }) => {
+    async ({ showCommand, showSummary }: { showCommand: boolean; showSummary: boolean }) => {
       compactionControllerRef.current?.abort();
       compactionControllerRef.current = null;
       setIsExiting(true);
+      const sessionId = sessionManager.getActiveSessionId();
+      if (sessionId && sessionManager.isSessionRunning(sessionId)) {
+        sessionManager.interruptSession(sessionId);
+        await sessionManager.waitForSessionIdle(sessionId).catch(() => {});
+      }
       setTimeout(() => {
         const activeSessionId = sessionManager.getActiveSessionId();
         const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
@@ -453,7 +458,7 @@ function App({
       )
         return;
       if (submission.command === "exit") {
-        handleExit({ showCommand: true, showSummary: true });
+        await handleExit({ showCommand: true, showSummary: true });
         return;
       }
       setCommandNotice(null);
@@ -825,15 +830,8 @@ function App({
   );
 
   const handleExitShortcut = useCallback(() => {
-    const id = sessionManager.getActiveSessionId();
-    if (id && sessionManager.isSessionRunning(id)) {
-      setIsExiting(true);
-      void sessionManager
-        .waitForSessionIdle(id)
-        .catch(() => {})
-        .then(() => handleExit({ showCommand: false, showSummary: false }));
-    } else handleExit({ showCommand: false, showSummary: false });
-  }, [handleExit, sessionManager]);
+    void handleExit({ showCommand: false, showSummary: false });
+  }, [handleExit]);
 
   const reloadActiveSessionView = useCallback(
     (sessionId: string): void => {
@@ -1235,7 +1233,8 @@ function App({
       return;
     }
     setDismissedQuestionIds((prev) => new Set(prev).add(pendingQuestion.messageId));
-  }, [pendingQuestion]);
+    sessionManager.interruptSession(pendingQuestion.sessionId);
+  }, [pendingQuestion, sessionManager]);
 
   const handlePermissionResult = useCallback(
     (result: PermissionPromptResult) => {

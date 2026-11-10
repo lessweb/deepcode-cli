@@ -192,6 +192,51 @@ test("interrupt retains the execution lock until cleanup and a new input resumes
   assert.equal(manager.getSession(id)?.status, "completed");
 });
 
+for (const resume of ["new input", "new input during cleanup", "/continue"] as const) {
+  test(`interrupted tools are retried only by explicit /continue: ${resume}`, { timeout: 10000 }, async (t) => {
+    const { manager, id, internal } = await fixture(t);
+    const entered = deferred();
+    const cleanup = deferred();
+    t.after(() => cleanup.resolve());
+    const tool = { id: "old-command", type: "function", function: { name: "Bash", arguments: '{"command":"old"}' } };
+    let requests = 0;
+    let executions = 0;
+    let resumedContext: any[] = [];
+    internal.requestSessionCompletion = async () => {
+      if (++requests === 1) return { choices: [{ message: { content: "", tool_calls: [tool] } }] };
+      resumedContext = manager.buildOpenAIMessages(manager.listSessionMessages(id), false, "test");
+      return completion();
+    };
+    internal.toolExecutor.executeToolCalls = async (_sessionId: string, _calls: unknown[], hooks: any) => {
+      if (++executions === 1) {
+        entered.resolve();
+        await cleanup.promise;
+        hooks.signal.throwIfAborted();
+      }
+      return [{ toolCallId: tool.id, content: "executed", result: { name: "Bash", ok: true } }];
+    };
+    const running = manager.handleUserPrompt({ text: "run a command" });
+    await entered.promise;
+    manager.interruptActiveSession();
+    const text = resume === "/continue" ? "/continue" : "Do not execute the previous command.";
+    const immediate = resume === "new input during cleanup" ? manager.handleUserPrompt({ text }) : undefined;
+    cleanup.resolve();
+    await running;
+    if (immediate) await immediate;
+    else await manager.handleUserPrompt({ text });
+
+    assert.equal(executions, resume === "/continue" ? 2 : 1);
+    assert.equal(requests, 2);
+    const result = resumedContext.find((message) => message.role === "tool" && message.tool_call_id === tool.id);
+    assert.ok(result, "the model context must pair every tool call with a result");
+    if (resume !== "/continue") {
+      assert.equal(JSON.parse(result.content).metadata.interrupted, true);
+      assert.ok(resumedContext.some((message) => message.role === "user" && message.content === text));
+    }
+    assert.equal(manager.getSession(id)?.status, "completed");
+  });
+}
+
 test("failed preparation retains inputs and a new submission resumes the FIFO batch", async (t) => {
   const { manager, id, internal } = await fixture(t);
   const normalize = internal.normalizeSkills;
@@ -329,7 +374,9 @@ test("model-change notices are deferred until pending tool results have been app
   internal.toolExecutor.executeToolCalls = async () => [
     { toolCallId: "tool", content: "done", result: { name: "Read" } },
   ];
-  await manager.replySession(id, { text: "next" });
+  manager.setActiveSessionId(null);
+  manager.enqueuePrompt(id, { text: "next" });
+  await manager.replySession(id, { text: "/continue" });
   const messages = manager.listSessionMessages(id);
   const index = messages.findIndex((m) => m.id === assistant.id);
   assert.equal(messages[index + 1].role, "tool");
