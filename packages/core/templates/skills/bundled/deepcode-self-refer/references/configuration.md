@@ -169,7 +169,7 @@ Deep Code 使用 `settings.json` 设置文件进行持久化配置，支持两�
 | `FAIL_REASON` | 失败原因（仅失败时设置）                                                                                                   |
 | `BODY`        | 最后一条 AI 助手回复的文本内容                                                                                             |
 | `TITLE`       | 会话标题（对应 resume 列表中的标题）                                                                                       |
-| `SESSION_ID` | 触发本次通知的会话 ID |
+| `SESSION_ID`  | 触发本次通知的会话 ID                                                                                                      |
 
 ```json
 {

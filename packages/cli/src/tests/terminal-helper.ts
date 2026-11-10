@@ -12,7 +12,8 @@ export async function terminal(t: TestContext, element: React.ReactElement, colu
   const stdout = Object.assign(
     new Writable({
       write(chunk, _encoding, done) {
-        const text = stripTerminalControls(chunk.toString());
+        // Title updates are terminal controls, not rendered frames.
+        const text = stripTerminalControls(chunk.toString().replace(/\u001b\][^\u0007]*\u0007/g, ""));
         if (text.trim()) {
           frame = text;
           rawFrame = chunk.toString();
