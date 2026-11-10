@@ -122,7 +122,7 @@ function setup() {
     });
     instance.listSkills = async () => [];
     (instance as any).reportNewPrompt = () => {};
-    instance.activateSession = async () => {
+    (instance as any).runSessionIterations = async () => {
       activations++;
     };
     cleanups.push(() => instance.dispose());

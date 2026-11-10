@@ -15,7 +15,7 @@ Configure the `notify` field in `settings.json` with the full path to an executa
 | `FAIL_REASON` | Failure reason (only set on failure)                                                                                                             |
 | `BODY`        | The text content of the last AI assistant reply                                                                                                  |
 | `TITLE`       | Session title (matches the resume list title)                                                                                                    |
-| `SESSION_ID` | ID of the session that triggered the notification |
+| `SESSION_ID`  | ID of the session that triggered the notification                                                                                                |
 
 ## Configuration
 

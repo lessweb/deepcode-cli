@@ -1,3 +1,4 @@
+import { SessionRuntime, type PromptContent, type QueuedMessage, type QueuePausedReason } from "./prompt-queue";
 import { appendHistoryEntry, type ResolvedHistorySettings } from "./common/message-history";
 import * as fs from "fs";
 import * as path from "path";
@@ -409,6 +410,7 @@ export type SessionManagerOptions = {
   };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
+  onUserMessage?: (message: SessionMessage) => void;
   onSessionEntryUpdated?: (entry: SessionEntry) => void;
   onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   onLlmRetry?: (event: LlmRetryEvent) => void;
@@ -461,6 +463,7 @@ export class SessionManager {
     experimental?: ResolvedExperimentalSettings;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
+  private readonly onUserMessage?: (message: SessionMessage) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   private readonly onLlmRetry?: (event: LlmRetryEvent) => void;
@@ -468,8 +471,9 @@ export class SessionManager {
   private readonly onProcessStdout?: (pid: number, chunk: string) => void;
   private readonly nonInteractive: boolean;
   private activeSessionId: string | null = null;
-  private activePromptController: AbortController | null = null;
-  private readonly sessionControllers = new Map<string, AbortController>();
+  private readonly runtimes = new Map<string, SessionRuntime>();
+  private readonly runtimeListeners = new Set<() => void>();
+  private disposed = false;
   private readonly sessionPermissionAllows = new Map<string, Set<PermissionScope>>();
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
@@ -485,6 +489,7 @@ export class SessionManager {
     this.createOpenAIClient = options.createOpenAIClient;
     this.getResolvedSettings = options.getResolvedSettings;
     this.onAssistantMessage = options.onAssistantMessage;
+    this.onUserMessage = options.onUserMessage;
     this.onSessionEntryUpdated = options.onSessionEntryUpdated;
     this.onLlmStreamProgress = options.onLlmStreamProgress;
     this.onLlmRetry = options.onLlmRetry;
@@ -534,20 +539,13 @@ export class SessionManager {
   }
 
   dispose(): void {
+    this.disposed = true;
+    for (const runtime of this.runtimes.values()) runtime.dispose();
+    this.runtimes.clear();
+    this.runtimeListeners.clear();
     for (const controller of this.titleControllers.values()) controller.abort();
     this.titleControllers.clear();
-    const controller = this.activePromptController;
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
-    }
-    this.activePromptController = null;
-    for (const sessionController of this.sessionControllers.values()) {
-      if (!sessionController.signal.aborted) {
-        sessionController.abort();
-      }
-    }
     this.killLiveProcesses();
-    this.sessionControllers.clear();
     this.sessionPermissionAllows.clear();
     this.processTimeoutControls.clear();
     this.mcpManager.disconnect();
@@ -1497,32 +1495,209 @@ ${agentInstructions}
 
   setActiveSessionId(sessionId: string | null): void {
     this.activeSessionId = sessionId;
+    if (sessionId) this.ensureSessionRunning(sessionId);
+    this.notifyRuntimeChanged();
+  }
+
+  subscribeRuntime(listener: () => void): () => void {
+    this.runtimeListeners.add(listener);
+    return () => this.runtimeListeners.delete(listener);
+  }
+
+  private notifyRuntimeChanged(): void {
+    for (const listener of this.runtimeListeners) listener();
+  }
+
+  private getRuntime(sessionId: string): SessionRuntime {
+    let runtime = this.runtimes.get(sessionId);
+    if (!runtime) {
+      runtime = new SessionRuntime(sessionId, () => {
+        this.ensureSessionRunning(sessionId);
+        this.notifyRuntimeChanged();
+      });
+      this.runtimes.set(sessionId, runtime);
+    }
+    return runtime;
+  }
+
+  isSessionRunning(sessionId: string): boolean {
+    return Boolean(this.runtimes.get(sessionId)?.task);
+  }
+
+  getQueuePausedReason(sessionId: string): QueuePausedReason | undefined {
+    if (sessionId !== this.activeSessionId) return "session_inactive";
+    const pause = this.runtimes.get(sessionId)?.pausedReason;
+    if (pause) return pause;
+    const status = this.getSession(sessionId)?.status;
+    if (status === "interrupted" || status === "failed") return status;
+    if (status === "ask_permission" || status === "waiting_for_user" || status === "permission_denied")
+      return "awaiting_user";
+    return undefined;
+  }
+
+  listQueuedMessages(sessionId: string): QueuedMessage[] {
+    return this.runtimes.get(sessionId)?.queue.list() ?? [];
+  }
+
+  getPreparingPromptId(sessionId: string): string | undefined {
+    const runtime = this.runtimes.get(sessionId);
+    const prompt = runtime?.preparingPrompt;
+    return prompt &&
+      !runtime.controller?.signal.aborted &&
+      runtime.queue.canCommit(prompt) &&
+      !this.getQueuePausedReason(sessionId)
+      ? prompt.id
+      : undefined;
+  }
+
+  enqueuePrompt(sessionId: string, content: PromptContent): QueuedMessage {
+    if (this.disposed || (!this.getSession(sessionId) && !this.runtimes.get(sessionId)?.initialize))
+      throw new Error("Session is not available.");
+    const reason = this.getQueuePausedReason(sessionId);
+    if (reason === "interrupted" || reason === "failed") this.resumeSession(sessionId);
+    return this.getRuntime(sessionId).queue.enqueue(content);
+  }
+
+  removeQueuedMessage(sessionId: string, id: string): boolean {
+    return this.getRuntime(sessionId).queue.remove(id);
+  }
+
+  beginQueuedMessageEdit(sessionId: string, id: string): QueuedMessage | undefined {
+    return this.getRuntime(sessionId).queue.beginEdit(id);
+  }
+
+  finishQueuedMessageEdit(sessionId: string, id: string, content?: PromptContent): boolean {
+    return this.getRuntime(sessionId).queue.finishEdit(id, content);
+  }
+
+  async waitForSessionIdle(sessionId: string): Promise<void> {
+    await this.runtimes.get(sessionId)?.wait();
+  }
+
+  private resumeSession(sessionId: string): void {
+    this.getRuntime(sessionId).pausedReason = undefined;
+    this.updateSessionEntry(sessionId, (entry) => ({ ...entry, status: "pending", failReason: null }));
+  }
+
+  private ensureSessionRunning(sessionId: string): void {
+    if (
+      this.disposed ||
+      this.isSessionRunning(sessionId) ||
+      this.getQueuePausedReason(sessionId) ||
+      !this.runtimes.get(sessionId)?.queue.executable().length
+    )
+      return;
+    void this.activateSession(sessionId).catch((error: unknown) => {
+      if (!this.isAbortLikeError(error))
+        this.onAssistantMessage(
+          this.buildAssistantMessage(sessionId, `Request failed: ${describeLlmError(error)}`, null),
+          false
+        );
+    });
+  }
+
+  private async consumeQueuedMessages(sessionId: string, signal: AbortSignal): Promise<number> {
+    const runtime = this.getRuntime(sessionId);
+    let consumed = 0;
+    for (const queued of runtime.queue.executable()) {
+      if (runtime.preparingPrompt !== queued) {
+        runtime.preparingPrompt = queued;
+        this.notifyRuntimeChanged();
+      }
+      if (!(await this.appendUserPrompt(sessionId, queued.content, signal, queued))) break;
+      consumed++;
+    }
+    runtime.preparingPrompt = undefined;
+    return consumed;
+  }
+
+  private async appendUserPrompt(
+    sessionId: string,
+    content: UserPromptContent,
+    signal: AbortSignal,
+    queued?: QueuedMessage
+  ): Promise<boolean> {
+    let prompt = structuredClone(content);
+    const queue = this.getRuntime(sessionId).queue;
+    const canCommit = () => !queued || (queue.canCommit(queued) && !this.getQueuePausedReason(sessionId));
+    signal.throwIfAborted();
+    if (!canCommit()) return false;
+    const skills = prompt.text ? await this.listSkills(sessionId) : [];
+    const names = prompt.text ? await this.identifyMatchingSkillNames(skills, prompt.text, { signal, sessionId }) : [];
+    prompt.skills = await this.normalizeSkills(prompt.skills, sessionId);
+    signal.throwIfAborted();
+    if (!canCommit()) return false;
+    prompt = this.preparePromptImages(sessionId, prompt);
+    this.ensureFileHistorySession(sessionId);
+    const checkpoint = this.recordUserPromptCheckpoint(sessionId);
+    if (checkpoint.changedFilePaths.length)
+      this.appendSessionMessage(
+        sessionId,
+        this.buildSystemMessage(
+          sessionId,
+          `Note that the user manually modified these files:\n${checkpoint.changedFilePaths.join("\n")}`
+        )
+      );
+    this.setPromptPlanMode(sessionId, prompt);
+    const message = this.buildUserMessage(sessionId, prompt);
+    if (queued)
+      Object.assign(message, { id: queued.id, createTime: queued.submittedAt, updateTime: queued.submittedAt });
+    this.appendSessionMessage(sessionId, message);
+    if (queued) {
+      queue.remove(queued.id);
+      this.onUserMessage?.(message);
+    }
+    this.appendSkillMessages(sessionId, prompt.skills);
+    this.appendSkillCatalogMessage(
+      sessionId,
+      this.mergeSkillCatalog(
+        this.listPreloadedSkillCatalog(sessionId),
+        skills.filter((skill) => names.includes(skill.name)).map(({ name, description }) => ({ name, description }))
+      )
+    );
+    this.reportNewPrompt();
+    this.maybeGenerateSessionTitle(sessionId, prompt);
+    await this.persistUserHistory(message);
+    return true;
+  }
+
+  private setPromptPlanMode(sessionId: string, prompt: UserPromptContent): void {
+    this.appendPlanModeTransitionMessages(
+      sessionId,
+      Boolean(this.getSession(sessionId)?.planMode),
+      Boolean(prompt.planMode)
+    );
+    this.updateSessionEntry(sessionId, (entry) => ({ ...entry, planMode: Boolean(prompt.planMode) }));
   }
 
   addSessionSystemMessage(sessionId: string, content: string, visible?: boolean, meta?: MessageMeta): void {
     const message = this.buildSystemMessage(sessionId, content, null, visible, meta);
-    if (sessionId) this.appendSessionMessage(sessionId, message);
+    if (sessionId) {
+      if (this.isSessionRunning(sessionId) || this.hasTrailingPendingToolCalls(sessionId)) {
+        this.getRuntime(sessionId).deferredMessages.push(message);
+      } else this.appendSessionMessage(sessionId, message);
+    }
     this.onAssistantMessage(message, false);
   }
 
-  async handleUserPrompt(userPrompt: UserPromptContent, options: { sessionId?: string } = {}): Promise<void> {
-    const controller = new AbortController();
-    this.activePromptController = controller;
+  private flushDeferredSystemMessages(sessionId: string): void {
+    const pending = this.runtimes.get(sessionId)?.deferredMessages;
+    if (!pending?.length || !this.getSession(sessionId) || this.hasTrailingPendingToolCalls(sessionId)) return;
+    for (const message of pending.splice(0)) this.appendSessionMessage(sessionId, message);
+  }
 
+  async handleUserPrompt(userPrompt: UserPromptContent, options: { sessionId?: string } = {}): Promise<void> {
+    const sessionId = this.activeSessionId;
     try {
-      if (options.sessionId !== undefined || !this.activeSessionId || !this.getSession(this.activeSessionId)) {
-        await this.createSession(userPrompt, controller, options.sessionId);
-      } else {
-        await this.replySession(this.activeSessionId, userPrompt, controller);
-      }
+      if (
+        options.sessionId !== undefined ||
+        !sessionId ||
+        (!this.getSession(sessionId) && !this.runtimes.get(sessionId)?.initialize)
+      ) {
+        await this.createSession(userPrompt, undefined, options.sessionId);
+      } else await this.replySession(sessionId, userPrompt);
     } catch (error) {
-      if (!this.isAbortLikeError(error) && !controller.signal.aborted) {
-        throw error;
-      }
-    } finally {
-      if (this.activePromptController === controller) {
-        this.activePromptController = null;
-      }
+      if (!this.isAbortLikeError(error)) throw error;
     }
   }
 
@@ -1531,21 +1706,33 @@ ${agentInstructions}
     controller?: AbortController,
     requestedSessionId?: string
   ): Promise<string> {
-    const signal = controller?.signal;
-    this.throwIfAborted(signal);
-    if (requestedSessionId !== undefined && !isValidSessionId(requestedSessionId)) {
-      throw new Error(`Invalid session ID: "${requestedSessionId}". Must be a valid UUID.`);
+    controller?.signal.throwIfAborted();
+    for (const [index, url] of (userPrompt.imageUrls ?? []).entries()) {
+      if (url.startsWith("data:")) this.decodePersistedPromptImage(url, index);
     }
     const sessionId = requestedSessionId?.toLowerCase() ?? crypto.randomUUID();
-    await this.createOpenAIClient.prepare?.(signal);
-    this.throwIfAborted(signal);
-    if (requestedSessionId !== undefined) {
-      assertSessionIdAvailable(sessionId);
-    }
-    this.reportNewPrompt();
+    if (!isValidSessionId(sessionId)) throw new Error(`Invalid session ID: "${sessionId}". Must be a valid UUID.`);
+    if (requestedSessionId !== undefined) assertSessionIdAvailable(sessionId);
+    this.activeSessionId = sessionId;
+    const runtime = this.getRuntime(sessionId);
+    runtime.initialize = (signal) => {
+      if (requestedSessionId !== undefined) assertSessionIdAvailable(sessionId);
+      return this.initializeSession(sessionId, userPrompt, signal);
+    };
+    const special = userPrompt.isAnswers || hasUserPermissionReplies(userPrompt);
+    const running = this.activateSession(sessionId, controller, special ? userPrompt : undefined);
+    if (!special) runtime.queue.enqueue(userPrompt);
+    await running;
+    return sessionId;
+  }
 
+  private async initializeSession(
+    sessionId: string,
+    userPrompt: UserPromptContent,
+    signal: AbortSignal
+  ): Promise<void> {
+    signal.throwIfAborted();
     const originalSummary = userPrompt.text ? userPrompt.text.slice(0, 100) : "[Image Prompt]";
-    userPrompt = this.preparePromptImages(sessionId, userPrompt);
     this.ensureFileHistorySession(sessionId);
     const now = new Date().toISOString();
     const index = this.loadSessionsIndex();
@@ -1565,7 +1752,7 @@ ${agentInstructions}
       createTime: now,
       updateTime: now,
       processes: null,
-      planMode: Boolean(userPrompt.planMode),
+      planMode: false,
       autoTitlePending: true,
     };
     index.entries.push(entry);
@@ -1609,117 +1796,36 @@ ${agentInstructions}
       const instructionsMessage = this.buildSystemMessage(sessionId, agentInstructions);
       this.appendSessionMessage(sessionId, instructionsMessage);
     }
-
-    this.appendPlanModeTransitionMessages(sessionId, false, Boolean(userPrompt.planMode));
-
-    this.recordUserPromptCheckpoint(sessionId);
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
-    await this.persistUserHistory(userMessage);
-    this.maybeGenerateSessionTitle(sessionId, userPrompt);
-
-    let matchedSkills: SkillInfo[] = [];
-    if (userPrompt.text) {
-      const skills = await this.listSkills();
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
-    this.throwIfAborted(signal);
-
-    this.appendSkillMessages(sessionId, userPrompt.skills);
-    this.appendSkillCatalogMessage(
-      sessionId,
-      this.mergeSkillCatalog(
-        this.listPreloadedSkillCatalog(sessionId),
-        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
-      )
-    );
-
-    this.activeSessionId = sessionId;
-    await this.activateSession(sessionId, controller);
-    return sessionId;
   }
 
   async replySession(sessionId: string, userPrompt: UserPromptContent, controller?: AbortController): Promise<void> {
-    const signal = controller?.signal;
-    this.throwIfAborted(signal);
-    if (!this.getSession(sessionId)) {
+    if (!this.getSession(sessionId) && !this.runtimes.get(sessionId)?.initialize) {
       await this.createSession(userPrompt, controller);
       return;
     }
-    await this.createOpenAIClient.prepare?.(signal);
-    this.throwIfAborted(signal);
-    this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      usingPlus: this.createOpenAIClient().usingPlus === true,
-    }));
-    userPrompt = this.preparePromptImages(sessionId, userPrompt);
-    this.applyPermissionGrants(sessionId, userPrompt);
-    const now = new Date().toISOString();
-    const previousPlanMode = Boolean(this.getSession(sessionId)?.planMode);
-    const nextPlanMode = Boolean(userPrompt.planMode);
-    const updated = this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      status: "pending",
-      failReason: null,
-      askPermissions: undefined,
-      planMode: nextPlanMode,
-      updateTime: now,
-    }));
-
-    if (!updated) return;
-
-    this.appendPlanModeTransitionMessages(sessionId, previousPlanMode, nextPlanMode);
-
-    if (hasUserPermissionReplies(userPrompt) && this.hasTrailingPendingToolCalls(sessionId)) {
-      this.activeSessionId = sessionId;
-      await this.activateSession(sessionId, controller, userPrompt);
-      return;
-    }
-
-    if (this.isContinuePrompt(userPrompt)) {
-      this.activeSessionId = sessionId;
-      await this.activateSession(sessionId, controller, userPrompt);
-      return;
-    }
-
-    this.reportNewPrompt();
-
-    this.ensureFileHistorySession(sessionId);
-    const checkpoint = this.recordUserPromptCheckpoint(sessionId);
-    if (checkpoint.changedFilePaths.length) {
-      const content = `Note that the user manually modified these files:\n${checkpoint.changedFilePaths.join("\n")}`;
-      this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, content));
-    }
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
-    await this.persistUserHistory(userMessage);
-    this.maybeGenerateSessionTitle(sessionId, userPrompt);
-
-    let matchedSkills: SkillInfo[] = [];
-    if (userPrompt.text) {
-      const skills = await this.listSkills(sessionId);
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
-    this.throwIfAborted(signal);
-
-    this.appendSkillMessages(sessionId, userPrompt.skills);
-    this.appendSkillCatalogMessage(
-      sessionId,
-      this.mergeSkillCatalog(
-        this.listPreloadedSkillCatalog(sessionId),
-        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
-      )
-    );
+    controller?.signal.throwIfAborted();
     this.activeSessionId = sessionId;
-    await this.activateSession(sessionId, controller);
+    if (!hasUserPermissionReplies(userPrompt) && !userPrompt.isAnswers && !this.isContinuePrompt(userPrompt)) {
+      const abort = () => this.interruptSession(sessionId);
+      controller?.signal.addEventListener("abort", abort, { once: true });
+      try {
+        if (this.getSession(sessionId)?.status === "waiting_for_user") this.resumeSession(sessionId);
+        this.enqueuePrompt(sessionId, userPrompt);
+        await this.waitForSessionIdle(sessionId);
+      } finally {
+        controller?.signal.removeEventListener("abort", abort);
+      }
+    } else {
+      if (
+        this.isContinuePrompt(userPrompt) &&
+        !hasUserPermissionReplies(userPrompt) &&
+        this.getQueuePausedReason(sessionId) === "awaiting_user"
+      )
+        return;
+      await this.waitForSessionIdle(sessionId);
+      this.resumeSession(sessionId);
+      await this.activateSession(sessionId, controller, userPrompt);
+    }
   }
 
   private applyPermissionGrants(sessionId: string, reply: PermissionReply): void {
@@ -1748,8 +1854,70 @@ ${agentInstructions}
     controller?: AbortController,
     permissionPrompt?: UserPromptContent
   ): Promise<void> {
+    const runtime = this.getRuntime(sessionId);
+    const needsInput = !permissionPrompt && Boolean(runtime.initialize || runtime.queue.executable().length);
+    return runtime.run(async (controller) => {
+      try {
+        if (needsInput) {
+          runtime.preparingPrompt = runtime.queue.executable()[0];
+          this.notifyRuntimeChanged();
+        }
+        await this.createOpenAIClient.prepare?.(controller.signal);
+        controller.signal.throwIfAborted();
+        await runtime.initialize?.(controller.signal);
+        runtime.initialize = undefined;
+        this.updateSessionEntry(sessionId, (entry) => ({
+          ...entry,
+          status: "pending",
+          failReason: null,
+          askPermissions: undefined,
+        }));
+        if (permissionPrompt) {
+          this.applyPermissionGrants(sessionId, permissionPrompt);
+          this.setPromptPlanMode(sessionId, permissionPrompt);
+        }
+        // New instructions supersede unfinished tool calls. Only explicit continuation or
+        // permission replies may resume those calls before accepting more input.
+        if (!permissionPrompt || !this.hasTrailingPendingToolCalls(sessionId)) {
+          if (permissionPrompt && !this.isContinuePrompt(permissionPrompt))
+            await this.appendUserPrompt(sessionId, permissionPrompt, controller.signal);
+          const consumed = await this.consumeQueuedMessages(sessionId, controller.signal);
+          if (needsInput && !consumed) return;
+        }
+        if (this.getQueuePausedReason(sessionId)) return;
+        await this.runSessionIterations(sessionId, controller, permissionPrompt);
+      } catch (error) {
+        this.recordSessionFailure(sessionId, error, controller.signal);
+        throw error;
+      } finally {
+        this.flushDeferredSystemMessages(sessionId);
+      }
+    }, controller);
+  }
+
+  private recordSessionFailure(sessionId: string, error: unknown, signal: AbortSignal): void {
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) return;
+    const aborted = this.isAbortLikeError(error) || signal.aborted;
+    // An input submitted after abort already resumed the queue; the old run must not pause it again.
+    if (signal.aborted && !runtime.pausedReason) return;
+    runtime.pausedReason = aborted ? "interrupted" : "failed";
+    const reason = aborted ? "interrupted" : describeLlmError(error);
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      status: aborted ? "interrupted" : "failed",
+      failReason: reason,
+      updateTime: new Date().toISOString(),
+    }));
+  }
+
+  private async runSessionIterations(
+    sessionId: string,
+    sessionController: AbortController,
+    permissionPrompt?: UserPromptContent
+  ): Promise<void> {
     const startedAt = Date.now();
-    const { client, usingPlus, configurationError, model, notify, env } = this.createOpenAIClient();
+    const { client, usingPlus, configurationError, notify, env } = this.createOpenAIClient();
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
 
@@ -1774,7 +1942,6 @@ ${agentInstructions}
       return;
     }
 
-    const sessionController = controller ?? new AbortController();
     if (sessionController.signal.aborted) {
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
@@ -1791,8 +1958,6 @@ ${agentInstructions}
       status: "processing",
       updateTime: now,
     }));
-
-    this.sessionControllers.set(sessionId, sessionController);
 
     try {
       const maxIterations = 80000; // about 1K RMB cost
@@ -1833,6 +1998,15 @@ ${agentInstructions}
           }
         }
 
+        if (this.getQueuePausedReason(sessionId)) return;
+        this.flushDeferredSystemMessages(sessionId);
+        const consumed = await this.consumeQueuedMessages(sessionId, sessionController.signal);
+        // A queued prompt can be edited or removed while preparation is awaiting I/O.
+        // A finished reply needs actual new input before requesting another completion.
+        if (iteration > 0 && !toolCalls && consumed === 0) return;
+        this.throwIfAborted(sessionController.signal);
+        if (this.getQueuePausedReason(sessionId)) return;
+        const model = this.createOpenAIClient().model;
         const response = await this.requestSessionCompletion(sessionId, sessionController.signal, iteration);
 
         const message = response.choices?.[0]?.message;
@@ -1935,7 +2109,7 @@ ${agentInstructions}
           return;
         }
 
-        if (!toolCalls) {
+        if (!toolCalls && !this.getRuntime(sessionId).queue.executable().length) {
           return;
         }
       }
@@ -1954,22 +2128,15 @@ ${agentInstructions}
         false
       );
     } catch (error) {
-      const errMessage = describeLlmError(error);
-      const aborted = this.isAbortLikeError(error) || sessionController.signal.aborted;
-      this.updateSessionEntry(sessionId, (entry) => ({
-        ...entry,
-        status: aborted ? "interrupted" : "failed",
-        failReason: aborted ? "interrupted" : errMessage,
-        updateTime: new Date().toISOString(),
-      }));
-
-      if (!aborted) {
-        this.onAssistantMessage(this.buildAssistantMessage(sessionId, `Request failed: ${errMessage}`, null), false);
-      }
+      this.recordSessionFailure(sessionId, error, sessionController.signal);
+      if (!this.isAbortLikeError(error) && !sessionController.signal.aborted)
+        this.onAssistantMessage(
+          this.buildAssistantMessage(sessionId, `Request failed: ${describeLlmError(error)}`, null),
+          false
+        );
     } finally {
-      if (this.sessionControllers.get(sessionId) === sessionController) {
-        this.sessionControllers.delete(sessionId);
-      }
+      if (sessionController.signal.aborted)
+        this.recordSessionFailure(sessionId, sessionController.signal.reason, sessionController.signal);
       this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
     }
   }
@@ -2157,13 +2324,29 @@ ${agentInstructions}
   }
 
   async compactSession(sessionId: string, signal?: AbortSignal): Promise<boolean> {
-    const compactionSignal = signal ?? new AbortController().signal;
-    compactionSignal.throwIfAborted();
-    this.onAssistantMessage(this.buildAssistantMessage(sessionId, "Compacting conversation...", null), false);
-    const changed = await this.compactSessionOnce(sessionId, compactionSignal, 0);
-    if (changed) {
-      this.onAssistantMessage(this.buildUserMessage(sessionId, { text: "Conversation compacted." }), false);
-    }
+    signal?.throwIfAborted();
+    if (this.compactingSessions.has(sessionId)) throw new Error("This session is already being compacted.");
+    if (this.isSessionRunning(sessionId)) throw new Error("This session is already running.");
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    const compactionSignal = controller.signal;
+    let changed = false;
+    await this.getRuntime(sessionId)
+      .run(async () => {
+        try {
+          this.onAssistantMessage(this.buildAssistantMessage(sessionId, "Compacting conversation...", null), false);
+          changed = await this.compactSessionOnce(sessionId, compactionSignal, 0);
+          if (changed)
+            this.onAssistantMessage(this.buildUserMessage(sessionId, { text: "Conversation compacted." }), false);
+        } catch (error) {
+          this.recordSessionFailure(sessionId, error, compactionSignal);
+          throw error;
+        } finally {
+          this.flushDeferredSystemMessages(sessionId);
+        }
+      }, controller)
+      .finally(() => signal?.removeEventListener("abort", abort));
     return changed;
   }
 
@@ -2475,11 +2658,6 @@ ${agentInstructions}
   }
 
   interruptActiveSession(): void {
-    const controller = this.activePromptController;
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
-    }
-
     const sessionId = this.activeSessionId;
     if (sessionId) {
       this.interruptSession(sessionId);
@@ -2487,6 +2665,7 @@ ${agentInstructions}
   }
 
   interruptSession(sessionId: string): void {
+    this.getRuntime(sessionId).interrupt();
     const session = this.getSession(sessionId);
     const processIds = this.getProcessIds(session?.processes ?? null);
     const killedPids: number[] = [];
@@ -2500,12 +2679,6 @@ ${agentInstructions}
         continue;
       }
       failedPids.push(pid);
-    }
-
-    const controller = this.sessionControllers.get(sessionId);
-    if (controller) {
-      controller.abort();
-      this.sessionControllers.delete(sessionId);
     }
 
     const now = new Date().toISOString();
@@ -2529,7 +2702,8 @@ ${agentInstructions}
   }
 
   private isInterrupted(sessionId: string): boolean {
-    return !this.sessionControllers.has(sessionId);
+    const controller = this.runtimes.get(sessionId)?.controller;
+    return !controller || controller.signal.aborted;
   }
 
   /**
@@ -2758,16 +2932,17 @@ ${agentInstructions}
   }
 
   listUndoTargets(sessionId: string): UndoTarget[] {
+    const checkpoints = new Map<string, boolean>();
     return this.listSessionMessages(sessionId)
       .map((message, index) => ({ message, index }))
       .filter(({ message }) => this.isUndoTargetMessage(message))
-      .map(({ message, index }) => ({
-        message,
-        index,
-        canRestoreCode: Boolean(
-          message.checkpointHash && this.canRestoreCheckpointHash(sessionId, message.checkpointHash)
-        ),
-      }));
+      .map(({ message, index }) => {
+        const hash = message.checkpointHash;
+        if (hash && !checkpoints.has(hash)) {
+          checkpoints.set(hash, this.canRestoreCheckpointHash(sessionId, hash));
+        }
+        return { message, index, canRestoreCode: hash ? checkpoints.get(hash)! : false };
+      });
   }
 
   restoreSessionConversation(sessionId: string, messageId: string): SessionMessage[] {
@@ -3000,6 +3175,8 @@ ${agentInstructions}
     sessionId: string,
     options: { removeMessages: boolean; processIds?: number[] }
   ): void {
+    this.runtimes.get(sessionId)?.dispose();
+    this.runtimes.delete(sessionId);
     const processIds = options.processIds ?? [];
     for (const pid of processIds) {
       const processControlKey = this.getProcessControlKey(sessionId, pid);
@@ -3014,11 +3191,6 @@ ${agentInstructions}
     this.sessionPermissionAllows.delete(sessionId);
     clearSessionState(sessionId);
     clearSessionWorkingDir(sessionId);
-    const controller = this.sessionControllers.get(sessionId);
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
-    }
-    this.sessionControllers.delete(sessionId);
     if (options.removeMessages) {
       this.removeSessionMessages([sessionId]);
       try {
@@ -3472,7 +3644,7 @@ ${agentInstructions}
   ): Promise<{ waitingForUser: boolean }> {
     const loadedSkillNames = new Set<string>();
     const hooks: ToolExecutionHooks = {
-      signal: this.sessionControllers.get(sessionId)?.signal,
+      signal: this.runtimes.get(sessionId)?.controller?.signal,
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
@@ -3559,29 +3731,7 @@ ${agentInstructions}
     if (!hasUserContent) {
       return;
     }
-    this.reportNewPrompt();
-    const signal = controller.signal;
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
-    await this.persistUserHistory(userMessage);
-    let matchedSkills: SkillInfo[] = [];
-    if (userPrompt.text) {
-      const skills = await this.listSkills(sessionId);
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
-    this.throwIfAborted(signal);
-    this.appendSkillMessages(sessionId, userPrompt.skills);
-    this.appendSkillCatalogMessage(
-      sessionId,
-      this.mergeSkillCatalog(
-        this.listPreloadedSkillCatalog(sessionId),
-        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
-      )
-    );
+    await this.appendUserPrompt(sessionId, userPrompt, controller.signal);
   }
 
   private buildToolParamsSnippet(toolFunction: unknown | null): string {

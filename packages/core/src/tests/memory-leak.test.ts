@@ -108,34 +108,32 @@ test("SessionManager.createSession auto-prune clears dropped session state cache
   assert.equal(state.wasFileRead(firstSession, filePath), false);
 });
 
-test("SessionManager.deleteSession clears controller map entry", async () => {
+test("SessionManager.deleteSession releases its runtime and aborts its controller", async () => {
   const home = createTempDir("deepcode-mem-home-");
   const projectRoot = createTempDir("deepcode-mem-workspace-");
   setHomeDir(home);
   const manager = createSessionManager(projectRoot);
 
   const sessionId = await manager.createSession({ text: "seed" });
-  const controllers = (manager as unknown as { sessionControllers: Map<string, AbortController> }).sessionControllers;
-  controllers.set(sessionId, new AbortController());
-  assert.equal(controllers.has(sessionId), true);
-
+  const runtime = (manager as any).getRuntime(sessionId);
+  const controller = new AbortController();
+  runtime.controller = controller;
   assert.equal(manager.deleteSession(sessionId), true);
-  assert.equal(controllers.has(sessionId), false);
+  assert.equal(controller.signal.aborted, true);
+  assert.equal((manager as any).runtimes.has(sessionId), false);
 });
 
 test("SessionManager.dispose aborts and clears controllers", () => {
   const projectRoot = createTempDir("deepcode-mem-workspace-");
   const manager = createSessionManager(projectRoot);
-  const controllers = (manager as unknown as { sessionControllers: Map<string, AbortController> }).sessionControllers;
-
   const controllerA = new AbortController();
   const controllerB = new AbortController();
-  controllers.set("a", controllerA);
-  controllers.set("b", controllerB);
-  assert.equal(controllers.size, 2);
-
+  (manager as any).getRuntime("a").controller = controllerA;
+  (manager as any).getRuntime("b").controller = controllerB;
   manager.dispose();
-  assert.equal(controllers.size, 0);
+  assert.equal(controllerA.signal.aborted, true);
+  assert.equal(controllerB.signal.aborted, true);
+  assert.equal((manager as any).runtimes.size, 0);
 });
 
 test("Deleted session id reuse should reset bash cwd to project root", async () => {

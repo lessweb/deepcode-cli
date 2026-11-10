@@ -1,3 +1,4 @@
+import { isBusyCommandAllowed } from "../core/slash-commands";
 import { getCompletedProposedPlan } from "@vegamo/deepcode-core/common/plan-implementation";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
@@ -8,7 +9,7 @@ import { type ReasoningSummaryMode, type ModelConfigSelection, type SettingsTarg
 import { type PromptDraft, PromptInput, type PromptSubmission } from "./PromptInput";
 import { MessageView, RawModeExitPrompt } from "../components";
 import { SessionList } from "./SessionList";
-import { type UndoRestoreMode, UndoSelector } from "./UndoSelector";
+import { type UndoRestoreMode, type QueueUndoTarget, UndoSelector } from "./UndoSelector";
 import { StatusLine } from "../components/status-line";
 import { buildLoadingText } from "../core/loading-text";
 import { writeClipboardTextAsync } from "../core/clipboard";
@@ -60,8 +61,8 @@ import type {
   SessionMessage,
   SessionStatus,
   SkillInfo,
-  UndoTarget,
   UserPromptContent,
+  QueuedMessage,
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
 import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
@@ -108,7 +109,9 @@ function App({
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
-  const [undoTargets, setUndoTargets] = useState<UndoTarget[]>([]);
+  const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+  const [editingQueue, setEditingQueue] = useState<{ sessionId: string; id: string } | null>(null);
+  const savedQueueDraft = useRef<PromptDraft | null>(null);
   const [promptDraft, setPromptDraft] = useState<PromptDraft | null>(null);
   const [statusLine, setStatusLine] = useState<string>("");
   const [errorLine, setErrorLine] = useState<string | null>(null);
@@ -123,6 +126,7 @@ function App({
   } | null>(null);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [isExiting, setIsExiting] = useState(false);
+  const exitingRef = useRef(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [welcomeNonce, setWelcomeNonce] = useState(0);
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot, settingsFile));
@@ -147,13 +151,22 @@ function App({
       getResolvedSettings: () => resolveCurrentSettings(projectRoot, settingsFile),
       renderMarkdown: (text) => text,
       onAssistantMessage: (message: SessionMessage) => {
-        setMessages((prev) => [...prev, message]);
+        setMessages((prev) => (prev.some((item) => item.id === message.id) ? prev : [...prev, message]));
         if (rawModeRef.current === RawMode.Raw) {
           const rendered = renderMessageToStdout(message, rawModeRef.current);
           if (rendered) {
             writeStdoutLine("\n");
             writeStdoutLine(rendered + "\n\n");
           }
+        }
+      },
+      onUserMessage: (message) => {
+        setMessages((previous) =>
+          previous.some((item) => item.id === message.id) ? previous : [...previous, message]
+        );
+        if (rawModeRef.current === RawMode.Raw) {
+          const rendered = renderMessageToStdout(message, rawModeRef.current);
+          if (rendered) writeStdoutLine("\n" + rendered + "\n\n");
         }
       },
       onSessionEntryUpdated: (entry) => {
@@ -199,10 +212,69 @@ function App({
     });
   }, [projectRoot, settingsFile, clientFactory]);
 
+  useEffect(
+    () =>
+      sessionManager.subscribeRuntime(() => {
+        const id = sessionManager.getActiveSessionId();
+        setQueuedMessages(id ? sessionManager.listQueuedMessages(id) : []);
+        setBusy(Boolean(compactionControllerRef.current || (id && sessionManager.isSessionRunning(id))));
+        if (id && !sessionManager.isSessionRunning(id)) {
+          const entry = sessionManager.getSession(id);
+          setPendingPlanImplementation(
+            getCompletedProposedPlan(Boolean(entry?.planMode), entry?.status, entry?.assistantReply ?? null)
+          );
+        }
+      }),
+    [sessionManager]
+  );
+
   const activeSessionId = sessionManager.getActiveSessionId();
+  const preparingPromptId = activeSessionId ? sessionManager.getPreparingPromptId(activeSessionId) : undefined;
+  const queuedTargets = useMemo<QueueUndoTarget[]>(
+    () =>
+      queuedMessages
+        .filter((message) => message.sessionId === activeSessionId)
+        .map((queued, index) => ({
+          queued,
+          index,
+          canRestoreCode: false,
+          message: {
+            id: queued.id,
+            sessionId: queued.sessionId,
+            role: "user",
+            content:
+              queued.content.text ||
+              (queued.content.skills?.length
+                ? `Use skills: ${queued.content.skills.map((skill) => skill.name).join(", ")}`
+                : "") ||
+              (queued.content.imageUrls?.length ? "[Image]" : ""),
+            contentParams: queued.content.imageUrls?.map((url) => ({ type: "image_url", image_url: { url } })) ?? null,
+            messageParams: null,
+            compacted: false,
+            visible: true,
+            createTime: queued.submittedAt,
+            updateTime: queued.submittedAt,
+            meta: { userPrompt: queued.content },
+          },
+        })),
+    [activeSessionId, queuedMessages]
+  );
+  const undoTargets = useMemo<QueueUndoTarget[]>(() => {
+    if (view !== "undo" || !activeSessionId) return [];
+    const history = sessionManager.listUndoTargets(activeSessionId);
+    return [...history, ...queuedTargets];
+  }, [view, activeSessionId, queuedTargets, sessionManager]);
+
   useEffect(() => {
     processStdoutRef.current.clear();
   }, [activeSessionId]);
+  useEffect(() => {
+    if (editingQueue && editingQueue.sessionId !== activeSessionId) {
+      sessionManager.finishQueuedMessageEdit(editingQueue.sessionId, editingQueue.id);
+      setEditingQueue(null);
+      savedQueueDraft.current = null;
+    }
+  }, [activeSessionId, editingQueue, sessionManager]);
   const processOutputItems = useMemo(
     () =>
       buildProcessOutputItems(
@@ -330,42 +402,71 @@ function App({
     return () => {
       compactionControllerRef.current?.abort();
       compactionControllerRef.current = null;
-      sessionManager.dispose();
+      try {
+        sessionManager.dispose();
+      } catch {
+        // Cleanup errors must not prevent Ink from restoring the terminal.
+      }
     };
   }, [sessionManager]);
 
   writeRef.current = write;
   const handleExit = useCallback(
-    ({ showCommand, showSummary }: { showCommand: boolean; showSummary: boolean }) => {
-      compactionControllerRef.current?.abort();
-      compactionControllerRef.current = null;
+    async ({ showCommand, showSummary }: { showCommand: boolean; showSummary: boolean }) => {
+      if (exitingRef.current) return;
+      exitingRef.current = true;
       setIsExiting(true);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        compactionControllerRef.current?.abort();
+        compactionControllerRef.current = null;
+        const sessionId = sessionManager.getActiveSessionId();
+        if (sessionId && sessionManager.isSessionRunning(sessionId)) {
+          const deadline = new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 5_000);
+          });
+          sessionManager.interruptSession(sessionId);
+          await Promise.race([sessionManager.waitForSessionIdle(sessionId), deadline]);
+        }
+      } catch {
+        // Exit even when interruption or session cleanup fails.
+      } finally {
+        clearTimeout(timer);
+      }
       setTimeout(() => {
-        const activeSessionId = sessionManager.getActiveSessionId();
-        const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
-        const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
-        const rateLimitHint = buildPluginRateLimitHintText(session);
+        try {
+          const activeSessionId = sessionManager.getActiveSessionId();
+          const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+          const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
+          const rateLimitHint = buildPluginRateLimitHintText(session);
 
-        writeStdoutLine("\n");
-        if (showCommand) {
-          writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
           writeStdoutLine("\n");
-        }
-        if (showSummary) {
-          const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
-          writeStdoutLine(summary);
-          writeStdoutLine("\n");
-        }
-        if (resumeHint) {
-          writeStdoutLine(resumeHint);
-          if (rateLimitHint) {
-            writeStdoutLine(rateLimitHint);
+          if (showCommand) {
+            writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
+            writeStdoutLine("\n");
           }
-          writeStdoutLine("\n");
+          if (showSummary) {
+            const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
+            writeStdoutLine(summary);
+            writeStdoutLine("\n");
+          }
+          if (resumeHint) {
+            writeStdoutLine(resumeHint);
+            if (rateLimitHint) {
+              writeStdoutLine(rateLimitHint);
+            }
+            writeStdoutLine("\n");
+          }
+        } catch {
+          // Printing the summary is best effort during shutdown.
         }
-
-        sessionManager.dispose();
-        exit();
+        try {
+          sessionManager.dispose();
+        } catch {
+          // Remaining handles are closed when the CLI process exits.
+        } finally {
+          exit();
+        }
       }, 0);
     },
     [exit, sessionManager]
@@ -373,14 +474,20 @@ function App({
 
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
+      if (
+        (busy ||
+          (sessionManager.getActiveSessionId() &&
+            sessionManager.isSessionRunning(sessionManager.getActiveSessionId()!))) &&
+        submission.command &&
+        !isBusyCommandAllowed(submission.command)
+      )
+        return;
       if (submission.command === "exit") {
-        handleExit({ showCommand: true, showSummary: true });
+        await handleExit({ showCommand: true, showSummary: true });
         return;
       }
-      if (compactionControllerRef.current) return;
       setCommandNotice(null);
       if (submission.command === "copy") {
-        if (busy) return;
         setErrorLine(null);
         const sessionId = sessionManager.getActiveSessionId();
         const lastAssistant = sessionId
@@ -431,7 +538,7 @@ function App({
           if (compactionControllerRef.current === controller) {
             compactionControllerRef.current = null;
             setCompacting(false);
-            setBusy(false);
+            setBusy(sessionManager.isSessionRunning(sessionId));
             setStreamProgress(null);
             setRetryEvent(null);
           }
@@ -489,11 +596,16 @@ function App({
           setErrorLine("No active session to undo.");
           return;
         }
-        setUndoTargets(sessionManager.listUndoTargets(activeSessionId));
+        if (editingQueue) {
+          sessionManager.finishQueuedMessageEdit(editingQueue.sessionId, editingQueue.id);
+          setEditingQueue(null);
+        }
+        savedQueueDraft.current = submission.savedDraft ?? null;
         navigateToSubView("undo");
         return;
       }
       if (submission.command === "mcp") {
+        setPromptDraft(submission.savedDraft ?? null);
         setMcpStatuses(sessionManager.getMcpStatus());
         navigateToSubView("mcp-status");
         return;
@@ -515,6 +627,32 @@ function App({
         isAnswers: submission.isAnswers,
       };
 
+      if (editingQueue && !submission.command) {
+        const changed = sessionManager.finishQueuedMessageEdit(editingQueue.sessionId, editingQueue.id, {
+          text: prompt.text,
+          imageUrls: prompt.imageUrls,
+          skills: prompt.skills,
+          planMode: prompt.planMode,
+        });
+        setEditingQueue(null);
+        setPromptDraft(savedQueueDraft.current ? { ...savedQueueDraft.current, nonce: Date.now() } : null);
+        if (savedQueueDraft.current?.planMode !== undefined) setPlanMode(savedQueueDraft.current.planMode);
+        savedQueueDraft.current = null;
+        if (!changed) setErrorLine("This message is no longer pending.");
+        return;
+      }
+      if (
+        activeSessionId &&
+        (busy || sessionManager.isSessionRunning(activeSessionId)) &&
+        !submission.command &&
+        !submission.isAnswers &&
+        !permissionReply
+      ) {
+        sessionManager.enqueuePrompt(activeSessionId, prompt);
+        setErrorLine(null);
+        return;
+      }
+
       const trimmedText = (submission.text ?? "").trim();
       const selectedSkillNames = submission.selectedSkills?.map((skill) => skill.name).filter(Boolean) ?? [];
       const userDisplayContent =
@@ -522,7 +660,7 @@ function App({
         (selectedSkillNames.length > 0 ? `Use skills: ${selectedSkillNames.join(", ")}` : "") ||
         (submission.imageUrls.length > 0 ? "[Image]" : "");
 
-      if (userDisplayContent && submission.command !== "continue") {
+      if (userDisplayContent && submission.command !== "continue" && (submission.isAnswers || permissionReply)) {
         setMessages((prev) => [
           ...prev,
           buildSyntheticUserMessage(
@@ -551,7 +689,7 @@ function App({
         refreshSessionsList();
         const completedSession = sessionManager.getSession(sessionManager.getActiveSessionId() ?? "");
         const proposedPlan = getCompletedProposedPlan(
-          prompt.planMode === true,
+          completedSession?.planMode === true,
           completedSession?.status,
           completedSession?.assistantReply ?? null
         );
@@ -560,7 +698,8 @@ function App({
         const message = error instanceof Error ? error.message : String(error);
         setErrorLine(message);
       } finally {
-        setBusy(false);
+        const id = sessionManager.getActiveSessionId();
+        setBusy(Boolean(id && sessionManager.isSessionRunning(id)));
         setStreamProgress(null);
         setRetryEvent(null);
         const finalActiveSessionId = sessionManager.getActiveSessionId();
@@ -571,6 +710,7 @@ function App({
     },
     [
       busy,
+      editingQueue,
       sessionManager,
       pendingPermissionReply,
       handleExit,
@@ -715,7 +855,7 @@ function App({
   );
 
   const handleExitShortcut = useCallback(() => {
-    handleExit({ showCommand: false, showSummary: false });
+    void handleExit({ showCommand: false, showSummary: false });
   }, [handleExit]);
 
   const reloadActiveSessionView = useCallback(
@@ -824,7 +964,7 @@ function App({
   }, []);
 
   const handleUndoRestore = useCallback(
-    async (target: UndoTarget, restoreMode: UndoRestoreMode): Promise<void> => {
+    async (target: QueueUndoTarget, restoreMode: UndoRestoreMode): Promise<void> => {
       const sessionId = sessionManager.getActiveSessionId();
       if (!sessionId) {
         setErrorLine("No active session to undo.");
@@ -833,6 +973,29 @@ function App({
         return;
       }
 
+      if (target.queued) {
+        if (restoreMode === "remove") {
+          sessionManager.removeQueuedMessage(sessionId, target.message.id);
+          setPromptDraft(savedQueueDraft.current);
+          savedQueueDraft.current = null;
+        } else if (restoreMode === "edit") {
+          const queued = sessionManager.beginQueuedMessageEdit(sessionId, target.message.id);
+          if (queued) {
+            setEditingQueue({ sessionId, id: queued.id });
+            setPromptDraft({
+              nonce: Date.now(),
+              text: queued.content.text ?? "",
+              imageUrls: queued.content.imageUrls ?? [],
+              selectedSkills: queued.content.skills,
+              planMode: queued.content.planMode,
+            });
+            setPlanMode(Boolean(queued.content.planMode));
+          } else setErrorLine("This message is no longer pending.");
+        }
+        setView("chat");
+        return;
+      }
+      if (sessionManager.isSessionRunning(sessionId)) return;
       const errors: string[] = [];
       if (restoreMode === "code-and-conversation") {
         try {
@@ -863,7 +1026,8 @@ function App({
   );
 
   const handleRawModeChange = useCallback(
-    (nextMode: string) => {
+    (nextMode: string, draft?: PromptDraft) => {
+      if (draft && editingQueue) setPromptDraft(draft);
       const activeSessionId = sessionManager.getActiveSessionId();
       setMode(nextMode as RawMode);
       if (nextMode === RawMode.Lite || nextMode === RawMode.None) {
@@ -887,7 +1051,7 @@ function App({
           renderRawModeMessages(allMessages, nextMode);
         } else if (activeSessionId) {
           // Switch to chat view to render messages.
-          handleSelectSession(activeSessionId);
+          void resetStaticView(loadVisibleMessages(sessionManager, activeSessionId), { clearScreen: true });
         } else {
           // No active session: just show the welcome screen once.
           setWelcomeNonce((n) => n + 1);
@@ -895,7 +1059,7 @@ function App({
         }
       }, 200);
     },
-    [handleSelectSession, sessionManager, setMode]
+    [editingQueue, resetStaticView, sessionManager, setMode]
   );
 
   useEffect(() => {
@@ -1055,6 +1219,9 @@ function App({
       staticItems.length,
       lastStaticItem?.id ?? "",
       lastStaticItem?.updateTime ?? "",
+      ...queuedTargets.map(
+        ({ message, queued }) => `${message.id}:${message.content}:${queued?.content.imageUrls?.length ?? 0}`
+      ),
       shouldShowQuestionPrompt ? (pendingQuestion?.messageId ?? "") : "",
       activeAskPermissions?.length ?? 0,
       pendingPermissionReply ? "pending-permission-reply" : "no-pending-permission-reply",
@@ -1067,6 +1234,7 @@ function App({
     errorLine,
     pendingPermissionReply,
     pendingQuestion,
+    queuedTargets,
     shouldShowQuestionPrompt,
     showProcessStdout,
     staticItems,
@@ -1090,7 +1258,8 @@ function App({
       return;
     }
     setDismissedQuestionIds((prev) => new Set(prev).add(pendingQuestion.messageId));
-  }, [pendingQuestion]);
+    sessionManager.interruptSession(pendingQuestion.sessionId);
+  }, [pendingQuestion, sessionManager]);
 
   const handlePermissionResult = useCallback(
     (result: PermissionPromptResult) => {
@@ -1153,6 +1322,10 @@ function App({
           );
         }}
       </Static>
+      {view === "chat" &&
+        queuedTargets.map(({ message }) => (
+          <MessageView key={message.id} message={message} projectRoot={projectRoot} width={screenWidth} />
+        ))}
       {(busy || statusLine) && !isExiting ? <StatusLine busy={busy} text={statusLine} width={screenWidth} /> : null}
       {commandNotice && !isExiting ? (
         <Box>
@@ -1164,7 +1337,9 @@ function App({
           <Text color="red">Error: {errorLine}</Text>
         </Box>
       ) : null}
-      {showProcessStdout ? (
+      {isExiting ? (
+        <Text dimColor>Exiting…</Text>
+      ) : showProcessStdout ? (
         <ProcessStdoutView
           key={activeSessionId}
           items={processOutputItems}
@@ -1194,9 +1369,11 @@ function App({
       ) : view === "undo" ? (
         <UndoSelector
           targets={undoTargets}
+          busy={busy}
           onSelect={(target, restoreMode) => void handleUndoRestore(target, restoreMode)}
           onCancel={() => {
-            setPromptDraft(null);
+            setPromptDraft(savedQueueDraft.current);
+            savedQueueDraft.current = null;
             setView("chat");
           }}
         />
@@ -1209,7 +1386,7 @@ function App({
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />
-      ) : shouldShowQuestionPrompt && pendingQuestion && !busy ? (
+      ) : shouldShowQuestionPrompt && pendingQuestion && !busy && !editingQueue ? (
         <AskUserQuestionPrompt
           questions={pendingQuestion.questions}
           onSubmit={handleQuestionAnswers}
@@ -1219,6 +1396,7 @@ function App({
         activeAskPermissions &&
         activeAskPermissions.length > 0 &&
         !pendingPermissionReply &&
+        !editingQueue &&
         !busy ? (
         <PermissionPrompt
           key={sessionManager.getActiveSessionId()}
@@ -1227,9 +1405,9 @@ function App({
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />
-      ) : pendingPlanImplementation && !busy ? (
+      ) : pendingPlanImplementation && !busy && !editingQueue ? (
         <PlanImplementationPrompt onSelect={handlePlanImplementationChoice} />
-      ) : isExiting ? null : (
+      ) : (
         <PromptInput
           key={sessionManager.getActiveSessionId() ?? "new"}
           projectRoot={projectRoot}
@@ -1239,10 +1417,23 @@ function App({
           reasoningSummary={resolvedSettings.experimental.reasoningSummary}
           promptHistory={promptHistory}
           busy={busy}
+          pendingMessageCount={queuedTargets.filter(({ message }) => message.id !== preparingPromptId).length}
           cursorLayoutKey={promptCursorLayoutKey}
           loadingText={loadingText}
           promptDraft={promptDraft}
           onPromptDraftApplied={handlePromptDraftApplied}
+          editingQueuedMessage={Boolean(editingQueue)}
+          onCancelQueueEdit={() => {
+            if (editingQueue) sessionManager.finishQueuedMessageEdit(editingQueue.sessionId, editingQueue.id);
+            setEditingQueue(null);
+            setPromptDraft(
+              savedQueueDraft.current
+                ? { ...savedQueueDraft.current, nonce: Date.now() }
+                : { nonce: Date.now(), text: "", imageUrls: [] }
+            );
+            if (savedQueueDraft.current?.planMode !== undefined) setPlanMode(savedQueueDraft.current.planMode);
+            savedQueueDraft.current = null;
+          }}
           onSubmit={handleSubmit}
           onModelConfigChange={handleModelConfigChange}
           onReasoningSummaryChange={handleReasoningSummaryChange}

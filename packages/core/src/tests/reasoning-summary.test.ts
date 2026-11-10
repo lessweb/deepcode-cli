@@ -94,10 +94,10 @@ async function sessionFixture(t: TestContext, create: (request: any, options: an
   (manager as any).maybeGenerateSessionTitle = () => {};
   (manager as any).reportNewPrompt = () => {};
   manager.listSkills = async () => [];
-  const activate = manager.activateSession;
-  manager.activateSession = async () => {};
+  const activate = (manager as any).runSessionIterations;
+  (manager as any).runSessionIterations = async () => {};
   const id = await manager.createSession({ text: "标题" });
-  manager.activateSession = activate;
+  (manager as any).runSessionIterations = activate;
   return { manager, id, shown };
 }
 

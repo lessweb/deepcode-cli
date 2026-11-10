@@ -63,7 +63,12 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
   const originalPrompt = message("user", "今天星期几");
   originalPrompt.meta = { userPrompt: { text: originalPrompt.content ?? "", imageUrls } };
   let history = [originalPrompt, message("assistant", "今天是星期二。")];
-  t.mock.method(SessionManager.prototype, "initMcpServers", async () => {});
+  const managerRef: { current?: SessionManager } = {};
+  let busy = false;
+  t.mock.method(SessionManager.prototype, "isSessionRunning", () => busy);
+  t.mock.method(SessionManager.prototype, "initMcpServers", async function (this: SessionManager) {
+    managerRef.current = this;
+  });
   t.mock.method(SessionManager.prototype, "listSkills", async () => []);
   t.mock.method(SessionManager.prototype, "getActiveSessionId", () => entry.id);
   t.mock.method(SessionManager.prototype, "getSession", () => entry);
@@ -150,7 +155,15 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
     submissions,
     send,
     submit,
+    manager: managerRef.current!,
+    sessionId: entry.id,
+    flush,
     latest: () => frames.at(-1) ?? "",
+    async setBusy(value: boolean) {
+      busy = value;
+      managerRef.current!.setActiveSessionId(null);
+      await flush();
+    },
     async undo() {
       await submit("/undo");
       await send("\r"); // Select the latest user message.
@@ -201,4 +214,83 @@ test("consuming an /undo draft preserves its attachments and allows another undo
   await h.submit("继续");
   assert.equal(h.submissions.at(-1)?.text, "继续");
   assert.deepEqual(h.submissions.at(-1)?.imageUrls, []);
+});
+
+test("busy /undo keeps history visible but only allows changing pending prompts", async (t) => {
+  const h = await harness(t);
+  await h.setBusy(true);
+  await h.submit("/undo");
+  assert.match(h.latest(), /今天星期几/);
+  assert.match(h.latest(), /unavailable while running/);
+  assert.doesNotMatch(h.latest(), /Nothing to undo/);
+  await h.send("\r");
+  assert.doesNotMatch(h.latest(), /Selected prompt:/);
+  assert.equal(h.manager.listSessionMessages(h.sessionId).length, 2);
+  await h.send("\x1b");
+
+  const queued = h.manager.enqueuePrompt(h.sessionId, { text: "pending input" });
+  await h.flush();
+  await h.submit("/undo");
+  assert.match(h.latest(), /pending input/);
+  assert.match(h.latest(), / · pending/);
+  await h.send("\r");
+  assert.match(h.latest(), /Remove/);
+  assert.match(h.latest(), /Edit/);
+  await h.send("\r");
+  assert.equal(
+    h.manager.listQueuedMessages(h.sessionId).some((message) => message.id === queued.id),
+    false
+  );
+  assert.match(h.latest(), /Type your message/);
+
+  await h.setBusy(false);
+  await h.submit("/undo");
+  await h.send("\r");
+  assert.match(h.latest(), /Restore conversation/);
+});
+
+test("idle /undo appends pending prompts and edits preserve ID, attachments and skills", async (t) => {
+  const h = await harness(t);
+  const content = {
+    text: "pending input",
+    imageUrls: ["file:///tmp/image.png"],
+    skills: [{ name: "demo", path: "/tmp/demo/SKILL.md", description: "demo" }],
+    planMode: true,
+  };
+  // Leave the queue paused so this test exercises the UI without a model request.
+  h.manager.setActiveSessionId(null);
+  const queued = h.manager.enqueuePrompt(h.sessionId, content);
+  await h.flush();
+  await h.submit("/undo");
+  assert.match(h.latest(), /pending input/);
+  assert.match(h.latest(), /pending/);
+  assert.match(h.latest(), /今天星期几/);
+  await h.send("\r");
+  assert.match(h.latest(), /Remove/);
+  await h.send("\x1b[B");
+  await h.send("\r");
+  assert.match(h.latest(), /pending input/);
+  await h.send("\x15");
+  await h.submit("edited input");
+  const updated = h.manager.listQueuedMessages(h.sessionId)[0];
+  assert.equal(updated.id, queued.id);
+  assert.equal(updated.submittedAt, queued.submittedAt);
+  assert.deepEqual(updated.content, { ...content, text: "edited input" });
+  assert.equal(h.submissions.length, 0);
+});
+
+test("cancelling a pending edit keeps the original queue content", async (t) => {
+  const h = await harness(t);
+  h.manager.setActiveSessionId(null);
+  const queued = h.manager.enqueuePrompt(h.sessionId, { text: "original pending" });
+  await h.flush();
+  await h.submit("/undo");
+  await h.send("\r");
+  await h.send("\x1b[B");
+  await h.send("\r");
+  await h.send("\x15changed");
+  await h.send("\x1b");
+  assert.equal(h.manager.listQueuedMessages(h.sessionId)[0].id, queued.id);
+  assert.equal(h.manager.listQueuedMessages(h.sessionId)[0].content.text, "original pending");
+  assert.match(h.latest(), /Type your message/);
 });

@@ -213,3 +213,5 @@ export type {
   HistoryCursor,
   HistoryBatch,
 } from "./common/message-history";
+
+export type { PromptContent, QueuedMessage, QueuePausedReason } from "./prompt-queue";

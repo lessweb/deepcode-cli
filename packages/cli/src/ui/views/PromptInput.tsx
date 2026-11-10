@@ -1,3 +1,4 @@
+import { isBusyCommandAllowed } from "../core/slash-commands";
 import { useHistorySearch, isHistorySearchShortcut } from "../hooks/useHistorySearch";
 import { historySearchFooter, historyMatchRange } from "../core/history-search-display";
 import React, { useEffect, useMemo, useRef, useState } from "react";
@@ -92,6 +93,7 @@ export type PromptSubmission = PermissionReply & {
   selectedSkills?: SkillInfo[];
   planMode?: boolean;
   isAnswers?: boolean;
+  savedDraft?: PromptDraft;
   command?: "new" | "resume" | "fork" | "continue" | "compact" | "copy" | "undo" | "mcp" | "exit";
 };
 
@@ -99,6 +101,8 @@ export type PromptDraft = {
   nonce: number;
   text: string;
   imageUrls: string[];
+  selectedSkills?: SkillInfo[];
+  planMode?: boolean;
 };
 
 type Props = {
@@ -109,6 +113,7 @@ type Props = {
   screenWidth: number;
   promptHistory: string[];
   busy: boolean;
+  pendingMessageCount?: number;
   cursorLayoutKey?: string;
   loadingText?: string | null;
   disabled?: boolean;
@@ -125,8 +130,10 @@ type Props = {
     target: PermissionSettingsEdit["target"],
     changes: PermissionSettingsChanges
   ) => string | Promise<string>;
-  onRawModeChange?: (mode: string) => void;
+  onRawModeChange?: (mode: string, draft?: PromptDraft) => void;
   onPlanModeChange: (enabled: boolean) => void;
+  editingQueuedMessage?: boolean;
+  onCancelQueueEdit?: () => void;
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
   onExitShortcut?: () => void;
@@ -144,6 +151,8 @@ const PromptPrefixLine = React.memo(function PromptPrefixLine(): React.ReactElem
 });
 
 export const PromptInput = React.memo(function PromptInput({
+  editingQueuedMessage,
+  onCancelQueueEdit,
   projectRoot,
   skills,
   modelConfig,
@@ -151,6 +160,7 @@ export const PromptInput = React.memo(function PromptInput({
   screenWidth,
   promptHistory,
   busy,
+  pendingMessageCount = 0,
   cursorLayoutKey,
   loadingText,
   disabled,
@@ -236,7 +246,7 @@ export const PromptInput = React.memo(function PromptInput({
       showFileMentionMenu
         ? []
         : slashToken
-          ? filterSlashCommands(slashItems, slashToken)
+          ? filterSlashCommands(slashItems, slashToken).filter((item) => !busy || isBusyCommandAllowed(item.kind))
           : [],
     [
       search,
@@ -248,6 +258,7 @@ export const PromptInput = React.memo(function PromptInput({
       showFileMentionMenu,
       slashToken,
       slashItems,
+      busy,
     ]
   );
   const showMenu = slashMenu.length > 0;
@@ -257,12 +268,14 @@ export const PromptInput = React.memo(function PromptInput({
   const busyStatusText =
     loadingText && loadingText.trim()
       ? `${loadingText}${processOrPasteHint}`
-      : `esc to interrupt · ctrl+c to cancel input${processOrPasteHint}`;
+      : `enter queue · esc interrupt${processOrPasteHint}`;
   const footerText = statusMessage
     ? statusMessage
-    : busy
-      ? busyStatusText
-      : `enter send · shift+enter newline · @ files · ${getClipboardPasteShortcutLabel().toLowerCase()} image / rich text · / commands · ctrl+d exit${pasteHint}`;
+    : editingQueuedMessage
+      ? "enter save · esc cancel"
+      : busy
+        ? busyStatusText
+        : `enter send · shift+enter newline · @ files · ${getClipboardPasteShortcutLabel().toLowerCase()} image / rich text · / commands · ctrl+d exit${pasteHint}`;
   const showFooterText = useMemo(
     () =>
       showMenu ||
@@ -295,11 +308,12 @@ export const PromptInput = React.memo(function PromptInput({
       [
         screenWidth,
         cursorLayoutKey ?? "default",
+        pendingMessageCount,
         imageUrls.length,
         planMode ? "plan-mode" : "default-mode",
         selectedSkills.map((skill) => skill.name).join("\u001F"),
       ].join("\u001E"),
-    [cursorLayoutKey, imageUrls.length, planMode, screenWidth, selectedSkills]
+    [cursorLayoutKey, pendingMessageCount, imageUrls.length, planMode, screenWidth, selectedSkills]
   );
   useTerminalFocusReporting(stdout, !disabled);
   useTerminalExtendedKeys(stdout, !disabled);
@@ -307,10 +321,10 @@ export const PromptInput = React.memo(function PromptInput({
   const terminalCursorActive = usePromptTerminalCursor(
     search ? searchTextRef : inputTextRef,
     search ? { row: 0, column: searchFooter.column } : cursorPlacement,
-    search ? !disabled && hasTerminalFocus && Boolean(stdout.isTTY) : !busy && usePositionedCursor,
+    !busy && (search ? !disabled && hasTerminalFocus && Boolean(stdout.isTTY) : usePositionedCursor),
     `${promptCursorLayoutKey}:${search ? "search" : "input"}`
   );
-  useHiddenTerminalCursor(stdout, !disabled && ((!search && busy) || !terminalCursorActive));
+  useHiddenTerminalCursor(stdout, !disabled && !terminalCursorActive);
 
   const refreshFileMentionItems = React.useCallback(() => {
     setFileMentionItems(scanFileMentionItems(projectRoot));
@@ -366,7 +380,7 @@ export const PromptInput = React.memo(function PromptInput({
     appliedDraftNonceRef.current = promptDraft.nonce;
     setBuffer({ text: promptDraft.text, cursor: promptDraft.text.length });
     setImageUrls(promptDraft.imageUrls);
-    setSelectedSkills([]);
+    setSelectedSkills(promptDraft.selectedSkills ?? []);
     setShowSkillsDropdown(false);
     setOpenRawModelDropdown(false);
     setPermissionEdit(null);
@@ -415,6 +429,10 @@ export const PromptInput = React.memo(function PromptInput({
         return;
       }
 
+      if (key.escape && editingQueuedMessage) {
+        onCancelQueueEdit?.();
+        return;
+      }
       if (key.escape) {
         if (openRawModelDropdown) {
           return;
@@ -544,7 +562,6 @@ export const PromptInput = React.memo(function PromptInput({
 
       const noModifier = !key.shift && !key.ctrl && !key.meta;
       const returnAction = getPromptReturnKeyAction(key);
-      const isPlainReturn = returnAction === "submit";
 
       if (key.shift && key.tab) {
         onPlanModeChange(!planMode);
@@ -573,11 +590,6 @@ export const PromptInput = React.memo(function PromptInput({
             return;
           }
         }
-      }
-
-      if (busy && isPlainReturn) {
-        setStatusMessage("wait for the current response or press esc to interrupt");
-        return;
       }
 
       if (returnAction === "newline") {
@@ -777,8 +789,18 @@ export const PromptInput = React.memo(function PromptInput({
     resetPastes();
   }
 
+  function snapshotDraft(): PromptDraft {
+    return {
+      nonce: Date.now(),
+      text: expandPasteMarkers(removeCurrentSlashToken(buffer).text, pastesRef.current),
+      imageUrls,
+      selectedSkills,
+      planMode,
+    };
+  }
+
   function handleSlashSelection(item: SlashCommandItem): void {
-    if (busy && item.kind !== "exit") {
+    if (busy && !isBusyCommandAllowed(item.kind)) {
       setStatusMessage("wait for the current response or press esc to interrupt");
       return;
     }
@@ -852,7 +874,12 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
     if (item.kind === "undo") {
-      onSubmit({ text: "/undo", imageUrls: [], command: "undo" });
+      onSubmit({
+        text: "/undo",
+        imageUrls: [],
+        command: "undo",
+        savedDraft: snapshotDraft(),
+      });
       resetPromptInput();
       return;
     }
@@ -871,7 +898,7 @@ export const PromptInput = React.memo(function PromptInput({
       return;
     }
     if (item.kind === "mcp") {
-      onSubmit({ text: "/mcp", imageUrls: [], command: "mcp" });
+      onSubmit({ text: "/mcp", imageUrls: [], command: "mcp", savedDraft: snapshotDraft() });
       resetPromptInput();
       return;
     }
@@ -884,11 +911,6 @@ export const PromptInput = React.memo(function PromptInput({
   }
 
   function submitCurrentBuffer(): void {
-    if (busy) {
-      setStatusMessage("wait for the current response or press esc to interrupt");
-      return;
-    }
-
     const trimmed = buffer.text.trim();
     if (!trimmed && imageUrls.length === 0 && selectedSkills.length === 0) {
       return;
@@ -896,6 +918,11 @@ export const PromptInput = React.memo(function PromptInput({
 
     const slash = resolveSlashSubmission(slashItems, buffer.text);
     if (slash) {
+      const kind = slash.kind === "plan" ? "plan" : slash.kind === "raw" ? "raw" : slash.item.kind;
+      if (busy && !isBusyCommandAllowed(kind)) {
+        setStatusMessage("wait for the current response or press esc to interrupt");
+        return;
+      }
       if (slash.kind === "command") {
         handleSlashSelection(slash.item);
         return;
@@ -913,7 +940,7 @@ export const PromptInput = React.memo(function PromptInput({
       }
       if (slash.kind === "raw") {
         const mode = slash.mode === "lite" ? RawMode.Lite : slash.mode === "normal" ? RawMode.None : RawMode.Raw;
-        onRawModeChange?.(mode);
+        onRawModeChange?.(mode, { ...snapshotDraft(), text: "" });
         resetPromptInput();
         return;
       }
@@ -951,6 +978,14 @@ export const PromptInput = React.memo(function PromptInput({
 
   return (
     <Box flexDirection="column" width={screenWidth}>
+      {pendingMessageCount > 0 ? (
+        <Box>
+          <Text color="magenta">
+            {`⏳ ${pendingMessageCount} pending message${pendingMessageCount === 1 ? "" : "s"}`}
+          </Text>
+          <Text dimColor> (use /undo to edit)</Text>
+        </Box>
+      ) : null}
       {(!search || search.preview === null) && imageUrls.length > 0 ? (
         <Box>
           <Text color="magenta">{formatImageAttachmentStatus(imageUrls.length)}</Text>
@@ -992,7 +1027,7 @@ export const PromptInput = React.memo(function PromptInput({
                 !disabled && hasTerminalFocus && !search,
                 placeholder,
                 pastesRef.current,
-                !busy && !terminalCursorActive && !search
+                !terminalCursorActive && !search
               )
             )}
           </PromptText>
@@ -1002,7 +1037,7 @@ export const PromptInput = React.memo(function PromptInput({
       <RawModelDropdown
         open={openRawModelDropdown}
         onClose={setOpenRawModelDropdown}
-        onSelect={(mode) => onRawModeChange?.(mode)}
+        onSelect={(mode) => onRawModeChange?.(mode, snapshotDraft())}
         screenWidth={screenWidth}
       />
       <SkillsDropdown
