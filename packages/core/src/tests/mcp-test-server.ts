@@ -1,5 +1,19 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import type { TestContext } from "node:test";
+
+export function createMcpTestServer(t: TestContext): string {
+  const directory = mkdtempSync(path.join(tmpdir(), "deepcode-mcp-probe-"));
+  const serverPath = path.join(directory, "server.cjs");
+  // Windows MCP commands run through cmd.exe, which cannot safely pass multiline node -e scripts.
+  writeFileSync(serverPath, MCP_TEST_SERVER);
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  return serverPath;
+}
+
 // A real stdio server that can ignore cancellation and send late responses.
-export const MCP_TEST_SERVER = `
+const MCP_TEST_SERVER = `
 const readline = require("node:readline");
 const calls = [];
 const cancelled = [];

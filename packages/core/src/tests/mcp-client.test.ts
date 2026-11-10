@@ -7,14 +7,14 @@ import path from "node:path";
 import { McpClient, createMcpSpawnSpec } from "../mcp/mcp-client";
 import { McpManager } from "../mcp/mcp-manager";
 import { ToolExecutor } from "../tools/executor";
-import { MCP_TEST_SERVER } from "./mcp-test-server";
+import { createMcpTestServer } from "./mcp-test-server";
 
 async function startClient(t: TestContext) {
   let started!: (params: Record<string, unknown>) => void;
   let cancelled!: (params: Record<string, unknown>) => void;
   const startedRequest = new Promise<Record<string, unknown>>((resolve) => (started = resolve));
   const cancelledRequest = new Promise<Record<string, unknown>>((resolve) => (cancelled = resolve));
-  const client = new McpClient("probe", process.execPath, ["-e", MCP_TEST_SERVER], undefined, (method, params) => {
+  const client = new McpClient("probe", process.execPath, [createMcpTestServer(t)], undefined, (method, params) => {
     if (method === "test/started") started(params!);
     if (method === "test/cancelled") cancelled(params!);
   });
@@ -78,7 +78,8 @@ test("MCP disconnect rejects pending calls without waiting for process close", {
 test("ToolExecutor propagates MCP cancellation instead of returning a tool error", { timeout: 5000 }, async (t) => {
   const manager = new McpManager();
   t.after(() => manager.disconnect());
-  await manager.initialize({ probe: { command: process.execPath, args: ["-e", MCP_TEST_SERVER] } });
+  await manager.initialize({ probe: { command: process.execPath, args: [createMcpTestServer(t)] } });
+  assert.equal(manager.getStatus()[0]?.status, "ready", JSON.stringify(manager.getStatus()));
   const executor = new ToolExecutor(process.cwd(), undefined, manager);
   const controller = new AbortController();
   const pending = executor.executeToolCalls(

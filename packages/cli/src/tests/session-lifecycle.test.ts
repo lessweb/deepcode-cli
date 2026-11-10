@@ -9,7 +9,7 @@ import { SessionManager, type SessionMessage } from "@vegamo/deepcode-core";
 import App from "../ui/views/App";
 import { terminal } from "./terminal-helper";
 import { McpClient } from "../../../core/src/mcp/mcp-client";
-import { MCP_TEST_SERVER } from "../../../core/src/tests/mcp-test-server";
+import { createMcpTestServer } from "../../../core/src/tests/mcp-test-server";
 
 function deferred() {
   let resolve!: () => void;
@@ -184,6 +184,7 @@ for (const action of ["/exit", "Ctrl+D twice"] as const) {
     let requests = 0;
     const h = await harness(t, () => {
       requests++;
+      assert.equal(requests, 1, "the MCP call must block further model requests");
       return {
         choices: [
           {
@@ -195,7 +196,8 @@ for (const action of ["/exit", "Ctrl+D twice"] as const) {
         ],
       };
     });
-    await h.initMcpServers({ probe: { command: process.execPath, args: ["-e", MCP_TEST_SERVER] } });
+    await h.initMcpServers({ probe: { command: process.execPath, args: [createMcpTestServer(t)] } });
+    assert.equal(h.manager.getMcpStatus()[0]?.status, "ready", JSON.stringify(h.manager.getMcpStatus()));
     await h.submit("call the MCP tool");
     await entered.promise;
     const id = h.manager.getActiveSessionId()!;
