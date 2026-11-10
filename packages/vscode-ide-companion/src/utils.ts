@@ -84,3 +84,24 @@ export function collectPromptImageUrls(value: unknown): string[] {
   visit(value);
   return [...urls];
 }
+
+export function formatTokenCount(value: number): string {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    return "0";
+  }
+  if (number >= 1_000_000) {
+    return `${(number / 1_000_000).toFixed(1)}M`;
+  }
+  if (number >= 1_000) {
+    return `${(number / 1_000).toFixed(1)}k`;
+  }
+  return String(Math.round(number));
+}
+
+export function formatContextStatus(activeTokens: number, contextWindow: number): string {
+  const active = Number.isFinite(activeTokens) && activeTokens > 0 ? activeTokens : 0;
+  const window = Number.isFinite(contextWindow) && contextWindow > 0 ? contextWindow : 0;
+  const percent = window > 0 ? Math.round((active / window) * 100) : 0;
+  return `${formatTokenCount(active)} / ${formatTokenCount(window)} (${percent}%)`;
+}
