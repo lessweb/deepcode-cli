@@ -10,6 +10,7 @@ import {
   type NotifyContext,
   type NotifySpawn,
 } from "../common/notify";
+import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "../common/llm-retry";
 import {
   DEFAULT_FILE_EXPIRES_AFTER_SECONDS,
   DEFAULT_FILE_QUOTA_CLEANUP_BATCH,
@@ -17,6 +18,8 @@ import {
   DEFAULT_FILES_API_TIMEOUT_MS,
   DEFAULT_MAX_REQUEST_FILES_BYTES,
   DEFAULT_MODEL,
+  MAX_STREAM_IDLE_TIMEOUT_MS,
+  MIN_STREAM_IDLE_TIMEOUT_MS,
   applyModelConfigSelection,
   readDeepcodePlusApiKey,
   readDeepcodePlusSettings,
@@ -148,6 +151,24 @@ test("resolveSettingsSources validates Files API settings and uses project prece
   assert.equal(resolved.fileRefreshMarginSeconds, DEFAULT_FILE_REFRESH_MARGIN_SECONDS);
   assert.equal(resolved.fileQuotaCleanupBatch, 200);
   assert.equal(resolved.maxRequestFilesBytes, 20_000);
+});
+
+test("resolveSettings accepts streamIdleTimeoutMs within bounds and falls back outside them", () => {
+  const resolved = resolveSettings(
+    { streamIdleTimeoutMs: 90_000 },
+    { model: "default-model", baseURL: "https://default.example.com" },
+    TEST_PROCESS_ENV
+  );
+  assert.equal(resolved.streamIdleTimeoutMs, 90_000);
+
+  for (const value of [MIN_STREAM_IDLE_TIMEOUT_MS - 1, MAX_STREAM_IDLE_TIMEOUT_MS + 1]) {
+    const fallback = resolveSettings(
+      { streamIdleTimeoutMs: value },
+      { model: "default-model", baseURL: "https://default.example.com" },
+      TEST_PROCESS_ENV
+    );
+    assert.equal(fallback.streamIdleTimeoutMs, DEFAULT_STREAM_IDLE_TIMEOUT_MS);
+  }
 });
 
 test("resolveSettings reads top-level multimodal and ignores invalid values", () => {

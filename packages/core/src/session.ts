@@ -399,6 +399,7 @@ export type SessionManagerOptions = {
     maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
+    streamIdleTimeoutMs?: number;
     retainRatio?: number;
     retainTokens?: number;
     webSearchTool?: string;
@@ -453,6 +454,7 @@ export class SessionManager {
     maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
+    streamIdleTimeoutMs?: number;
     retainRatio?: number;
     retainTokens?: number;
     webSearchTool?: string;
@@ -791,6 +793,7 @@ export class SessionManager {
     let idleTimedOut = false;
     let idleTimer: ReturnType<typeof setTimeout> | null = null;
     let idleTimeoutPromise: Promise<never>;
+    const streamIdleTimeoutMs = this.getResolvedSettings().streamIdleTimeoutMs ?? LLM_STREAM_IDLE_TIMEOUT_MS;
     const forwardAbort = () => attemptController.abort(outerSignal?.reason);
     const clearAttempt = () => {
       if (idleTimer) {
@@ -806,10 +809,10 @@ export class SessionManager {
       idleTimeoutPromise = new Promise((_, reject) => {
         idleTimer = setTimeout(() => {
           idleTimedOut = true;
-          const error = new LlmStreamIdleTimeoutError();
+          const error = new LlmStreamIdleTimeoutError(streamIdleTimeoutMs);
           attemptController.abort(error);
           reject(error);
-        }, LLM_STREAM_IDLE_TIMEOUT_MS);
+        }, streamIdleTimeoutMs);
       });
     };
     if (outerSignal?.aborted) {
@@ -841,7 +844,7 @@ export class SessionManager {
         idleTimeoutPromise!,
       ]);
     } catch (error) {
-      const requestError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
+      const requestError = idleTimedOut ? new LlmStreamIdleTimeoutError(streamIdleTimeoutMs) : error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
         location: debug?.location ?? "SessionManager.createChatCompletionStream:create",
@@ -997,7 +1000,7 @@ export class SessionManager {
         throw new LlmStreamDisconnectedError();
       }
     } catch (error) {
-      const streamError = idleTimedOut ? new LlmStreamIdleTimeoutError() : error;
+      const streamError = idleTimedOut ? new LlmStreamIdleTimeoutError(streamIdleTimeoutMs) : error;
       this.logChatCompletionDebug(debug, {
         timestamp: new Date().toISOString(),
         location: debug?.location ?? "SessionManager.createChatCompletionStream:stream",
