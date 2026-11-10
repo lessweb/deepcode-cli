@@ -4,6 +4,8 @@ import {
   collectPromptImageUrls,
   PLUS_PACKAGES_URL,
   VALID_PERMISSION_SCOPES,
+  formatContextStatus,
+  formatTokenCount,
   getNonce,
   isAllowedExternalUrl,
   parsePermissionScopes,
@@ -162,4 +164,23 @@ test("attachment discovery includes queue, drafts and legacy images but ignores 
     }),
     ["file:///legacy.png", "file:///pending.png", "data:image/png;base64,abc"]
   );
+});
+
+// --- token formatting ---
+
+test("formatTokenCount compacts thousands and millions", () => {
+  assert.equal(formatTokenCount(0), "0");
+  assert.equal(formatTokenCount(-1), "0");
+  assert.equal(formatTokenCount(Number.NaN), "0");
+  assert.equal(formatTokenCount(999), "999");
+  assert.equal(formatTokenCount(1_000), "1.0k");
+  assert.equal(formatTokenCount(20_770), "20.8k");
+  assert.equal(formatTokenCount(1_048_576), "1.0M");
+});
+
+test("formatContextStatus renders used tokens, window, and percentage", () => {
+  assert.equal(formatContextStatus(20_770, 1_048_576), "20.8k / 1.0M (2%)");
+  assert.equal(formatContextStatus(500_000, 1_000_000), "500.0k / 1.0M (50%)");
+  assert.equal(formatContextStatus(0, 0), "0 / 0 (0%)");
+  assert.equal(formatContextStatus(Number.NaN, 1_000_000), "0 / 1.0M (0%)");
 });

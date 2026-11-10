@@ -22,7 +22,13 @@ import {
   type ResolvedDeepcodingSettings,
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
-import { collectPromptImageUrls, getNonce, isAllowedExternalUrl } from "./utils.js";
+import {
+  collectPromptImageUrls,
+  formatContextStatus,
+  formatTokenCount,
+  getNonce,
+  isAllowedExternalUrl,
+} from "./utils.js";
 import { handleWebviewMessage, postUndoState, releaseQueueEdit } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
 import { prepareToolDiffContent } from "./tool-diff.js";
@@ -34,6 +40,24 @@ type ReasoningMessageParams = {
   reasoning_content?: string;
 };
 
+type TokenUsage = {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  prompt_cache_hit_tokens?: number;
+  prompt_tokens_details?: { cached_tokens?: number };
+  completion_tokens_details?: { reasoning_tokens?: number };
+};
+
+type TokenTelemetry = {
+  model: string;
+  thinkingEnabled: boolean;
+  reasoningEffort: ReasoningEffort;
+  activeTokens: number;
+  contextWindow: number;
+  compactPromptTokenThreshold: number;
+  usage: unknown | null;
+};
+
 export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "deepcode.chatView";
 
@@ -42,6 +66,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   private readonly md: MarkdownIt;
   private readonly sessionManager: SessionManager;
   private unsubscribeRuntime?: () => void;
+  private readonly statusBar: vscode.StatusBarItem;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -50,6 +75,12 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       linkify: false,
       breaks: true,
     });
+    this.statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+    this.statusBar.name = "Deep Code";
+    this.statusBar.command = "deepcode.openView";
+    this.statusBar.text = "$(comment-discussion) Deep Code";
+    this.statusBar.tooltip = "Open Deep Code";
+    this.statusBar.show();
     this.sessionManager = new SessionManager({
       projectRoot: this.getWorkspaceRoot(),
       loadSharp: createSharpLoader({
@@ -103,6 +134,8 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         });
       },
       onSessionEntryUpdated: (entry) => {
+        const tokenTelemetry = this.buildTokenTelemetry(entry);
+        this.updateStatusBar(tokenTelemetry);
         if (!this.webviewView) {
           return;
         }
@@ -114,7 +147,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           pluginRateLimitedTool: entry.pluginRateLimitedTool ?? null,
           askPermissions: entry.askPermissions,
           processes: this.serializeProcesses(entry.processes),
-          tokenTelemetry: this.buildTokenTelemetry(entry),
+          tokenTelemetry,
         });
       },
       onLlmStreamProgress: (progress: LlmStreamProgress) => {
@@ -143,6 +176,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this.statusBar.dispose();
     this.unsubscribeRuntime?.();
     releaseQueueEdit(this.sessionManager);
     this.sessionManager.dispose();
@@ -157,6 +191,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       if (this.webviewView === webviewView) this.webviewView = undefined;
       releaseQueueEdit(this.sessionManager);
     });
+    this.refreshStatusBar();
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -191,6 +226,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         renderMarkdown: (text) => this.md.render(text),
         copyToClipboard: (text) => void vscode.env.clipboard.writeText(text),
       });
+      this.refreshStatusBar();
 
       if (!handled) {
         // unrecognized message type — no-op
@@ -512,15 +548,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     };
   }
 
-  private buildTokenTelemetry(session: SessionEntry | null): {
-    model: string;
-    thinkingEnabled: boolean;
-    reasoningEffort: ReasoningEffort;
-    activeTokens: number;
-    contextWindow: number;
-    compactPromptTokenThreshold: number;
-    usage: unknown | null;
-  } {
+  private buildTokenTelemetry(session: SessionEntry | null): TokenTelemetry {
     const settings = this.resolveCurrentSettings();
     return {
       model: settings.model,
@@ -531,6 +559,38 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       compactPromptTokenThreshold: settings.autoCompactWindow,
       usage: session?.usage ?? null,
     };
+  }
+
+  private refreshStatusBar(): void {
+    const sessionId = this.sessionManager.getActiveSessionId();
+    const session = sessionId ? this.sessionManager.getSession(sessionId) : null;
+    this.updateStatusBar(this.buildTokenTelemetry(session));
+  }
+
+  private updateStatusBar(telemetry: TokenTelemetry): void {
+    const activeTokens = Number.isFinite(telemetry.activeTokens) ? Math.max(0, telemetry.activeTokens) : 0;
+    const contextWindow = Number.isFinite(telemetry.contextWindow) ? Math.max(0, telemetry.contextWindow) : 0;
+    const usage = (telemetry.usage ?? {}) as TokenUsage;
+    const promptTokens = Number(usage.prompt_tokens ?? 0);
+    const completionTokens = Number(usage.completion_tokens ?? 0);
+    const cachedTokens = Number(usage.prompt_tokens_details?.cached_tokens ?? usage.prompt_cache_hit_tokens ?? 0);
+    const reasoningTokens = Number(usage.completion_tokens_details?.reasoning_tokens ?? 0);
+
+    if (activeTokens === 0 && promptTokens === 0 && completionTokens === 0) {
+      this.statusBar.text = "$(comment-discussion) Deep Code";
+      this.statusBar.tooltip = "Open Deep Code";
+      return;
+    }
+
+    this.statusBar.text = `$(comment-discussion) ${formatContextStatus(activeTokens, contextWindow)}`;
+    const tooltip = new vscode.MarkdownString();
+    tooltip.appendMarkdown(`**Deep Code** · ${telemetry.model}\n\n`);
+    tooltip.appendMarkdown(`Context: ${formatContextStatus(activeTokens, contextWindow)}\n\n`);
+    tooltip.appendMarkdown(`Prompt: ${formatTokenCount(promptTokens)}  \n`);
+    tooltip.appendMarkdown(`Completion: ${formatTokenCount(completionTokens)}  \n`);
+    tooltip.appendMarkdown(`Cached: ${formatTokenCount(cachedTokens)}  \n`);
+    tooltip.appendMarkdown(`Reasoning: ${formatTokenCount(reasoningTokens)}`);
+    this.statusBar.tooltip = tooltip;
   }
 
   private async initializeMcpServers(): Promise<void> {
