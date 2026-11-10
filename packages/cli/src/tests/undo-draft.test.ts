@@ -159,6 +159,11 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
     sessionId: entry.id,
     flush,
     latest: () => frames.at(-1) ?? "",
+    async waitForFrame(pattern: RegExp) {
+      const deadline = Date.now() + 2_000;
+      while (!pattern.test(frames.at(-1) ?? "") && Date.now() < deadline) await flush();
+      assert.match(frames.at(-1) ?? "", pattern);
+    },
     async setBusy(value: boolean) {
       busy = value;
       managerRef.current!.setActiveSessionId(null);
@@ -290,7 +295,8 @@ test("cancelling a pending edit keeps the original queue content", async (t) => 
   await h.send("\r");
   await h.send("\x15changed");
   await h.send("\x1b");
+  // Esc is decoded asynchronously; restoring the draft also needs a React effect and render.
+  await h.waitForFrame(/Type your message/);
   assert.equal(h.manager.listQueuedMessages(h.sessionId)[0].id, queued.id);
   assert.equal(h.manager.listQueuedMessages(h.sessionId)[0].content.text, "original pending");
-  assert.match(h.latest(), /Type your message/);
 });
