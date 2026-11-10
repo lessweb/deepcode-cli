@@ -103,10 +103,7 @@ export class McpClient {
   private process: ChildProcess | null = null;
   private reader: Interface | null = null;
   private nextId = 1;
-  private pendingRequests = new Map<
-    number,
-    { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: NodeJS.Timeout }
-  >();
+  private pendingRequests = new Map<number, { resolve: (value: unknown) => void; reject: (error: unknown) => void }>();
   private stderrBuffer = "";
   private notificationHandler: McpNotificationHandler | null = null;
   private disconnectHandler: ((reason: string) => void) | null = null;
@@ -158,17 +155,20 @@ export class McpClient {
       this.process.on("close", (code) => {
         const reason = `MCP server "${this.serverName}" exited with code ${code}`;
         const error = this.withStderr(reason);
-        for (const [, pending] of this.pendingRequests) {
-          clearTimeout(pending.timer);
+        for (const pending of this.pendingRequests.values()) {
           pending.reject(error);
         }
-        this.pendingRequests.clear();
         this.reader?.close();
         this.reader = null;
         this.process = null;
         if (!this.intentionallyDisconnected && this.disconnectHandler) {
           this.disconnectHandler(reason);
         }
+        safeReject(error);
+      });
+
+      this.process.stdin?.on("error", (error) => {
+        for (const pending of this.pendingRequests.values()) pending.reject(error);
         safeReject(error);
       });
 
@@ -231,8 +231,13 @@ export class McpClient {
     throw this.withStderr(`MCP server "${this.serverName}" returned too many tools/list pages`);
   }
 
-  async callTool(name: string, args: Record<string, unknown>, timeoutMs = 60_000): Promise<CallToolResult> {
-    return (await this.sendRequest("tools/call", { name, arguments: args }, timeoutMs)) as CallToolResult;
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    timeoutMs = 60_000,
+    signal?: AbortSignal
+  ): Promise<CallToolResult> {
+    return (await this.sendRequest("tools/call", { name, arguments: args }, timeoutMs, signal)) as CallToolResult;
   }
 
   async listPrompts(timeoutMs: number): Promise<McpPromptDefinition[]> {
@@ -279,6 +284,8 @@ export class McpClient {
 
   disconnect(): void {
     this.intentionallyDisconnected = true;
+    const error = this.withStderr(`MCP server "${this.serverName}" disconnected`);
+    for (const pending of this.pendingRequests.values()) pending.reject(error);
     if (this.reader) {
       this.reader.close();
       this.reader = null;
@@ -297,8 +304,15 @@ export class McpClient {
     return this.process !== null && this.process.exitCode === null;
   }
 
-  private sendRequest(method: string, params: Record<string, unknown>, timeoutMs = 30_000): Promise<unknown> {
+  private sendRequest(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs = 30_000,
+    signal?: AbortSignal
+  ): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      signal?.throwIfAborted();
+      if (!this.isConnected()) throw this.withStderr(`MCP server "${this.serverName}" is not connected`);
       const id = this.nextId++;
       const request: JsonRpcRequest = {
         jsonrpc: "2.0",
@@ -306,16 +320,44 @@ export class McpClient {
         method,
         params,
       };
-      const timer = setTimeout(() => {
+      const cleanup = () => {
         this.pendingRequests.delete(id);
-        reject(
-          this.withStderr(
-            `Timed out after ${timeoutMs}ms waiting for MCP server "${this.serverName}" to respond to ${method}`
-          )
-        );
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const onAbort = () => {
+        this.pendingRequests.get(id)?.reject(signal?.reason);
+        try {
+          this.sendNotification("notifications/cancelled", { requestId: id, reason: "Request cancelled" });
+        } catch {
+          // Cancellation must not depend on the server accepting the notification.
+        }
+      };
+      const timer = setTimeout(() => {
+        this.pendingRequests
+          .get(id)
+          ?.reject(
+            this.withStderr(
+              `Timed out after ${timeoutMs}ms waiting for MCP server "${this.serverName}" to respond to ${method}`
+            )
+          );
       }, timeoutMs);
-      this.pendingRequests.set(id, { resolve, reject, timer });
-      this.writeLine(JSON.stringify(request));
+      this.pendingRequests.set(id, {
+        resolve: (value) => {
+          cleanup();
+          resolve(value);
+        },
+        reject: (error) => {
+          cleanup();
+          reject(error);
+        },
+      });
+      signal?.addEventListener("abort", onAbort, { once: true });
+      try {
+        this.writeLine(JSON.stringify(request));
+      } catch (error) {
+        this.pendingRequests.get(id)?.reject(error);
+      }
     });
   }
 
@@ -376,8 +418,6 @@ export class McpClient {
     const message = msg as unknown as JsonRpcResponse;
     if (message.id !== undefined && this.pendingRequests.has(message.id)) {
       const pending = this.pendingRequests.get(message.id)!;
-      this.pendingRequests.delete(message.id);
-      clearTimeout(pending.timer);
       if (message.error) {
         pending.reject(this.withStderr(`MCP error: ${message.error.message}`));
       } else {

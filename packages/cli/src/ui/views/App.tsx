@@ -126,6 +126,7 @@ function App({
   } | null>(null);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [isExiting, setIsExiting] = useState(false);
+  const exitingRef = useRef(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [welcomeNonce, setWelcomeNonce] = useState(0);
   const [resolvedSettings, setResolvedSettings] = useState(() => resolveCurrentSettings(projectRoot, settingsFile));
@@ -401,47 +402,71 @@ function App({
     return () => {
       compactionControllerRef.current?.abort();
       compactionControllerRef.current = null;
-      sessionManager.dispose();
+      try {
+        sessionManager.dispose();
+      } catch {
+        // Cleanup errors must not prevent Ink from restoring the terminal.
+      }
     };
   }, [sessionManager]);
 
   writeRef.current = write;
   const handleExit = useCallback(
     async ({ showCommand, showSummary }: { showCommand: boolean; showSummary: boolean }) => {
-      compactionControllerRef.current?.abort();
-      compactionControllerRef.current = null;
+      if (exitingRef.current) return;
+      exitingRef.current = true;
       setIsExiting(true);
-      const sessionId = sessionManager.getActiveSessionId();
-      if (sessionId && sessionManager.isSessionRunning(sessionId)) {
-        sessionManager.interruptSession(sessionId);
-        await sessionManager.waitForSessionIdle(sessionId).catch(() => {});
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        compactionControllerRef.current?.abort();
+        compactionControllerRef.current = null;
+        const sessionId = sessionManager.getActiveSessionId();
+        if (sessionId && sessionManager.isSessionRunning(sessionId)) {
+          const deadline = new Promise<void>((resolve) => {
+            timer = setTimeout(resolve, 5_000);
+          });
+          sessionManager.interruptSession(sessionId);
+          await Promise.race([sessionManager.waitForSessionIdle(sessionId), deadline]);
+        }
+      } catch {
+        // Exit even when interruption or session cleanup fails.
+      } finally {
+        clearTimeout(timer);
       }
       setTimeout(() => {
-        const activeSessionId = sessionManager.getActiveSessionId();
-        const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
-        const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
-        const rateLimitHint = buildPluginRateLimitHintText(session);
+        try {
+          const activeSessionId = sessionManager.getActiveSessionId();
+          const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+          const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
+          const rateLimitHint = buildPluginRateLimitHintText(session);
 
-        writeStdoutLine("\n");
-        if (showCommand) {
-          writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
           writeStdoutLine("\n");
-        }
-        if (showSummary) {
-          const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
-          writeStdoutLine(summary);
-          writeStdoutLine("\n");
-        }
-        if (resumeHint) {
-          writeStdoutLine(resumeHint);
-          if (rateLimitHint) {
-            writeStdoutLine(rateLimitHint);
+          if (showCommand) {
+            writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
+            writeStdoutLine("\n");
           }
-          writeStdoutLine("\n");
+          if (showSummary) {
+            const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
+            writeStdoutLine(summary);
+            writeStdoutLine("\n");
+          }
+          if (resumeHint) {
+            writeStdoutLine(resumeHint);
+            if (rateLimitHint) {
+              writeStdoutLine(rateLimitHint);
+            }
+            writeStdoutLine("\n");
+          }
+        } catch {
+          // Printing the summary is best effort during shutdown.
         }
-
-        sessionManager.dispose();
-        exit();
+        try {
+          sessionManager.dispose();
+        } catch {
+          // Remaining handles are closed when the CLI process exits.
+        } finally {
+          exit();
+        }
       }, 0);
     },
     [exit, sessionManager]
@@ -1312,7 +1337,9 @@ function App({
           <Text color="red">Error: {errorLine}</Text>
         </Box>
       ) : null}
-      {showProcessStdout ? (
+      {isExiting ? (
+        <Text dimColor>Exiting…</Text>
+      ) : showProcessStdout ? (
         <ProcessStdoutView
           key={activeSessionId}
           items={processOutputItems}
@@ -1380,7 +1407,7 @@ function App({
         />
       ) : pendingPlanImplementation && !busy && !editingQueue ? (
         <PlanImplementationPrompt onSelect={handlePlanImplementationChoice} />
-      ) : isExiting ? null : (
+      ) : (
         <PromptInput
           key={sessionManager.getActiveSessionId() ?? "new"}
           projectRoot={projectRoot}

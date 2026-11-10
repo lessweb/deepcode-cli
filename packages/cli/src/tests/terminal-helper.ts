@@ -8,7 +8,15 @@ import { render } from "ink";
 export async function terminal(t: TestContext, element: React.ReactElement, columns = 80) {
   let frame = "";
   let rawFrame = "";
-  const stdin = Object.assign(new PassThrough(), { isTTY: true, setRawMode() {}, ref() {}, unref() {} });
+  let rawMode = false;
+  const stdin = Object.assign(new PassThrough(), {
+    isTTY: true,
+    setRawMode(value: boolean) {
+      rawMode = value;
+    },
+    ref() {},
+    unref() {},
+  });
   const stdout = Object.assign(
     new Writable({
       write(chunk, _encoding, done) {
@@ -43,6 +51,7 @@ export async function terminal(t: TestContext, element: React.ReactElement, colu
   return {
     frame: () => frame,
     rawFrame: () => rawFrame,
+    rawMode: () => rawMode,
     rerender: app.rerender,
     waitUntilExit: app.waitUntilExit,
     async send(input: string) {

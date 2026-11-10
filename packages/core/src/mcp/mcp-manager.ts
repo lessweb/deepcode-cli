@@ -333,8 +333,10 @@ export class McpManager {
   async executeMcpTool(
     name: string,
     args: Record<string, unknown>,
-    timeoutMs = MCP_CALL_TOOL_TIMEOUT_MS
+    timeoutMs = MCP_CALL_TOOL_TIMEOUT_MS,
+    signal?: AbortSignal
   ): Promise<{ ok: boolean; name: string; output?: string; error?: string }> {
+    signal?.throwIfAborted();
     const tool = this.tools.find((t) => t.namespacedName === name);
     if (!tool) {
       return { ok: false, name, error: `Unknown MCP tool: ${name}` };
@@ -343,7 +345,8 @@ export class McpManager {
     try {
       const validationError = this.getToolSchema(tool.definition).validateArguments?.(args);
       if (validationError) return { ok: false, name, error: validationError };
-      const result = await tool.client.callTool(tool.originalName, args, timeoutMs);
+      const result = await tool.client.callTool(tool.originalName, args, timeoutMs, signal);
+      signal?.throwIfAborted();
       const text = result.content
         .filter((c) => c.type === "text" && c.text)
         .map((c) => c.text)
@@ -354,6 +357,7 @@ export class McpManager {
         output: text || JSON.stringify(result.content),
       };
     } catch (err) {
+      signal?.throwIfAborted();
       return {
         ok: false,
         name,

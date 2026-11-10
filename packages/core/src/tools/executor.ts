@@ -151,7 +151,7 @@ export class ToolExecutor {
       if (this.mcpManager?.isMcpTool(toolName)) {
         const parsedArgs = this.parseToolArguments(toolCall.function.arguments);
         const args = parsedArgs.ok ? parsedArgs.args : {};
-        return this.mcpManager.executeMcpTool(toolName, args);
+        return this.mcpManager.executeMcpTool(toolName, args, undefined, hooks?.signal);
       }
       return {
         ok: false,
