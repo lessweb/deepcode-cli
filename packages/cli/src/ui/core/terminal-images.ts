@@ -47,7 +47,7 @@ export function encodeImage(image: ImagePreview, protocol: Exclude<ImageProtocol
   return output;
 }
 
-type Placement = { image: ImagePreview; id: number; permanent: boolean };
+type Placement = { image: ImagePreview; id: number; permanent: boolean; history?: symbol };
 const runtimes = new WeakMap<NodeJS.WriteStream, TerminalImages>();
 
 export function terminalImagesFor(stdout: NodeJS.WriteStream): TerminalImages | undefined {
@@ -108,9 +108,9 @@ export class TerminalImages {
     for (const listener of this.listeners) listener();
   }
 
-  register(image: ImagePreview, permanent: boolean): string {
+  register(image: ImagePreview, permanent: boolean, history?: symbol): string {
     const marker = `${this.prefix}${(++this.counter).toString(36)}X`;
-    this.placements.set(marker, { image, permanent, id: randomInt(1, 0xffffffff) });
+    this.placements.set(marker, { image, permanent, history, id: randomInt(1, 0xffffffff) });
     return marker;
   }
 
@@ -128,6 +128,19 @@ export class TerminalImages {
     if (this.dynamicIds.delete(placement.id) && this.protocol === "kitty") {
       this.output.write(kittyDelete(placement.id));
     }
+  }
+
+  /** Release a replaced Static tree, without touching the next history or draft previews. */
+  releaseHistory(history: symbol, preserveScrollback = false): void {
+    let cleanup = "";
+    for (const [marker, placement] of this.placements) {
+      if (!placement.permanent || placement.history !== history) continue;
+      this.placements.delete(marker);
+      if (this.staticIds.delete(placement.id) && this.protocol === "kitty" && !preserveScrollback) {
+        cleanup += kittyDelete(placement.id);
+      }
+    }
+    if (cleanup) this.output.write(cleanup);
   }
 
   transform(chunk: string): string {
@@ -175,6 +188,8 @@ export class TerminalImages {
     this.output.off("resize", this.onResize);
     runtimes.delete(this.stdout);
     this.placements.clear();
+    this.dynamicIds.clear();
+    this.staticIds.clear();
     this.listeners.clear();
   }
 }

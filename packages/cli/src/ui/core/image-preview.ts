@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import sharp from "sharp";
+import { ImagePreviewCache } from "./image-preview-cache";
 
 export type CellSize = { width: number; height: number };
 export type ImagePreview = {
@@ -31,26 +32,15 @@ export function imagePlaceholder(index: number, image?: ImagePreview): string {
   return `[image #${index + 1}${dimensions}]`;
 }
 
-// Completed entries are bounded independently of previews currently held by the UI.
-const cache = new Map<string, ImagePreview>();
-const pending = new Map<string, Promise<ImagePreview>>();
-let cachedBytes = 0;
-let decoding = 0;
-const waiting: (() => void)[] = [];
+const previews = new ImagePreviewCache();
 
-async function decodeWithLimit(url: string, cell: CellSize, graphics: boolean): Promise<ImagePreview> {
-  if (decoding >= 2) await new Promise<void>((resolve) => waiting.push(resolve));
-  else decoding++;
-  try {
-    return await decodePreview(url, cell, graphics);
-  } finally {
-    const next = waiting.shift();
-    if (next) next();
-    else decoding--;
-  }
-}
-
-export async function prepareImagePreview(url: string, cell: CellSize, graphics: boolean): Promise<ImagePreview> {
+export async function prepareImagePreview(
+  url: string,
+  cell: CellSize,
+  graphics: boolean,
+  signal?: AbortSignal
+): Promise<ImagePreview> {
+  if (signal?.aborted) return { columns: 0, rows: 1 };
   let sourceVersion = "";
   if (url.startsWith("file:")) {
     try {
@@ -61,40 +51,43 @@ export async function prepareImagePreview(url: string, cell: CellSize, graphics:
       return { columns: 0, rows: 1 };
     }
   }
+  if (signal?.aborted) return { columns: 0, rows: 1 };
   const key = createHash("sha256")
     .update(url)
     .update(`:${sourceVersion}:${cell.width}:${cell.height}:${graphics}`)
     .digest("hex");
-  const cached = cache.get(key);
-  if (cached) {
-    cache.delete(key);
-    cache.set(key, cached);
-    return Promise.resolve(cached);
-  }
-  const existing = pending.get(key);
-  if (existing) return existing;
-  const task = decodeWithLimit(url, cell, graphics).then((result) => {
-    pending.delete(key);
-    cache.set(key, result);
-    cachedBytes += result.png?.length ?? 0;
-    while (cache.size > 32 || cachedBytes > 8 * 1024 * 1024) {
-      const oldest = cache.keys().next().value!;
-      cachedBytes -= cache.get(oldest)?.png?.length ?? 0;
-      cache.delete(oldest);
-    }
-    return result;
-  });
-  pending.set(key, task);
-  return task;
+  return previews.get(key, (decodeSignal) => decodePreview(url, cell, graphics, decodeSignal), signal);
 }
 
-async function decodePreview(url: string, cell: CellSize, graphics: boolean): Promise<ImagePreview> {
+/** Submit a batch incrementally so a long transcript cannot monopolize the decode queue. */
+export async function prepareImagePreviews(
+  urls: string[],
+  cell: CellSize,
+  graphics: boolean,
+  signal: AbortSignal
+): Promise<ImagePreview[]> {
+  const images: ImagePreview[] = [];
+  for (const url of urls) {
+    if (signal.aborted) break;
+    images.push(await prepareImagePreview(url, cell, graphics, signal));
+  }
+  return images;
+}
+
+async function decodePreview(
+  url: string,
+  cell: CellSize,
+  graphics: boolean,
+  signal: AbortSignal
+): Promise<ImagePreview> {
   const result: ImagePreview = { columns: 0, rows: 1 };
   try {
-    const bytes = await readPreviewSource(url);
+    const bytes = await readPreviewSource(url, signal);
+    signal.throwIfAborted();
     if (!bytes) return result;
     const source = sharp(bytes, { limitInputPixels: 32 * 1024 * 1024 });
     const metadata = await source.metadata();
+    signal.throwIfAborted();
     if (!metadata.width || !metadata.height) return result;
     const rotated = (metadata.orientation ?? 1) >= 5;
     result.width = rotated ? metadata.height : metadata.width;
@@ -120,6 +113,7 @@ async function decodePreview(url: string, cell: CellSize, graphics: boolean): Pr
         })
         .png()
         .toBuffer({ resolveWithObject: true });
+      signal.throwIfAborted();
       result.png = await sharp(resized.data)
         .extend({
           top: 0,
@@ -130,24 +124,30 @@ async function decodePreview(url: string, cell: CellSize, graphics: boolean): Pr
         })
         .png()
         .toBuffer();
+      signal.throwIfAborted();
     }
   } catch {
+    if (signal.aborted) return { columns: 0, rows: 1 };
     // A preview must never prevent sending the original attachment.
   }
   return result;
 }
 
-async function readPreviewSource(url: string): Promise<Buffer | undefined> {
+async function readPreviewSource(url: string, signal: AbortSignal): Promise<Buffer | undefined> {
+  signal.throwIfAborted();
   // Submitted attachments are persisted as file URLs; clipboard drafts use data URLs.
   // Only explicit attachment references are read. Remote URLs are never fetched.
   if (url.startsWith("file:")) {
     const file = await open(fileURLToPath(url), "r");
     try {
+      signal.throwIfAborted();
       const info = await file.stat();
+      signal.throwIfAborted();
       if (!info.isFile() || info.size === 0 || info.size > MAX_SOURCE_BYTES) return;
       const bytes = Buffer.alloc(info.size);
       let offset = 0;
       while (offset < bytes.length) {
+        signal.throwIfAborted();
         const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
         if (bytesRead === 0) break;
         offset += bytesRead;

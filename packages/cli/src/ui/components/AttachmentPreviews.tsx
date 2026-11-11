@@ -1,12 +1,13 @@
-import React, { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Box, Text, useStdout } from "ink";
-import { DEFAULT_CELL_SIZE, imagePlaceholder, prepareImagePreview, type ImagePreview } from "../core/image-preview";
+import { DEFAULT_CELL_SIZE, imagePlaceholder, prepareImagePreviews, type ImagePreview } from "../core/image-preview";
 import { terminalImagesFor } from "../core/terminal-images";
 import type { TerminalImages } from "../core/terminal-images";
 
 const noopSubscribe = () => () => {};
 const zero = () => 0;
 const EMPTY_URLS: string[] = [];
+export const ImageHistoryContext = createContext<symbol | undefined>(undefined);
 
 export function useImagePreviewEnvironment(width: number) {
   const { stdout } = useStdout();
@@ -37,13 +38,11 @@ export function AttachmentPreviews({
   const sources = useMemo<string[]>(() => JSON.parse(sourceKey), [sourceKey]);
   useEffect(() => {
     if (prepared) return;
-    let active = true;
-    void Promise.all(sources.map((url) => prepareImagePreview(url, cell, graphics))).then((images) => {
-      if (active) setLoaded({ urls: sources, images });
+    const controller = new AbortController();
+    void prepareImagePreviews(sources, cell, graphics, controller.signal).then((images) => {
+      if (!controller.signal.aborted) setLoaded({ urls: sources, images });
     });
-    return () => {
-      active = false;
-    };
+    return () => controller.abort();
   }, [sources, cell, graphics, prepared]);
   const images = prepared ?? (loaded?.urls === sources ? loaded.images : undefined);
   useEffect(() => {
@@ -77,7 +76,8 @@ function InlineImage({
   terminal: TerminalImages;
   permanent: boolean;
 }) {
-  const marker = useMemo(() => terminal.register(image, permanent), [image, terminal, permanent]);
+  const history = useContext(ImageHistoryContext);
+  const marker = useMemo(() => terminal.register(image, permanent, history), [image, terminal, permanent, history]);
   useEffect(() => () => terminal.unregister(marker), [terminal, marker]);
   return (
     <Box width={40} height={image.rows} flexShrink={0} flexDirection="column">

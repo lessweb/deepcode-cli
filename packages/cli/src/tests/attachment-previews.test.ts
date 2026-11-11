@@ -3,7 +3,7 @@ import { test, type TestContext } from "node:test";
 import { PassThrough, Writable } from "node:stream";
 import { setTimeout } from "node:timers/promises";
 import React from "react";
-import { Box, render, Static, Text } from "ink";
+import { Box, render, Text } from "ink";
 import sharp from "sharp";
 import fs from "node:fs";
 import os from "node:os";
@@ -15,8 +15,9 @@ import { AttachmentPreviews } from "../ui/components/AttachmentPreviews";
 import { MessageView } from "../ui/components/MessageView";
 import { PromptInput, type PromptDraft, type PromptSubmission } from "../ui/views/PromptInput";
 import { TerminalImages } from "../ui/core/terminal-images";
+import { ImagePreviewCache } from "../ui/core/image-preview-cache";
 import { createImageInput } from "../ui/core/terminal-image-input";
-import { usePreparedMessages } from "../ui/hooks/usePreparedMessages";
+import { StaticMessageHistory } from "../ui/components/StaticMessageHistory";
 import type { SessionMessage } from "@vegamo/deepcode-core";
 import { terminal } from "./terminal-helper";
 
@@ -113,24 +114,74 @@ test("iTerm2 preview uses its native protocol and can be removed", async (t) => 
   assert.match(h.output(), /\x1b\[2K/);
 });
 
-function PreparedTranscript({ messages, width = 80 }: { messages: SessionMessage[]; width?: number }) {
-  const prepared = usePreparedMessages(messages, width);
+function PreparedTranscript({
+  messages,
+  width = 80,
+  generation = 0,
+  footer = "prompt",
+  isExiting = false,
+}: {
+  messages: SessionMessage[];
+  width?: number;
+  generation?: number;
+  footer?: string;
+  isExiting?: boolean;
+}) {
   return React.createElement(
     Box,
     { flexDirection: "column" },
-    React.createElement(Static<SessionMessage>, {
-      items: prepared.items,
-      children: (message) =>
+    React.createElement(StaticMessageHistory, {
+      key: generation,
+      messages,
+      width,
+      isExiting,
+      children: (message, imagePreviews) =>
         React.createElement(MessageView, {
           key: message.id,
           message,
           width,
           permanentImages: true,
-          imagePreviews: prepared.previews.get(message),
+          imagePreviews,
         }),
     }),
-    React.createElement(Text, null, "prompt")
+    React.createElement(Text, null, footer)
   );
+}
+
+for (const kind of ["draft", "history"]) {
+  test(`unmounting ${kind} cancels unfinished preparation and stops its remaining batch`, async (t) => {
+    const signals: AbortSignal[] = [];
+    t.mock.method(ImagePreviewCache.prototype, "get", (_key: string, _load: unknown, signal: AbortSignal) => {
+      signals.push(signal);
+      return new Promise((resolve) => {
+        signal.addEventListener("abort", () => resolve({ columns: 0, rows: 1 }), { once: true });
+      });
+    });
+    const urls = ["data:image/png;base64,YQ==", "data:image/png;base64,Yg=="];
+    const message: SessionMessage = {
+      id: "pending",
+      sessionId: "test",
+      role: "user",
+      content: "PENDING_IMAGE_MESSAGE",
+      contentParams: urls.map((url) => ({ type: "image_url" as const, image_url: { url } })),
+      messageParams: null,
+      visible: true,
+      compacted: false,
+      createTime: "",
+      updateTime: "",
+    };
+    const element =
+      kind === "draft"
+        ? React.createElement(AttachmentPreviews, { urls, width: 80 })
+        : React.createElement(PreparedTranscript, { messages: [message] });
+    const h = await nativeTerminal(t, element);
+    assert.equal(signals.length, 1, "batch should submit only its first image while waiting");
+    h.clear();
+    await h.rerender(React.createElement(Text, null, "next view"));
+    assert.equal(signals[0].aborted, true);
+    assert.equal(signals.length, 1, "invalidated batch must not submit its second image");
+    assert.doesNotMatch(h.output(), /PENDING_IMAGE_MESSAGE|a=T|1337;File=/);
+  });
 }
 
 test("static transcript waits for thumbnails, preserves order and does not duplicate images", async (t) => {
@@ -161,6 +212,13 @@ test("static transcript waits for thumbnails, preserves order and does not dupli
   h.clear();
   await h.rerender(React.createElement(PreparedTranscript, { messages: [message, reply] }));
   assert.doesNotMatch(h.output(), /\x1b_Ga=T|my picture/);
+  const placements = Reflect.get(h.images, "placements") as Map<string, unknown>;
+  await h.rerender(React.createElement(PreparedTranscript, { messages: [message, reply], isExiting: true }));
+  assert.equal(placements.size, 1, "entering the exit screen must preserve existing history");
+  h.clear();
+  await h.rerender(React.createElement(Text, null, "finished"));
+  assert.equal(placements.size, 0, "exit must still release JS image references");
+  assert.doesNotMatch(h.output(), /a=d,d=I/, "exit must leave the image in terminal scrollback");
 });
 
 function promptProps(draft: PromptDraft, submissions: PromptSubmission[], output: () => void) {
@@ -272,11 +330,62 @@ test("replaying static messages after resize prepares images at the new width", 
   const h = await nativeTerminal(t, React.createElement(PreparedTranscript, { messages: [message], width: 44 }));
   assert.match(h.output(), /\[image #1 \(800×600\)\]/);
   assert.doesNotMatch(h.output(), /a=T/);
-  await h.rerender(React.createElement(PreparedTranscript, { messages: [], width: 80 }));
+  await h.rerender(React.createElement(PreparedTranscript, { messages: [], width: 80, generation: 1 }));
   h.clear();
-  await h.rerender(React.createElement(PreparedTranscript, { messages: [message], width: 80 }));
+  await h.rerender(React.createElement(PreparedTranscript, { messages: [message], width: 80, generation: 1 }));
   assert.match(h.output(), /a=T/);
 });
+
+for (const protocol of ["kitty", "iTerm.app"]) {
+  test(`replacing history releases old images and excludes old content from full redraws (${protocol})`, async (t) => {
+    const old: SessionMessage = {
+      id: "old",
+      sessionId: "old-session",
+      role: "user",
+      content: "OLD_SESSION",
+      contentParams: [{ type: "image_url", image_url: { url: await imageUrl(123, 456) } }],
+      messageParams: null,
+      visible: true,
+      compacted: false,
+      createTime: "",
+      updateTime: "",
+    };
+    const current: SessionMessage = {
+      ...old,
+      id: "new",
+      sessionId: "new-session",
+      content: "NEW_SESSION",
+      contentParams: [{ type: "image_url", image_url: { url: await imageUrl(456, 123) } }],
+    };
+    const h = await nativeTerminal(t, React.createElement(PreparedTranscript, { messages: [old] }), protocol);
+    await h.waitForOutput(/a=T|1337;File=/);
+    const placements = Reflect.get(h.images, "placements") as Map<string, unknown>;
+    assert.equal(placements.size, 1, "Static child unmount must retain the replay image");
+    const oldMarkers = [...placements.keys()];
+    const oldId = /a=T,f=100,t=d,i=(\d+)/.exec(h.output())?.[1];
+    h.clear();
+    await h.rerender(React.createElement(PreparedTranscript, { messages: [], generation: 1 }));
+    assert.equal(placements.size, 0);
+    if (oldId) assert.ok(h.output().includes(`a=d,d=I,i=${oldId},`));
+    await h.rerender(React.createElement(PreparedTranscript, { messages: [current], generation: 1 }));
+    await h.waitForOutput(/a=T|1337;File=/);
+    assert.equal(placements.size, 1);
+    assert.ok(oldMarkers.every((marker) => !placements.has(marker)));
+    h.clear();
+    await h.rerender(
+      React.createElement(PreparedTranscript, {
+        messages: [current],
+        generation: 1,
+        footer: Array.from({ length: 35 }, (_, i) => `footer ${i}`).join("\n"),
+      })
+    );
+    assert.match(h.output(), /\x1b\[(?:2|3)J/, "overflow must exercise Ink's full static replay");
+    assert.match(h.output(), /NEW_SESSION/);
+    assert.match(h.output(), /a=T|1337;File=/, "current image must survive ordinary full redraw");
+    assert.doesNotMatch(h.output(), /OLD_SESSION|123×456/);
+    assert.equal(placements.size, 1);
+  });
+}
 
 for (const protocol of ["kitty", "iTerm.app"]) {
   test(`saved attachments remain in the transcript when the assistant replies (${protocol})`, async (t) => {
@@ -367,6 +476,14 @@ for (const protocol of ["kitty", "iTerm.app"]) {
     );
     if (staticId)
       assert.ok(!h.output().includes(`a=d,d=I,i=${staticId},`), "assistant append must not delete the saved image");
+    await h.send("/new");
+    await h.send("\r");
+    assert.equal(manager.getActiveSessionId(), null);
+    assert.equal(
+      (Reflect.get(h.images, "placements") as Map<string, unknown>).size,
+      0,
+      "resetting App's history must release its image resources"
+    );
   });
 }
 

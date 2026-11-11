@@ -138,6 +138,48 @@ test("output adapter replaces markers, restores cursor and deletes only dynamic 
   terminal.dispose();
 });
 
+test("history release frees retained previews even after clearing, while preserving current and draft images", () => {
+  const { stdout, writes } = outputStream();
+  const terminal = new TerminalImages(stdout, { TERM_PROGRAM: "kitty" });
+  const image = { columns: 10, rows: 3, png: Buffer.from("png") };
+  const current = Symbol("current");
+  const sent = terminal.register(image, true, current);
+  const draft = terminal.register(image, false);
+  const placements = Reflect.get(terminal, "placements") as Map<string, unknown>;
+  for (let i = 0; i < 100; i++) {
+    const history = Symbol("old");
+    const marker = terminal.register({ ...image, png: Buffer.alloc(1024) }, true, history);
+    terminal.transform(marker);
+    terminal.unregister(marker);
+    if (i % 2 === 0) terminal.transform("\x1b[2J");
+    assert.match(terminal.transform(marker), /a=T/, "ordinary clear or child unmount must allow history replay");
+    if (i % 2 === 0) terminal.transform("\x1b[2J");
+    terminal.releaseHistory(history);
+    assert.equal(terminal.transform(marker), " ".repeat(marker.length));
+    assert.equal(placements.size, 2, "expired histories must release their PNG references");
+  }
+  assert.match(writes.join(""), /a=d,d=I/);
+  assert.match(terminal.transform(sent), /a=T/);
+  assert.match(terminal.transform(draft), /a=T/);
+  terminal.releaseHistory(current);
+  assert.equal(placements.size, 1);
+  assert.match(terminal.transform(draft), /a=T/);
+  terminal.dispose();
+  assert.equal(placements.size, 0);
+});
+
+test("exit releases history buffers while leaving static images in terminal scrollback", () => {
+  const { stdout, writes } = outputStream();
+  const terminal = new TerminalImages(stdout, { TERM_PROGRAM: "kitty" });
+  const history = Symbol("exiting");
+  const marker = terminal.register({ columns: 10, rows: 3, png: Buffer.from("png") }, true, history);
+  terminal.transform(marker);
+  terminal.releaseHistory(history, true);
+  assert.equal((Reflect.get(terminal, "placements") as Map<string, unknown>).size, 0);
+  terminal.dispose();
+  assert.doesNotMatch(writes.join(""), /a=d,d=I/);
+});
+
 test("size response filter handles every split, preserves keys and leaves paste data untouched", () => {
   const response = "\x1b[6;18;9t";
   for (let split = 1; split < response.length; split++) {
