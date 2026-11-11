@@ -175,7 +175,7 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
             paddingX={1}
             overflow="hidden"
           >
-            <Text dimColor>Selected prompt:</Text>
+            <Text dimColor>Selected message:</Text>
             <Text>{formatUndoMessage(selectedTarget?.message.content ?? "")}</Text>
             {!selectedTarget ? (
               <Text>This message is no longer available.</Text>
@@ -184,23 +184,29 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
             ) : selectedTarget.queued ? (
               <Box marginTop={1} flexDirection="column">
                 <Text color={modeIndex === 0 ? "cyanBright" : undefined}>{modeIndex === 0 ? "> " : "  "}Remove</Text>
-                <Text color={modeIndex === 1 ? "cyanBright" : undefined}>{modeIndex === 1 ? "> " : "  "}Edit</Text>
+                <Text dimColor>{"  "}↩️ Remove this message from the queue.</Text>
+                <Box marginTop={1} flexDirection="column">
+                  <Text color={modeIndex === 1 ? "cyanBright" : undefined}>{modeIndex === 1 ? "> " : "  "}Edit</Text>
+                  <Text dimColor>{"  "}✏️ Edit this message before it is sent.</Text>
+                </Box>
               </Box>
             ) : (
               <Box marginTop={1} flexDirection="column">
                 <Text color={modeIndex === 0 ? "cyanBright" : undefined}>
-                  {modeIndex === 0 ? "> " : "  "}Restore code and conversation
+                  {modeIndex === 0 ? "> " : "  "}Restore files and conversation
                 </Text>
                 <Text dimColor>
                   {"  "}
                   {selectedTarget?.canRestoreCode
-                    ? "Restore files from the recorded Git checkpoint, then fork the conversation."
+                    ? "Also restore files with saved history to their recorded state."
                     : "No code checkpoint is recorded for this prompt."}
                 </Text>
-                <Text color={modeIndex === 1 ? "cyanBright" : undefined}>
-                  {modeIndex === 1 ? "> " : "  "}Restore conversation
-                </Text>
-                <Text dimColor>{"  "}Fork the conversation without changing files.</Text>
+                <Box marginTop={1} flexDirection="column">
+                  <Text color={modeIndex === 1 ? "cyanBright" : undefined}>
+                    {modeIndex === 1 ? "> " : "  "}Restore conversation only
+                  </Text>
+                  <Text dimColor>{"  "}Leave files unchanged.</Text>
+                </Box>
               </Box>
             )}
           </Box>

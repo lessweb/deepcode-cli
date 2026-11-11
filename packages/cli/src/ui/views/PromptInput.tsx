@@ -1058,7 +1058,7 @@ export const PromptInput = React.memo(function PromptInput({
           <Text color="magenta">
             {`⏳ ${pendingMessageCount} pending message${pendingMessageCount === 1 ? "" : "s"}`}
           </Text>
-          <Text dimColor> (use /undo to edit)</Text>
+          <Text dimColor> (use /undo to remove or edit)</Text>
         </Box>
       ) : null}
       {(!search || search.preview === null) && imageUrls.length > 0 ? (

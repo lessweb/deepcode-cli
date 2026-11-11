@@ -242,7 +242,7 @@ test("busy /undo keeps history visible but only allows changing pending prompts"
   assert.match(h.latest(), /unavailable while running/);
   assert.doesNotMatch(h.latest(), /Nothing to undo/);
   await h.send("\r");
-  assert.doesNotMatch(h.latest(), /Selected prompt:/);
+  assert.doesNotMatch(h.latest(), /Selected message:/);
   assert.equal(h.manager.listSessionMessages(h.sessionId).length, 2);
   await h.send("\x1b");
 

@@ -79,7 +79,7 @@ test("submitted prompts display during preparation and appear once after consump
   await h.send("later");
   await h.send("\r");
   assert.match(h.frame(), /> 1\+2=[\s\S]*> later/);
-  assert.match(h.frame(), /1 pending message \(use \/undo to edit\)/);
+  assert.match(h.frame(), /1 pending message \(use \/undo to remove or edit\)/);
   const queued = manager.listQueuedMessages(id)[1];
   manager.beginQueuedMessageEdit(id, queued.id);
   manager.finishQueuedMessageEdit(id, queued.id, { text: "edited" });
@@ -189,7 +189,7 @@ test("Esc cancels a queue edit without interrupting the model", async (t) => {
   assert.deepEqual(h.events, ["cancel edit"]);
 });
 
-test("pending undo targets expose only remove and edit", async (t) => {
+test("pending undo targets expose remove and edit", async (t) => {
   const target: QueueUndoTarget = {
     index: 0,
     canRestoreCode: false,
@@ -224,7 +224,7 @@ test("pending undo targets expose only remove and edit", async (t) => {
   await h.send("\r");
   assert.match(h.frame(), /Remove/);
   assert.match(h.frame(), /Edit/);
-  assert.doesNotMatch(h.frame(), /Restore code|Restore conversation/);
+  assert.doesNotMatch(h.frame(), /Restore files|Restore conversation/);
   await h.send("\x1b[B");
   await h.send("\r");
   assert.deepEqual(selected, ["edit"]);
