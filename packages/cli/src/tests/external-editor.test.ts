@@ -16,7 +16,13 @@ function mockVim(t: TestContext, action: (file: string, child: EventEmitter) => 
     assert.deepEqual(options, { cwd: process.cwd(), stdio: "inherit", shell: false });
     const child = new EventEmitter();
     files.push(args[0]);
-    queueMicrotask(() => action(args[0], child));
+    queueMicrotask(() => {
+      try {
+        action(args[0], child);
+      } catch (error) {
+        child.emit("error", error);
+      }
+    });
     return child;
   });
   syncBuiltinESMExports();
@@ -31,7 +37,8 @@ test("vim receives complete UTF-8 text and its saved contents are normalized", a
   const seed = "中文 😀\n".repeat(1000);
   mockVim(t, (file, child) => {
     assert.equal(fs.readFileSync(file, "utf8"), seed);
-    assert.equal(fs.statSync(file).mode & 0o777, 0o600);
+    // Windows does not expose POSIX owner/group/other permission bits.
+    if (process.platform !== "win32") assert.equal(fs.statSync(file).mode & 0o777, 0o600);
     fs.writeFileSync(file, "edited 中文\r\nnext\r\n\r\n");
     child.emit("exit", 0, null);
   });

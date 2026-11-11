@@ -152,7 +152,12 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
     await send(value);
     await send("\r");
   }
-  await flush();
+  async function waitForFrame(pattern: RegExp) {
+    const deadline = Date.now() + 2_000;
+    while (!pattern.test(frames.at(-1) ?? "") && Date.now() < deadline) await flush();
+    assert.match(frames.at(-1) ?? "", pattern);
+  }
+  await waitForFrame(/Type your message/);
   return {
     submissions,
     send,
@@ -161,11 +166,7 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
     sessionId: entry.id,
     flush,
     latest: () => frames.at(-1) ?? "",
-    async waitForFrame(pattern: RegExp) {
-      const deadline = Date.now() + 2_000;
-      while (!pattern.test(frames.at(-1) ?? "") && Date.now() < deadline) await flush();
-      assert.match(frames.at(-1) ?? "", pattern);
-    },
+    waitForFrame,
     async setBusy(value: boolean) {
       busy = value;
       managerRef.current!.setActiveSessionId(null);
@@ -184,7 +185,9 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
     },
     async undo() {
       await submit("/undo");
+      await waitForFrame(/Enter choose/);
       await send("\r"); // Select the latest user message.
+      await waitForFrame(/Restore conversation only/);
       await send("\r"); // Restore the conversation.
     },
   };
@@ -194,7 +197,7 @@ for (const action of ["answer", "cancel"] as const) {
   test(`/undo draft does not return after ${action}ing AskUserQuestion`, async (t) => {
     const h = await harness(t);
     await h.undo();
-    assert.match(h.latest(), /^> 今天星期几$/m);
+    await h.waitForFrame(/^> 今天星期几$/m);
     await h.send("\u0015");
     await h.submit("明天星期几");
     assert.equal(h.submissions[0]?.text, "明天星期几", h.latest());
@@ -218,12 +221,12 @@ test("consuming an /undo draft preserves its attachments and allows another undo
   const images = ["data:image/png;base64,aW1hZ2U="];
   const h = await harness(t, images);
   await h.undo();
-  assert.match(h.latest(), /^> 今天星期几$/m);
+  await h.waitForFrame(/^> 今天星期几$/m);
   await h.send("\u0015");
   await h.submit("明天星期几");
   assert.deepEqual(h.submissions.at(-1)?.imageUrls, images);
   await h.undo();
-  assert.match(h.latest(), /^> 明天星期几$/m);
+  await h.waitForFrame(/^> 明天星期几$/m);
   await h.send("\r");
   assert.equal(h.submissions.at(-1)?.text, "明天星期几");
   assert.deepEqual(h.submissions.at(-1)?.imageUrls, images);
