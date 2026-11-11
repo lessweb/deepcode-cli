@@ -104,6 +104,8 @@ function App({
   const compactionControllerRef = useRef<AbortController | null>(null);
   const [view, setView] = useState<View>("chat");
   const [busy, setBusy] = useState(false);
+  const [externalEditorRunning, setExternalEditorRunning] = useState(false);
+  const externalEditorDraftRef = useRef<PromptDraft | null>(null);
   const [compacting, setCompacting] = useState(false);
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -959,6 +961,7 @@ function App({
   );
 
   const handlePromptDraftApplied = useCallback((nonce: number) => {
+    if (externalEditorDraftRef.current?.nonce === nonce) externalEditorDraftRef.current = null;
     // Consume the draft so remounting PromptInput cannot restore it again.
     setPromptDraft((draft) => (draft?.nonce === nonce ? null : draft));
   }, []);
@@ -1165,6 +1168,15 @@ function App({
   const expandedThinkingId = findExpandedThinkingId(messages);
   const pendingQuestion = useMemo(() => findPendingAskUserQuestion(messages, activeStatus), [activeStatus, messages]);
   const shouldShowQuestionPrompt = Boolean(pendingQuestion && !dismissedQuestionIds.has(pendingQuestion.messageId));
+  const pendingPromptDialog =
+    !busy &&
+    !editingQueue &&
+    Boolean(
+      shouldShowQuestionPrompt ||
+      (activeStatus === "ask_permission" && activeAskPermissions?.length && !pendingPermissionReply) ||
+      pendingPlanImplementation
+    );
+
   const loadingText = useMemo(
     () =>
       compacting
@@ -1267,7 +1279,7 @@ function App({
       if (!sessionId) {
         return;
       }
-      setPromptDraft(null);
+      setPromptDraft(externalEditorDraftRef.current);
       if (result.permissions.some(({ permission }) => permission === "deny")) {
         setPendingPermissionReply({ sessionId, result });
         setStatusLine("Permission denied. Add a reply, then press Enter to continue.");
@@ -1288,7 +1300,7 @@ function App({
     sessionManager.interruptActiveSession();
     setActiveStatus("interrupted");
     setActiveAskPermissions(undefined);
-    setPromptDraft(null);
+    setPromptDraft(externalEditorDraftRef.current);
     refreshSessionsList();
   }, [refreshSessionsList, sessionManager]);
 
@@ -1386,7 +1398,7 @@ function App({
             void sessionManager.reconnectMcpServer(name, latest.mcpServers?.[name]);
           }}
         />
-      ) : shouldShowQuestionPrompt && pendingQuestion && !busy && !editingQueue ? (
+      ) : shouldShowQuestionPrompt && pendingQuestion && !busy && !editingQueue && !externalEditorRunning ? (
         <AskUserQuestionPrompt
           questions={pendingQuestion.questions}
           onSubmit={handleQuestionAnswers}
@@ -1396,6 +1408,7 @@ function App({
         activeAskPermissions &&
         activeAskPermissions.length > 0 &&
         !pendingPermissionReply &&
+        !externalEditorRunning &&
         !editingQueue &&
         !busy ? (
         <PermissionPrompt
@@ -1405,7 +1418,7 @@ function App({
           onSubmit={handlePermissionResult}
           onCancel={handlePermissionCancel}
         />
-      ) : pendingPlanImplementation && !busy && !editingQueue ? (
+      ) : pendingPlanImplementation && !busy && !editingQueue && !externalEditorRunning ? (
         <PlanImplementationPrompt onSelect={handlePlanImplementationChoice} />
       ) : (
         <PromptInput
@@ -1421,6 +1434,13 @@ function App({
           cursorLayoutKey={promptCursorLayoutKey}
           loadingText={loadingText}
           promptDraft={promptDraft}
+          onExternalEditorChange={(running, draft) => {
+            setExternalEditorRunning(running);
+            if (!running && draft && pendingPromptDialog) {
+              externalEditorDraftRef.current = draft;
+              setPromptDraft(draft);
+            }
+          }}
           onPromptDraftApplied={handlePromptDraftApplied}
           editingQueuedMessage={Boolean(editingQueue)}
           onCancelQueueEdit={() => {

@@ -2,9 +2,10 @@ import { isBusyCommandAllowed } from "../core/slash-commands";
 import { useHistorySearch, isHistorySearchShortcut } from "../hooks/useHistorySearch";
 import { historySearchFooter, historyMatchRange } from "../core/history-search-display";
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Box, Text, useStdout } from "ink";
+import { Box, Text, useApp, useStdin, useStdout } from "ink";
 import type { DOMElement } from "ink";
 import chalk from "chalk";
+import { editInExternalEditor } from "../core/external-editor";
 import { ARGS_SEPARATOR } from "../constants";
 import { PromptText } from "../components/PromptText";
 import {
@@ -137,6 +138,7 @@ type Props = {
   onInterrupt: () => void;
   onToggleProcessStdout?: () => void;
   onExitShortcut?: () => void;
+  onExternalEditorChange?: (running: boolean, draft?: PromptDraft) => void;
 };
 
 const PROMPT_PREFIX_WIDTH = 2;
@@ -177,10 +179,18 @@ export const PromptInput = React.memo(function PromptInput({
   onInterrupt,
   onToggleProcessStdout,
   onExitShortcut,
+  onExternalEditorChange,
   onRawModeChange,
   onPlanModeChange,
 }: Props): React.ReactElement {
   const { stdout } = useStdout();
+  const { stdin } = useStdin();
+  const { suspendTerminal, waitUntilRenderFlush } = useApp();
+  const [editingExternally, setEditingExternally] = useState(false);
+  const externalEditorRunningRef = useRef(false);
+  const externalEditorChangeRef = useRef(onExternalEditorChange);
+  externalEditorChangeRef.current = onExternalEditorChange;
+  const terminalActive = !disabled && !editingExternally;
   const inputTextRef = useRef<DOMElement | null>(null);
   const searchTextRef = useRef<DOMElement | null>(null);
   const historySearch = useHistorySearch();
@@ -214,8 +224,15 @@ export const PromptInput = React.memo(function PromptInput({
     promptHistory
   );
 
-  const { pastesRef, handlePaste, expandPasteMarkerAtCursor, resetPastes, hasCollapsedMarkers, hasExpandedRegions } =
-    usePasteHandling(buffer, updateBuffer, setStatusMessage);
+  const {
+    pastesRef,
+    expandedRegionsRef,
+    handlePaste,
+    expandPasteMarkerAtCursor,
+    resetPastes,
+    hasCollapsedMarkers,
+    hasExpandedRegions,
+  } = usePasteHandling(buffer, updateBuffer, setStatusMessage);
 
   const fileMentionToken = getCurrentFileMentionToken(buffer);
   const hasFileMentionToken = fileMentionToken !== null;
@@ -225,6 +242,7 @@ export const PromptInput = React.memo(function PromptInput({
     [fileMentionItems, fileMentionToken]
   );
   const showFileMentionMenu =
+    !editingExternally &&
     !search &&
     !showSkillsDropdown &&
     !showModelDropdown &&
@@ -302,7 +320,7 @@ export const PromptInput = React.memo(function PromptInput({
     [buffer, inputContentWidth]
   );
   const useInlineCursor = isPromptCursorAtWrapBoundary(buffer, inputContentWidth);
-  const usePositionedCursor = !disabled && hasTerminalFocus && !showFooterText && stdout.isTTY && !useInlineCursor;
+  const usePositionedCursor = terminalActive && hasTerminalFocus && !showFooterText && stdout.isTTY && !useInlineCursor;
   const promptCursorLayoutKey = useMemo(
     () =>
       [
@@ -315,16 +333,16 @@ export const PromptInput = React.memo(function PromptInput({
       ].join("\u001E"),
     [cursorLayoutKey, pendingMessageCount, imageUrls.length, planMode, screenWidth, selectedSkills]
   );
-  useTerminalFocusReporting(stdout, !disabled);
-  useTerminalExtendedKeys(stdout, !disabled);
-  useBracketedPaste(stdout, !disabled);
+  useTerminalFocusReporting(stdout, terminalActive);
+  useTerminalExtendedKeys(stdout, terminalActive);
+  useBracketedPaste(stdout, terminalActive);
   const terminalCursorActive = usePromptTerminalCursor(
     search ? searchTextRef : inputTextRef,
     search ? { row: 0, column: searchFooter.column } : cursorPlacement,
-    !busy && (search ? !disabled && hasTerminalFocus && Boolean(stdout.isTTY) : usePositionedCursor),
+    !busy && (search ? terminalActive && hasTerminalFocus && Boolean(stdout.isTTY) : usePositionedCursor),
     `${promptCursorLayoutKey}:${search ? "search" : "input"}`
   );
-  useHiddenTerminalCursor(stdout, !disabled && !terminalCursorActive);
+  useHiddenTerminalCursor(stdout, terminalActive && !terminalCursorActive);
 
   const refreshFileMentionItems = React.useCallback(() => {
     setFileMentionItems(scanFileMentionItems(projectRoot));
@@ -396,6 +414,8 @@ export const PromptInput = React.memo(function PromptInput({
 
   useTerminalInput(
     (input, key) => {
+      if (externalEditorRunningRef.current) return;
+
       if (key.focusIn) {
         setHasTerminalFocus(true);
         return;
@@ -500,6 +520,11 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (openRawModelDropdown || showSkillsDropdown || showModelDropdown) {
+        return;
+      }
+
+      if (key.ctrl && !key.meta && !key.paste && input.toLowerCase() === "g") {
+        void openExternalEditor();
         return;
       }
 
@@ -737,8 +762,58 @@ export const PromptInput = React.memo(function PromptInput({
         updateBuffer((s) => insertText(s, sanitized));
       }
     },
-    { isActive: !disabled }
+    { isActive: terminalActive }
   );
+
+  async function openExternalEditor(): Promise<void> {
+    if (externalEditorRunningRef.current || !stdin.isTTY || !stdout.isTTY) return;
+    externalEditorRunningRef.current = true;
+    const seed = expandPasteMarkers(buffer.text, pastesRef.current);
+    let text = seed;
+    setEditingExternally(true);
+    setPendingExit(false);
+    setStatusMessage(null);
+    externalEditorChangeRef.current?.(true);
+    try {
+      // Let the custom input listener and terminal-mode hooks release ownership
+      // before Ink hands the terminal to vim.
+      await waitUntilRenderFlush();
+      text = await editInExternalEditor(seed, projectRoot, (run) =>
+        suspendTerminal(async () => {
+          stdin.pause();
+          await run();
+        })
+      );
+      if (text !== seed) {
+        // Old marker contents remain available to undo; expanded coordinates no
+        // longer describe the edited text and must not be reused by Ctrl+O.
+        for (const [id, region] of expandedRegionsRef.current) {
+          pastesRef.current.set(id, region.content);
+        }
+        expandedRegionsRef.current.clear();
+        updateBuffer(() => ({ text, cursor: text.length }));
+      }
+    } catch (error) {
+      setStatusMessage(
+        (error as NodeJS.ErrnoException).code === "ENOENT"
+          ? "Could not open vim or read the edited text"
+          : "Could not edit in vim"
+      );
+    } finally {
+      setHasTerminalFocus(true);
+      setEditingExternally(false);
+      externalEditorChangeRef.current?.(false, {
+        nonce: Date.now(),
+        text,
+        imageUrls,
+        selectedSkills,
+        planMode,
+      });
+      await waitUntilRenderFlush();
+      stdin.resume();
+      externalEditorRunningRef.current = false;
+    }
+  }
 
   function undo(): void {
     const previous = undoPromptEdit(undoRedoRef.current, buffer);
@@ -1024,7 +1099,7 @@ export const PromptInput = React.memo(function PromptInput({
             ) : (
               renderBufferWithCursor(
                 buffer,
-                !disabled && hasTerminalFocus && !search,
+                terminalActive && hasTerminalFocus && !search,
                 placeholder,
                 pastesRef.current,
                 !terminalCursorActive && !search
@@ -1094,7 +1169,7 @@ export const PromptInput = React.memo(function PromptInput({
             <Text wrap="truncate-end">
               <Text dimColor>{searchFooter.prefix}</Text>
               <Text color="cyan">{searchFooter.query}</Text>
-              <Text inverse={!disabled && hasTerminalFocus && !terminalCursorActive}> </Text>
+              <Text inverse={terminalActive && hasTerminalFocus && !terminalCursorActive}> </Text>
             </Text>
           </Box>
           {screenWidth > searchFooter.column + 1 && (

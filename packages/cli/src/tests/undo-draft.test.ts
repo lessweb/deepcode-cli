@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import childProcess from "node:child_process";
+import { EventEmitter } from "node:events";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -169,6 +171,17 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
       managerRef.current!.setActiveSessionId(null);
       await flush();
     },
+    async requestPermission() {
+      busy = false;
+      entry.status = "ask_permission";
+      entry.askPermissions = [
+        { toolCallId: "editor-test", name: "Bash", command: "touch example", scopes: ["write-in-cwd"] },
+      ];
+      const events = managerRef.current! as unknown as Pick<SessionManagerOptions, "onSessionEntryUpdated">;
+      events.onSessionEntryUpdated?.({ ...entry });
+      managerRef.current!.setActiveSessionId(null);
+      await flush();
+    },
     async undo() {
       await submit("/undo");
       await send("\r"); // Select the latest user message.
@@ -300,3 +313,31 @@ test("cancelling a pending edit keeps the original queue content", async (t) => 
   assert.equal(h.manager.listQueuedMessages(h.sessionId)[0].id, queued.id);
   assert.equal(h.manager.listQueuedMessages(h.sessionId)[0].content.text, "original pending");
 });
+
+for (const action of ["allow", "cancel"] as const) {
+  test(`vim draft survives a permission request arriving during editing (${action})`, async (t) => {
+    const h = await harness(t);
+    let editor: { file: string; child: EventEmitter } | undefined;
+    t.mock.method(childProcess, "spawn", (command: string, args: string[]) => {
+      assert.equal(command, "vim");
+      editor = { file: args[0], child: new EventEmitter() };
+      return editor.child;
+    });
+    syncBuiltinESMExports();
+    await h.setBusy(true);
+    await h.send("draft before vim");
+    await h.send("\x07");
+    assert.ok(editor);
+    assert.equal(fs.readFileSync(editor.file, "utf8"), "draft before vim");
+    await h.requestPermission();
+    assert.doesNotMatch(h.latest(), /touch example/);
+    fs.writeFileSync(editor.file, "draft from vim\n");
+    editor.child.emit("exit", 0, null);
+    await h.waitForFrame(/touch example/);
+    await h.send(action === "allow" ? "\r" : "\x1b");
+    await h.waitForFrame(/> draft from vim/);
+    await h.send("!");
+    await h.send("\r");
+    assert.equal(h.submissions.at(-1)?.text, "draft from vim!");
+  });
+}
