@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import sharp from "sharp";
 import { mkdtemp, writeFile, rm, readdir } from "node:fs/promises";
@@ -30,6 +31,46 @@ function outputStream() {
   );
   return { stdout: stdout as unknown as NodeJS.WriteStream, writes };
 }
+
+test("CLI startup and image placeholders survive a sharp load failure", async () => {
+  // A fresh process ensures no successful sharp import can mask a native module failure.
+  const brokenSharp = `
+    globalThis.sharpLoadAttempts = (globalThis.sharpLoadAttempts ?? 0) + 1;
+    throw new Error("Simulated sharp native module load failure");
+    export default function sharp() {}
+  `;
+  const loader = `
+    export async function resolve(specifier, context, nextResolve) {
+      if (specifier === "sharp") {
+        return { url: ${JSON.stringify(`data:text/javascript,${encodeURIComponent(brokenSharp)}`)}, shortCircuit: true };
+      }
+      return nextResolve(specifier, context);
+    }
+  `;
+  const script = `
+    import assert from "node:assert/strict";
+    import { register } from "node:module";
+    register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(loader)}`)});
+    // Both interactive and --exec modes load this entry before choosing their mode.
+    await import(${JSON.stringify(new URL("../cli-app.tsx", import.meta.url).href)});
+    const { prepareImagePreview, imagePlaceholder, DEFAULT_CELL_SIZE } =
+      await import(${JSON.stringify(new URL("../ui/core/image-preview.ts", import.meta.url).href)});
+    assert.equal(globalThis.sharpLoadAttempts, undefined);
+    for (const graphics of [true, false]) {
+      const preview = await prepareImagePreview(${JSON.stringify(await makeImageUrl())}, DEFAULT_CELL_SIZE, graphics);
+      assert.deepEqual(preview, { columns: 0, rows: 1 });
+      assert.equal(imagePlaceholder(0, preview), "[image #1]");
+    }
+    assert.equal(globalThis.sharpLoadAttempts, 1);
+    await assert.rejects(import("sharp"), /Simulated sharp native module load failure/);
+  `;
+  const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], {
+    encoding: "utf8",
+    timeout: 15_000,
+  });
+  assert.ifError(result.error);
+  assert.equal(result.status, 0, result.stderr);
+});
 
 test("thumbnail layout preserves proportions within 40 columns and 10 rows", () => {
   assert.deepEqual(thumbnailLayout(800, 600, DEFAULT_CELL_SIZE), {

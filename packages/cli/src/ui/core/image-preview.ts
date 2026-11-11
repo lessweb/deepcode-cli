@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { open, stat } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import sharp from "sharp";
 import { ImagePreviewCache } from "./image-preview-cache";
 
 export type CellSize = { width: number; height: number };
@@ -85,6 +84,8 @@ async function decodePreview(
     const bytes = await readPreviewSource(url, signal);
     signal.throwIfAborted();
     if (!bytes) return result;
+    const sharp = (await import("sharp")).default;
+    signal.throwIfAborted();
     const source = sharp(bytes, { limitInputPixels: 32 * 1024 * 1024 });
     const metadata = await source.metadata();
     signal.throwIfAborted();
