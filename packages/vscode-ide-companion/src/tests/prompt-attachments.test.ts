@@ -149,7 +149,12 @@ class FakeFileReader {
 }
 
 function loadAttachmentManager(): {
-  manager: { clear: () => void; hasAttachments: () => boolean; getImageUrls: () => string[] };
+  manager: {
+    clear: () => void;
+    hasAttachments: () => boolean;
+    getImageUrls: () => string[];
+    setImageUrls: (urls: string[]) => void;
+  };
   promptInput: FakeElement;
   toolsLine: FakeElement;
 } {
@@ -168,6 +173,7 @@ function loadAttachmentManager(): {
           clear: () => void;
           hasAttachments: () => boolean;
           getImageUrls: () => string[];
+          setImageUrls: (urls: string[]) => void;
         }),
   };
 
@@ -237,4 +243,13 @@ test("prompt attachment manager removes one pasted image without clearing the re
   assert.equal(manager.hasAttachments(), false);
   assert.deepEqual(Array.from(manager.getImageUrls()), []);
   assert.equal(toolsLine.children.length, 0);
+});
+
+test("restored attachments replace prior input and retain original URLs for submission", async () => {
+  const { manager, promptInput } = loadAttachmentManager();
+  await pasteImage(promptInput, "data:image/png;base64,previous");
+  manager.setImageUrls(["file:///saved.png", "data:image/png;base64,restored"]);
+  assert.deepEqual(Array.from(manager.getImageUrls()), ["file:///saved.png", "data:image/png;base64,restored"]);
+  manager.clear();
+  assert.equal(manager.hasAttachments(), false);
 });

@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleWebviewMessage, loadSession, type ProviderDeps } from "../provider.js";
+import { handleWebviewMessage, loadSession, postUndoState, releaseQueueEdit, type ProviderDeps } from "../provider.js";
+
+import { PromptQueue } from "../../../core/src/prompt-queue.js";
 
 // --- Helpers ---
 
@@ -22,7 +24,22 @@ function createMockSessionManager(options?: { sessions?: any[]; messages?: any[]
   const skills = options?.skills ?? [];
   let activeSessionId: string | null = sessions[0]?.id ?? null;
 
+  const queue = new PromptQueue("session-1");
   return {
+    listUndoTargets: () =>
+      messages
+        .filter((m: any) => m.role === "user" && m.visible && !m.meta?.isSummary)
+        .map((message: any, index: number) => ({ message, index, canRestoreCode: Boolean(message.checkpointHash) })),
+    restoreSessionCode: () => {},
+    restoreSessionConversation: () => [],
+    listQueuedMessages: () => queue.list(),
+    getQueuePausedReason: () => undefined,
+    getPreparingPromptId: (): string | undefined => undefined,
+    enqueuePrompt: (_sessionId: string, content: any) => queue.enqueue(content),
+    beginQueuedMessageEdit: (_sessionId: string, id: string) => queue.beginEdit(id),
+    finishQueuedMessageEdit: (_sessionId: string, id: string, content?: any) => queue.finishEdit(id, content),
+    removeQueuedMessage: (_sessionId: string, id: string) => queue.remove(id),
+    isSessionRunning: () => false,
     dispose: () => {},
     listSessions: () => sessions,
     getSession: (id: string) => sessions.find((s: any) => s.id === id) ?? null,
@@ -251,29 +268,25 @@ test("userPrompt with empty prompt and no images/permissions is handled without 
   assert.equal(deps.messages.length, 0, "No messages for empty prompt");
 });
 
-test("userPrompt with text sends userMessage and loading states", async () => {
+test("ordinary userPrompt waits for committed user callback and sends loading states", async () => {
   const deps = createDeps();
   await handleWebviewMessage({ type: "userPrompt", prompt: "hello" }, deps);
 
   const types = deps.messages.map((m: any) => m.type);
-  assert.ok(types.includes("userMessage"), `Expected userMessage, got: ${types.join(", ")}`);
+  assert.ok(!types.includes("userMessage"), "No optimistic duplicate of the committed user message");
   assert.ok(types.includes("loading"), `Expected loading, got: ${types.join(", ")}`);
-  const userMessage = deps.messages.find((message: any) => message.type === "userMessage") as any;
-  assert.equal(userMessage.html, undefined);
-  assert.equal(userMessage.meta, undefined);
 
   // Should end with loading: false
   const lastLoading = [...deps.messages].reverse().find((m: any) => m.type === "loading");
   assert.deepEqual(lastLoading, { type: "loading", value: false, status: "idle" });
 });
 
-test("userPrompt with images sends userMessage with image placeholder", async () => {
+test("image userPrompt waits for committed user callback", async () => {
   const deps = createDeps();
   await handleWebviewMessage({ type: "userPrompt", prompt: "", images: ["data:image/png;base64,abc"] }, deps);
 
   const userMsg = deps.messages.find((m: any) => m.type === "userMessage");
-  assert.ok(userMsg, "Should send userMessage for images");
-  assert.equal((userMsg as any).content, "粘贴的图像");
+  assert.equal(userMsg, undefined);
 });
 
 test("userPrompt passes multiple image urls to the session manager", async () => {
@@ -806,4 +819,239 @@ test("pending choices survive Webview reconstruction but not switching sessions"
     deps.messages.some((m: any) => m.type === "planImplementation"),
     false
   );
+});
+
+const undoPrompt = {
+  id: "prompt-1",
+  role: "user",
+  visible: true,
+  content: "restore me",
+  createTime: "2026-11-11T00:00:00Z",
+  checkpointHash: "checkpoint",
+  meta: { userPrompt: { imageUrls: ["data:image/png;base64,abc"] } },
+};
+
+async function undoAction(
+  deps: ProviderDeps & { messages: unknown[] },
+  action: string,
+  extra: Record<string, unknown> = {}
+) {
+  await handleWebviewMessage(
+    { type: "undoAction", action, sessionId: "session-1", id: "prompt-1", requestId: 42, ...extra },
+    deps
+  );
+  return deps.messages.filter((message: any) => message.type === "undoResult").at(-1) as any;
+}
+
+test("busy undo exposes history and pending messages without interrupting", async () => {
+  const deps = createDeps({ messages: [undoPrompt] });
+  deps.sessionManager.getSession("session-1")!.status = "processing";
+  deps.sessionManager.interruptActiveSession = () => assert.fail("must not interrupt");
+  deps.sessionManager.enqueuePrompt("session-1", { text: "pending" });
+  await handleWebviewMessage({ type: "slashCommand", command: "undo" }, deps);
+  const state = deps.messages.find((m: any) => m.type === "undoState") as any;
+  assert.equal(state.busy, true);
+  assert.equal(state.targets[0].id, "prompt-1");
+  assert.equal(state.queued[0].content.text, "pending");
+  assert.ok(deps.messages.some((m: any) => m.type === "openUndo"));
+  deps.sessionManager.restoreSessionConversation = () => assert.fail("busy restore must be rejected");
+  assert.equal((await undoAction(deps, "conversation")).ok, false);
+});
+
+test("restore attempts files then conversation, reports partial failure and returns images once", async () => {
+  const deps = createDeps({ messages: [undoPrompt] });
+  const calls: string[] = [];
+  deps.sessionManager.restoreSessionCode = () => {
+    calls.push("files");
+    throw new Error("unavailable");
+  };
+  deps.sessionManager.restoreSessionConversation = () => {
+    calls.push("conversation");
+    return [];
+  };
+  const reply = await undoAction(deps, "code-and-conversation");
+  assert.deepEqual(calls, ["files", "conversation"]);
+  assert.equal(reply.ok, true);
+  assert.match(reply.error, /File restore failed/);
+  assert.deepEqual(reply.draft, { text: "restore me", imageUrls: ["data:image/png;base64,abc"] });
+  assert.equal(reply.requestId, 42);
+  assert.ok(deps.messages.some((m: any) => m.type === "loadSession"));
+  deps.messages.length = 0;
+  await handleWebviewMessage({ type: "ready" }, deps);
+  assert.ok(!deps.messages.some((m: any) => m.type === "undoResult"));
+});
+
+test("failed conversation restore does not replace history or apply a draft", async () => {
+  const deps = createDeps({ messages: [undoPrompt] });
+  deps.sessionManager.restoreSessionCode = () => assert.fail("conversation-only must not restore files");
+  deps.sessionManager.restoreSessionConversation = () => {
+    throw new Error("read only");
+  };
+  const reply = await undoAction(deps, "conversation");
+  assert.equal(reply.ok, false);
+  assert.equal(reply.draft, undefined);
+  assert.ok(!deps.messages.some((m: any) => m.type === "loadSession"));
+});
+
+test("restore rejects stale session and missing message, even if the client sends an action directly", async () => {
+  const deps = createDeps({ messages: [undoPrompt] });
+  deps.sessionManager.restoreSessionCode = () => assert.fail("must not restore");
+  deps.sessionManager.restoreSessionConversation = () => assert.fail("must not restore");
+  assert.equal((await undoAction(deps, "code-and-conversation", { sessionId: "other" })).ok, false);
+  assert.equal((await undoAction(deps, "conversation", { id: "missing" })).ok, false);
+  deps.sessionManager.isSessionRunning = () => true;
+  assert.equal((await undoAction(deps, "conversation")).ok, false);
+});
+
+test("queue edit preserves ID, timestamp, attachments, skills and mode, and cancel preserves original", async () => {
+  const deps = createDeps();
+  const content = { text: "pending", imageUrls: ["image"], skills: [{ name: "test" } as any], planMode: true };
+  const queued = deps.sessionManager.enqueuePrompt("session-1", content);
+  const edit = await undoAction(deps, "edit", { id: queued.id });
+  assert.deepEqual(edit.draft, content);
+  assert.equal((await undoAction(deps, "save", { id: queued.id, ...content, text: "edited" })).ok, true);
+  const updated = deps.sessionManager.listQueuedMessages("session-1")[0];
+  assert.equal(updated.id, queued.id);
+  assert.equal(updated.submittedAt, queued.submittedAt);
+  assert.deepEqual(updated.content, { ...content, text: "edited" });
+  await undoAction(deps, "edit", { id: queued.id });
+  assert.equal((await undoAction(deps, "cancel", { id: queued.id })).ok, true);
+  assert.deepEqual(deps.sessionManager.listQueuedMessages("session-1")[0], updated);
+  assert.equal((await undoAction(deps, "remove", { id: queued.id })).ok, true);
+  assert.equal(deps.sessionManager.listQueuedMessages("session-1").length, 0);
+  assert.equal((await undoAction(deps, "edit", { id: queued.id })).ok, false);
+});
+
+test("empty queue edit remains editable and release/ready/session switch cancel locks", async () => {
+  const deps = createDeps();
+  const queued = deps.sessionManager.enqueuePrompt("session-1", { text: "pending" });
+  await undoAction(deps, "edit", { id: queued.id });
+  assert.equal((await undoAction(deps, "save", { id: queued.id, text: "" })).ok, false);
+  releaseQueueEdit(deps.sessionManager);
+  assert.equal((await undoAction(deps, "edit", { id: queued.id })).ok, true);
+  await handleWebviewMessage({ type: "ready" }, deps);
+  assert.equal((await undoAction(deps, "edit", { id: queued.id })).ok, true);
+  await handleWebviewMessage({ type: "createNewSession" }, deps);
+  deps.sessionManager.setActiveSessionId("session-1");
+  assert.equal((await undoAction(deps, "edit", { id: queued.id })).ok, true);
+  releaseQueueEdit(deps.sessionManager);
+});
+
+test("busy ordinary submissions enqueue while permission and question replies keep their dedicated path", async () => {
+  const deps = createDeps();
+  deps.sessionManager.getSession("session-1")!.status = "processing";
+  deps.sessionManager.handleUserPrompt = () => assert.fail("must not start another request");
+  await handleWebviewMessage({ type: "userPrompt", prompt: "queued", planMode: true, images: ["image"] }, deps);
+  assert.deepEqual(deps.sessionManager.listQueuedMessages("session-1")[0].content, {
+    text: "queued",
+    planMode: true,
+    imageUrls: ["image"],
+    skills: [],
+  });
+  await handleWebviewMessage({ type: "userPrompt", prompt: "answer", isAnswers: true }, deps);
+  assert.equal(deps.sessionManager.listQueuedMessages("session-1").length, 1);
+  await handleWebviewMessage({ type: "enqueuePrompt", sessionId: "other", requestId: 7, text: "stale" }, deps);
+  assert.equal(deps.sessionManager.listQueuedMessages("session-1").length, 1);
+});
+
+test("legacy history images and stable IDs reach restore and message list", async () => {
+  const deps = createDeps({
+    messages: [
+      { ...undoPrompt, meta: null, contentParams: [{ type: "image_url", image_url: { url: "legacy-image" } }] },
+    ],
+  });
+  loadSession("session-1", deps.sessionManager, deps.postMessage, deps.renderMarkdown);
+  const loaded = deps.messages.find((m: any) => m.type === "loadSession") as any;
+  assert.equal(loaded.messages[0].id, undoPrompt.id);
+  assert.equal(loaded.messages[0].createTime, undoPrompt.createTime);
+  const reply = await undoAction(deps, "conversation");
+  assert.deepEqual(reply.draft.imageUrls, ["legacy-image"]);
+});
+
+test("question replies associate their temporary bubble with the committed message ID", async () => {
+  const history: any[] = [];
+  const deps = createDeps({ messages: history });
+  deps.sessionManager.handleUserPrompt = async () => {
+    history.push({ ...undoPrompt, id: "answer-id", content: "My answer", meta: { isAnswers: true } });
+  };
+  await handleWebviewMessage({ type: "userPrompt", prompt: "My answer", isAnswers: true }, deps);
+  const optimistic = deps.messages.find((message: any) => message.type === "userMessage") as any;
+  const committed = deps.messages.find((message: any) => message.type === "userMessageCommitted") as any;
+  assert.equal(committed.optimisticId, optimistic.id);
+  assert.equal(committed.message.id, "answer-id");
+  const state = deps.messages.filter((message: any) => message.type === "undoState").at(-1) as any;
+  assert.equal(state.targets[0].id, "answer-id");
+});
+
+test("undo opened during compaction becomes available when compaction finishes", async () => {
+  const deps = createDeps({ messages: [undoPrompt] });
+  let finish!: () => void;
+  deps.sessionManager.compactSession = () =>
+    new Promise<boolean>((resolve) => {
+      finish = () => resolve(true);
+    });
+  const compaction = handleWebviewMessage({ type: "slashCommand", command: "compact" }, deps);
+  await handleWebviewMessage({ type: "slashCommand", command: "undo" }, deps);
+  assert.equal((deps.messages.filter((message: any) => message.type === "undoState").at(-1) as any).busy, true);
+  finish();
+  await compaction;
+  assert.equal((deps.messages.filter((message: any) => message.type === "undoState").at(-1) as any).busy, false);
+});
+
+for (const fresh of [false, true]) {
+  test(`${fresh ? "new" : "existing"} idle session displays its first submission as preparing, not pending`, async () => {
+    const deps = createDeps();
+    if (fresh) deps.sessionManager.setActiveSessionId(null);
+    deps.sessionManager.handleUserPrompt = async (content) => {
+      deps.sessionManager.setActiveSessionId("session-1");
+      const first = deps.sessionManager.enqueuePrompt("session-1", content);
+      // Core notifies as soon as it enqueues, before it assigns preparingPromptId.
+      postUndoState(deps.sessionManager, deps.postMessage);
+      const initial = deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any;
+      assert.equal(initial.preparing.id, first.id);
+      assert.equal(initial.queued.filter((q: any) => q.id !== initial.preparing.id).length, 0);
+      const second = deps.sessionManager.enqueuePrompt("session-1", { text: "next" });
+      postUndoState(deps.sessionManager, deps.postMessage);
+      const withPending = deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any;
+      assert.equal(withPending.preparing.id, first.id);
+      assert.deepEqual(
+        withPending.queued.filter((q: any) => q.id !== withPending.preparing.id).map((q: any) => q.id),
+        [second.id]
+      );
+      deps.sessionManager.removeQueuedMessage("session-1", first.id);
+      postUndoState(deps.sessionManager, deps.postMessage);
+      const consumed = deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any;
+      assert.equal(consumed.preparing, undefined, "do not misclassify the next queued prompt as the idle submission");
+      deps.sessionManager.getPreparingPromptId = () => second.id;
+      postUndoState(deps.sessionManager, deps.postMessage);
+      assert.equal((deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any).preparing.id, second.id);
+    };
+    await handleWebviewMessage({ type: "userPrompt", prompt: "first" }, deps);
+  });
+}
+
+test("a paused or edited initial submission returns to the pending list", async () => {
+  const deps = createDeps();
+  deps.sessionManager.handleUserPrompt = async (content) => {
+    const first = deps.sessionManager.enqueuePrompt("session-1", content);
+    postUndoState(deps.sessionManager, deps.postMessage);
+    await undoAction(deps, "edit", { id: first.id });
+    assert.equal((deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any).preparing, undefined);
+    await undoAction(deps, "cancel", { id: first.id });
+    deps.sessionManager.getQueuePausedReason = () => "interrupted";
+    postUndoState(deps.sessionManager, deps.postMessage);
+    const paused = deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any;
+    assert.equal(paused.preparing, undefined);
+    assert.equal(paused.queued[0].id, first.id);
+  };
+  await handleWebviewMessage({ type: "userPrompt", prompt: "first" }, deps);
+});
+
+test("messages submitted while busy remain pending until core prepares them", async () => {
+  const deps = createDeps();
+  deps.sessionManager.getSession("session-1")!.status = "processing";
+  await handleWebviewMessage({ type: "userPrompt", prompt: "wait for current request" }, deps);
+  const state = deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any;
+  assert.equal(state.preparing, undefined);
+  assert.equal(state.queued.length, 1);
 });

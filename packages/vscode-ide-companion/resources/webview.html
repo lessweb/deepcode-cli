@@ -11,6 +11,10 @@
     <link rel="stylesheet" href="{{cssUri}}" />
   </head>
   <body>
+    <dialog id="undoDialog" aria-labelledby="undoTitle">
+      <div class="undo-heading"><strong id="undoTitle">Undo</strong><button id="undoBack" type="button" hidden>Back</button><button id="undoClose" type="button">Close</button></div>
+      <div id="undoBody"></div>
+    </dialog>
     <div class="app">
       <div class="header-container">
         <div class="header-left">
@@ -65,6 +69,8 @@
             <div class="skills-popup-header">Commands</div>
             <div class="skills-popup-list" id="slashPopupList" role="listbox" aria-label="Commands"></div>
           </div>
+          <div id="queueList" class="queue-list" hidden></div>
+          <div id="queueEditBar" class="queue-edit-bar" hidden>Editing pending message <button id="queueEditSave" type="button">Save</button> <button id="queueEditCancel" type="button">Cancel</button></div>
           <div class="command-notice" id="commandNotice" role="status" hidden></div>
           <div class="plan-implementation-menu" id="planImplementationMenu" role="menu" aria-labelledby="planImplementationTitle" hidden>
             <div class="skills-popup-header" id="planImplementationTitle">Plan ready</div>
@@ -152,11 +158,13 @@
       const pluginRateLimitLink = document.getElementById("pluginRateLimitLink");
       const pluginRateLimitClose = document.getElementById("pluginRateLimitClose");
 
+      const imagePreviewUrls = Object.create(null);
       const attachmentManager = typeof window.createPromptAttachmentManager === "function"
         ? window.createPromptAttachmentManager({
           promptInput,
           inputWrap,
           toolsLine,
+          resolveImageUrl: (url) => imagePreviewUrls[url] || url,
           onAttachmentChange: () => {
             updateSendIconState();
           }
@@ -204,7 +212,7 @@
       }
 
       function isProcessing() {
-        return commandBusy || planImplementationRunning || isBusyStatus(currentSessionStatus);
+        return commandBusy || planImplementationRunning || undoState.busy || isBusyStatus(currentSessionStatus);
       }
 
       const planImplementationMenu = document.getElementById("planImplementationMenu");
@@ -260,8 +268,177 @@
       let slashIndex = 0;
       let slashDismissedText = null;
 
+      let undoState = { targets: [], queued: [], busy: false };
+      let undoSelected = null;
+      let editingQueue = null;
+      let savedQueueDraft = null;
+      let undoRequest = null;
+
+      let reloadQueueDraft = savedState.queueDraft;
+      let undoError = "";
+      const undoDialog = document.getElementById("undoDialog");
+      const undoBody = document.getElementById("undoBody");
+      const queueList = document.getElementById("queueList");
+      const queueEditBar = document.getElementById("queueEditBar");
+
+      function composerDraft() {
+        return { text: promptInput.value, imageUrls: getAttachedImageUrls(), skills: selectedSkills.slice(), planMode: composerState.planMode };
+      }
+      function applyComposerDraft(draft) {
+        promptInput.value = draft.text || "";
+        attachmentManager?.setImageUrls(draft.imageUrls || []);
+        selectedSkills = draft.skills || [];
+        if (typeof draft.planMode === "boolean") composerState.planMode = draft.planMode;
+        historyCursor = -1;
+        draftBeforeHistory = null;
+        renderSkillsTags();
+        renderPlanMode();
+        updateComposerInput();
+        promptInput.focus();
+      }
+      function endQueueEdit() {
+        const draft = savedQueueDraft;
+        editingQueue = null;
+        savedQueueDraft = null;
+        queueEditBar.hidden = true;
+        if (draft) applyComposerDraft(draft);
+        saveComposerState();
+      }
+      function requestUndo(action, id, draft, type = "undoAction") {
+        if (undoRequest) return;
+        const requestId = Array.from(crypto.getRandomValues(new Uint32Array(4))).join("-");
+        undoError = "";
+        undoRequest = { requestId, action, id, draft, before: composerDraft(), sessionId: currentSessionId };
+        promptInput.readOnly = true;
+        vscode.postMessage({ type, requestId, sessionId: currentSessionId, action, id, ...draft });
+        renderUndo();
+      }
+      function closeUndo() {
+        undoDialog.close();
+        undoSelected = null;
+        promptInput.focus();
+      }
+      function openUndo() {
+        if (editingQueue || undoRequest) return;
+        undoError = "";
+        undoSelected = null;
+        if (!undoDialog.open) undoDialog.showModal();
+        renderUndo();
+        const buttons = undoBody.querySelectorAll("button:not(:disabled)");
+        buttons[buttons.length - 1]?.focus();
+      }
+      function actionButton(text, action, disabled = false) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = text;
+        button.dataset.undoKey = text;
+        button.disabled = disabled || Boolean(undoRequest);
+        button.addEventListener("click", action);
+        return button;
+      }
+      function targetLabel(target) {
+        const text = (target.text || "").replace(/\s+/g, " ").trim() || "(empty message)";
+        const count = target.imageUrls?.length || 0;
+        return (count ? `${count} image${count === 1 ? "" : "s"} · ` : "") + (text.length > 90 ? text.slice(0, 89) + "…" : text);
+      }
+      function queueTarget(message) {
+        return { id: message.id, text: message.content.text, imageUrls: message.content.imageUrls, createTime: message.submittedAt, queued: true };
+      }
+      function renderUndo() {
+        const pending = undoState.queued.filter((message) => message.id !== undoState.preparing?.id);
+        queueList.replaceChildren();
+        queueList.hidden = !pending.length;
+        if (pending.length) {
+          const title = document.createElement("div");
+          title.textContent = `${pending.length} pending message${pending.length === 1 ? "" : "s"}${undoState.pausedReason ? " · paused" : ""}`;
+          queueList.appendChild(title);
+          for (const queued of pending) {
+            const row = document.createElement("div");
+            row.className = "queue-message";
+            const label = document.createElement("span");
+            label.textContent = targetLabel(queueTarget(queued));
+            row.append(label, actionButton("Edit", () => requestUndo("edit", queued.id), Boolean(editingQueue)), actionButton("Remove", () => requestUndo("remove", queued.id), Boolean(editingQueue)));
+            queueList.appendChild(row);
+          }
+        }
+        if (!undoDialog.open) return;
+        document.getElementById("undoBack").hidden = !undoSelected;
+        const focused = document.activeElement?.dataset.undoKey;
+        undoBody.replaceChildren();
+        const targets = [...undoState.targets, ...undoState.queued.map(queueTarget)];
+        if (!undoSelected) {
+          if (!targets.length) undoBody.textContent = "Nothing to undo yet.";
+          for (const target of targets) {
+            const row = actionButton(targetLabel(target), () => {
+              undoSelected = { id: target.id, queued: Boolean(target.queued) };
+              renderUndo();
+              undoBody.querySelector("button:not(:disabled)")?.focus();
+            }, !target.queued && (undoState.busy || isProcessing()));
+            row.className = "undo-target";
+            row.dataset.undoKey = target.id;
+            const time = document.createElement("small");
+            time.textContent = `${new Date(target.createTime).toLocaleString()}${target.queued ? " · pending" : ""}`;
+            row.appendChild(time);
+            undoBody.appendChild(row);
+          }
+        } else {
+          const target = targets.find((item) => item.id === undoSelected.id && Boolean(item.queued) === undoSelected.queued);
+          const label = document.createElement("p");
+          label.textContent = target ? targetLabel(target) : "This message is no longer available.";
+          undoBody.appendChild(label);
+          if (target?.queued) {
+            undoBody.append(actionButton("Remove", () => requestUndo("remove", target.id)), actionButton("Edit", () => requestUndo("edit", target.id)));
+          } else if (target) {
+            const busy = undoState.busy || isProcessing();
+            undoBody.append(actionButton("Restore files and conversation", () => requestUndo("code-and-conversation", target.id), busy || !target.canRestoreCode));
+            if (!target.canRestoreCode) {
+              const note = document.createElement("p");
+              note.textContent = "No saved file history is available for this message.";
+              undoBody.appendChild(note);
+            }
+            undoBody.append(actionButton("Restore conversation only", () => requestUndo("conversation", target.id), busy));
+            const note = document.createElement("p");
+            note.textContent = busy ? "This prompt cannot be changed while running." : "The selected message and later messages will be removed. The selected message returns to the input box.";
+            undoBody.appendChild(note);
+          }
+        }
+        if (undoError) {
+          const error = document.createElement("p");
+          error.setAttribute("role", "alert");
+          error.textContent = undoError;
+          undoBody.appendChild(error);
+        }
+        if (focused) Array.from(undoBody.querySelectorAll("button")).find((button) => button.dataset.undoKey === focused && !button.disabled)?.focus();
+        if (!undoDialog.contains(document.activeElement)) {
+          (undoBody.querySelector("button:not(:disabled)") || document.getElementById("undoClose")).focus();
+        }
+      }
+      document.getElementById("undoBack").addEventListener("click", () => {
+        undoSelected = null;
+        undoError = "";
+        renderUndo();
+        undoBody.querySelector("button:not(:disabled)")?.focus();
+      });
+      document.getElementById("undoClose").addEventListener("click", closeUndo);
+      undoDialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        if (undoSelected) { undoSelected = null; renderUndo(); undoBody.querySelector("button:not(:disabled)")?.focus(); }
+        else closeUndo();
+      });
+      undoDialog.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home" && event.key !== "End") return;
+        event.preventDefault();
+        const buttons = Array.from(undoBody.querySelectorAll("button:not(:disabled)"));
+        const index = buttons.indexOf(document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : Math.max(0, Math.min(buttons.length - 1, index + (event.key === "ArrowUp" ? -1 : 1)));
+        buttons[next]?.focus();
+      });
+      document.getElementById("queueEditSave").addEventListener("click", () => requestUndo("save", editingQueue.id, composerDraft()));
+      document.getElementById("queueEditCancel").addEventListener("click", () => requestUndo("cancel", editingQueue.id));
+
       function saveComposerState() {
-        vscode.setState({ sessionId: composerState.sessionId, drafts: composerState.save(promptInput.value) });
+        vscode.setState({ sessionId: composerState.sessionId, drafts: composerState.save(promptInput.value), queueDraft: savedQueueDraft });
       }
 
       function renderPlanMode() {
@@ -288,8 +465,8 @@
 
       function refreshSlashMenu() {
         const token = DeepcodeComposer.getSlashToken(promptInput.value);
-        slashMatches = token && !isProcessing() && slashDismissedText !== promptInput.value
-          ? DeepcodeComposer.filterSlashCommands(DeepcodeComposer.buildComposerCommands(availableSkills), token)
+        slashMatches = token && !editingQueue && slashDismissedText !== promptInput.value
+          ? DeepcodeComposer.filterSlashCommands(DeepcodeComposer.buildComposerCommands(availableSkills).filter((item) => !isProcessing() || item.kind === "undo"), token)
           : [];
         slashIndex = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
         if (!slashMatches.length) { closeSlashMenu(); return; }
@@ -327,7 +504,14 @@
       }
 
       function selectSlashCommand(item) {
-        if (isProcessing()) return;
+        if (editingQueue || (isProcessing() && item.kind !== "undo")) return;
+        if (item.kind === "undo") {
+          promptInput.value = "";
+          closeSlashMenu();
+          updateComposerInput();
+          vscode.postMessage({ type: "slashCommand", command: "undo" });
+          return;
+        }
         promptInput.value = "";
         closeSlashMenu();
         commandNotice.hidden = true;
@@ -1127,6 +1311,7 @@
         requestAnimationFrame(() => {
           updateAllConnectionLines();
         });
+        return bubble;
       }
 
       function updateConnectionLine(currentBubble) {
@@ -1908,7 +2093,7 @@
       }
 
       function setLoading(isLoading, status) {
-        isLoading = isLoading || planImplementationRunning;
+        isLoading = isLoading || planImplementationRunning || undoState.busy;
         if (status !== undefined) {
           currentSessionStatus = status;
         }
@@ -1947,6 +2132,7 @@
         updateAskUserQuestionInteractivity();
         renderPermissionPrompt();
         renderPlanImplementation();
+        renderUndo();
       }
 
       function updateSendIconState() {
@@ -2182,6 +2368,12 @@
         if (event.key !== "Escape") {
           return;
         }
+        if (undoDialog.open) {
+          event.preventDefault();
+          if (undoSelected) { undoSelected = null; undoError = ""; renderUndo(); }
+          else closeUndo();
+          return;
+        }
         if (sessionDropdown.classList.contains("show")) {
           sessionDropdown.classList.remove("show");
           sessionSelector.classList.remove("open");
@@ -2190,6 +2382,11 @@
         if (composerState.pendingPlanImplementation && !isProcessing()) {
           event.preventDefault();
           choosePlanImplementation("stay");
+          return;
+        }
+        if (editingQueue) {
+          event.preventDefault();
+          requestUndo("cancel", editingQueue.id);
           return;
         }
         if (isProcessing()) {
@@ -2256,9 +2453,10 @@
         return true;
       }
 
-      function sendPrompt() {
+      function sendPrompt(fromKeyboard = false) {
+        if (undoRequest) return;
         // 如果正在处理，则中断（不检查输入框内容）
-        if (isProcessing()) {
+        if (isProcessing() && fromKeyboard !== true) {
           vscode.postMessage({ type: "interrupt" });
           // 立即更新本地状态为 interrupted
           currentSessionStatus = "interrupted";
@@ -2273,11 +2471,21 @@
           return;
         }
 
+        if (editingQueue) {
+          requestUndo("save", editingQueue.id, composerDraft());
+          return;
+        }
         const submission = DeepcodeComposer.resolveSlashSubmission(
           DeepcodeComposer.buildComposerCommands(availableSkills), text
         );
         if (submission?.kind === "command") {
           selectSlashCommand(submission.item);
+          return;
+        }
+
+        if (isProcessing()) {
+          if (commandBusy || !currentSessionId) return;
+          requestUndo("enqueue", null, { ...composerDraft(), text: submission?.kind === "plan" ? submission.text : text, planMode: submission?.kind === "plan" || composerState.planMode }, "enqueuePrompt");
           return;
         }
 
@@ -2419,7 +2627,7 @@
           } else {
             // 回车：发送消息
             event.preventDefault();
-            sendPrompt();
+            sendPrompt(true);
           }
         } else if (event.key === "ArrowUp" && noModifier) {
           if ((historyCursor !== -1 || isCaretCollapsedAtStart(promptInput)) && inputHistory.length > 0) {
@@ -2436,10 +2644,23 @@
       });
 
       function addMessageBubble(msg, shouldConnect) {
+        const existing = msg.id && Array.from(messages.children).find((bubble) => bubble.dataset.messageId === msg.id);
+        if (existing && (!existing.dataset.preparing || msg.preparing)) return;
         if (msg.role === "system") {
           addBubble(msg.content, "system", msg.meta, shouldConnect);
         } else if (msg.role === "user") {
-          addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false);
+          const bubble = addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false);
+          if (msg.id) bubble.dataset.messageId = msg.id;
+          if (msg.preparing) bubble.dataset.preparing = "true";
+          const images = msg.meta?.userPrompt?.imageUrls || (Array.isArray(msg.contentParams) ? msg.contentParams : [msg.contentParams]).filter((part) => part?.type === "image_url").map((part) => part.image_url?.url).filter(Boolean);
+          for (const url of images) {
+            const image = document.createElement("img");
+            image.src = imagePreviewUrls[url] || url;
+            image.alt = "Attached image";
+            image.className = "message-image";
+            bubble.appendChild(image);
+          }
+          if (existing) existing.replaceWith(bubble);
         } else if (msg.role === "assistant") {
           addBubble(msg.html || msg.content, "assistant", msg.meta, shouldConnect, msg.content || "");
         } else if (msg.role === "tool") {
@@ -2449,6 +2670,65 @@
 
       window.addEventListener("message", (event) => {
         const message = event.data;
+        Object.assign(imagePreviewUrls, message.imagePreviews || {});
+        if (message.type === "userMessageCommitted") {
+          const bubble = Array.from(messages.children).find((item) => item.dataset.messageId === message.optimisticId);
+          if (bubble) bubble.dataset.messageId = message.message.id;
+          renderUndo();
+          return;
+        }
+        if (message.type === "undoState") {
+          if (message.sessionId !== currentSessionId) return;
+          undoState = message;
+          // Render the message being prepared as a normal user bubble. Retain it
+          // until the committed callback replaces it with the same message ID.
+          for (const bubble of messages.querySelectorAll("[data-preparing]")) {
+            if (bubble.dataset.messageId !== message.preparing?.id && !message.targets.some((target) => target.id === bubble.dataset.messageId)) bubble.remove();
+          }
+          if (message.preparing) {
+            const preparing = message.preparing;
+            addMessageBubble({ id: preparing.id, role: "user", content: preparing.content.text || "", meta: { userPrompt: preparing.content }, preparing: true }, false);
+          }
+          if (editingQueue && !undoRequest && !message.queued.some((item) => item.id === editingQueue.id)) endQueueEdit();
+          renderUndo();
+          setLoading(isProcessing(), currentSessionStatus);
+          refreshSlashMenu();
+          return;
+        }
+        if (message.type === "openUndo") {
+          if (message.sessionId === currentSessionId) openUndo();
+          return;
+        }
+        if (message.type === "undoResult") {
+          const request = undoRequest;
+          if (!request || request.requestId !== message.requestId || request.sessionId !== message.sessionId) return;
+          undoRequest = null;
+          promptInput.readOnly = false;
+          if (message.sessionId !== currentSessionId) return;
+          if (message.ok) {
+            if (request.action === "edit") {
+              savedQueueDraft = request.before;
+              editingQueue = { id: message.id, sessionId: message.sessionId };
+              applyComposerDraft(message.draft);
+              queueEditBar.hidden = false;
+            } else if (request.action === "save" || request.action === "cancel") endQueueEdit();
+            else if (request.action === "enqueue") {
+              composerState.pendingPlanImplementation = null;
+              renderPlanImplementation();
+              applyComposerDraft({ text: "", imageUrls: [], skills: [] });
+            }
+            else if (message.draft) applyComposerDraft(message.draft);
+            closeUndo();
+          }
+          if (message.error) {
+            undoError = message.error;
+            commandNotice.textContent = message.error;
+            commandNotice.hidden = false;
+
+          }
+          renderUndo();
+          return;
+        }
         if (message.type === "planImplementation") {
           if (composerState.offerPlanImplementation({ id: message.id, sessionId: message.sessionId })) {
             closeSlashMenu();
@@ -2477,6 +2757,9 @@
           if (!hasLoadedSession && !savedState.drafts && savedState.promptText) {
             composerState.sessionId = message.sessionId || null;
           }
+          if (editingQueue) endQueueEdit();
+          undoState = { targets: [], queued: [], busy: false };
+          closeUndo();
           hasLoadedSession = true;
           promptInput.value = composerState.load(
             message.type === "loadSession" ? message.sessionId : null,
@@ -2581,6 +2864,11 @@
             }
           }
 
+          if (reloadQueueDraft && message.sessionId === savedState.sessionId) {
+            const draft = reloadQueueDraft;
+            reloadQueueDraft = null;
+            applyComposerDraft(draft);
+          }
           // 设置会话状态
           const isCurrentlyProcessing = isBusyStatus(currentSessionStatus);
           setLoading(isCurrentlyProcessing, currentSessionStatus);
@@ -2654,12 +2942,7 @@
           currentLlmRetry = event;
           updateThinkingBubbleContent();
         } else if (message.type === "userMessage") {
-          addBubble(
-            message.meta?.isAnswers ? message.html || message.content || "" : message.content || "",
-            "user",
-            message.meta,
-            false
-          );
+          addMessageBubble({ ...message, role: "user" }, false);
 
           // Record user message into history
           if (typeof message.content === "string") {

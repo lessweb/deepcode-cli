@@ -67,3 +67,20 @@ export function getNonce(): string {
   }
   return text;
 }
+
+/** Collect attachment URLs without interpreting URLs inside message text. */
+export function collectPromptImageUrls(value: unknown): string[] {
+  const urls = new Set<string>();
+  function visit(item: unknown): void {
+    if (!item || typeof item !== "object") return;
+    for (const [key, child] of Object.entries(item)) {
+      if (key === "imageUrls" && Array.isArray(child)) {
+        for (const url of child) if (typeof url === "string") urls.add(url);
+      } else if (key === "image_url" && child && typeof child === "object" && "url" in child) {
+        if (typeof child.url === "string") urls.add(child.url);
+      } else visit(child);
+    }
+  }
+  visit(value);
+  return [...urls];
+}

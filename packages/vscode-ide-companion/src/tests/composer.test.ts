@@ -17,7 +17,7 @@ test("composer exposes only supported commands and shares CLI matching and parsi
   const items = buildComposerCommands(skills);
   assert.deepEqual(
     items.filter((item) => item.kind !== "skill").map((item) => item.name),
-    ["skills", "plan", "new", "init", "resume", "fork", "continue", "compact"]
+    ["skills", "plan", "new", "init", "resume", "fork", "continue", "compact", "undo"]
   );
   assert.equal(getSlashToken("/"), "/");
   assert.equal(getSlashToken(" /plan"), null);

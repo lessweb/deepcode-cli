@@ -22,6 +22,7 @@ const supportedCommands = new Set<SlashCommandKind>([
   "init",
   "fork",
   "compact",
+  "undo",
 ]);
 
 export function buildComposerCommands(skills: SkillInfo[]) {

@@ -10,7 +10,7 @@ import {
   PLAN_IMPLEMENTATION_CHOICES,
 } from "@vegamo/deepcode-core/common/plan-implementation";
 import type { SessionManager } from "@vegamo/deepcode-core";
-import type { PermissionScope, SkillInfo, UserToolPermission } from "@vegamo/deepcode-core";
+import type { PermissionScope, SessionMessage, SkillInfo, UserToolPermission } from "@vegamo/deepcode-core";
 import { prepareToolDiffContent } from "./tool-diff.js";
 import { parseUserToolPermissions, parsePermissionScopes } from "./utils.js";
 
@@ -32,6 +32,17 @@ export interface ProviderDeps {
     | "listSkills"
     | "forkSession"
     | "compactSession"
+    | "listUndoTargets"
+    | "restoreSessionCode"
+    | "restoreSessionConversation"
+    | "listQueuedMessages"
+    | "getQueuePausedReason"
+    | "getPreparingPromptId"
+    | "enqueuePrompt"
+    | "beginQueuedMessageEdit"
+    | "finishQueuedMessageEdit"
+    | "removeQueuedMessage"
+    | "isSessionRunning"
   >;
   postMessage: PostMessageFn;
   renderMarkdown: (text: string) => string;
@@ -50,12 +61,16 @@ function sendPendingPlan(manager: ProviderDeps["sessionManager"], postMessage: P
 }
 
 const activeRequests = new WeakSet<ProviderDeps["sessionManager"]>();
+// The first idle submission is already being sent, even while core initializes
+// the session before assigning its preparing prompt ID.
+const directSubmissions = new WeakMap<ProviderDeps["sessionManager"], { sessionId: string | null; id?: string }>();
 
 function isBusy(manager: ProviderDeps["sessionManager"]): boolean {
   const session = manager.getSession(manager.getActiveSessionId() ?? "");
   return (
     activeRequests.has(manager) ||
     compactions.has(manager) ||
+    manager.isSessionRunning(manager.getActiveSessionId() ?? "") ||
     session?.status === "processing" ||
     session?.status === "pending"
   );
@@ -95,6 +110,7 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
   const msg = message as Record<string, unknown>;
 
   if (msg.type === "ready") {
+    releaseQueueEdit(sessionManager);
     const activeSessionId = sessionManager.getActiveSessionId();
     if (isBusy(sessionManager) && activeSessionId && sessionManager.getSession(activeSessionId)) {
       loadSession(activeSessionId, sessionManager, postMessage, renderMarkdown);
@@ -108,6 +124,7 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
     sendPendingPlan(sessionManager, postMessage);
     if (compactions.has(sessionManager)) postMessage({ type: "commandBusy", value: true });
     await sendSkillsList(sessionManager, postMessage);
+    postUndoState(sessionManager, postMessage);
     return true;
   }
 
@@ -121,13 +138,23 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
     return true;
   }
 
+  if (msg.type === "undoAction" || msg.type === "enqueuePrompt") {
+    await handleUndoAction(msg, deps);
+    return true;
+  }
+
+  if (msg.type === "slashCommand" && msg.command === "undo") {
+    postUndoState(sessionManager, postMessage);
+    postMessage({ type: "openUndo", sessionId: sessionManager.getActiveSessionId() });
+    return true;
+  }
+
   if (msg.type === "slashCommand") {
     if (!isBusy(sessionManager)) await handleSlashCommand(msg, deps);
     return true;
   }
 
   if (msg.type === "userPrompt") {
-    if (isBusy(sessionManager)) return true;
     const prompt = String(msg.prompt || "").trim();
     const images = Array.isArray(msg.images)
       ? (msg.images as unknown[]).filter((image): image is string => typeof image === "string" && image.length > 0)
@@ -138,6 +165,25 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
       return true;
     }
     const skills = (msg.skills as SkillInfo[]) || [];
+    if (isBusy(sessionManager)) {
+      const sessionId = sessionManager.getActiveSessionId();
+      if (
+        sessionId &&
+        !compactions.has(sessionManager) &&
+        !msg.isAnswers &&
+        !permissions.length &&
+        !alwaysAllows.length
+      ) {
+        sessionManager.enqueuePrompt(sessionId, {
+          text: prompt,
+          imageUrls: images,
+          skills,
+          planMode: msg.planMode === true,
+        });
+        postUndoState(sessionManager, postMessage);
+      }
+      return true;
+    }
     const pending = pendingPlans.get(sessionManager);
     const continuesPlan = pending?.sessionId === sessionManager.getActiveSessionId();
     pendingPlans.delete(sessionManager);
@@ -151,6 +197,7 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
       });
     } finally {
       activeRequests.delete(sessionManager);
+      postUndoState(sessionManager, postMessage);
     }
     sendPendingPlan(sessionManager, postMessage);
     return true;
@@ -182,6 +229,7 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
     const sessionId = String(msg.sessionId || "").trim();
     if (sessionId) {
       pendingPlans.delete(sessionManager);
+      if (sessionId === sessionManager.getActiveSessionId()) releaseQueueEdit(sessionManager);
       loadSession(sessionId, sessionManager, postMessage, renderMarkdown);
       await sendSkillsList(sessionManager, postMessage, sessionId);
     }
@@ -242,7 +290,9 @@ export function loadSession(
   }
 
   if (pendingPlans.get(sessionManager)?.sessionId !== sessionId) pendingPlans.delete(sessionManager);
+  const changedSession = sessionManager.getActiveSessionId() !== sessionId;
   sessionManager.setActiveSessionId(sessionId);
+  if (changedSession) releaseQueueEdit(sessionManager);
   const messages = sessionManager.listSessionMessages(sessionId);
   const sessions = sessionManager.listSessions();
 
@@ -259,6 +309,9 @@ export function loadSession(
     messages: messages
       .filter((m) => m.visible)
       .map((m) => ({
+        id: m.id,
+        createTime: m.createTime,
+        contentParams: m.contentParams,
         role: m.role,
         content: prepareToolDiffContent(m.role, m.content),
         html:
@@ -270,6 +323,7 @@ export function loadSession(
         meta: m.meta,
       })),
   });
+  postUndoState(sessionManager, postMessage);
 }
 
 function showSessionsList(sessionManager: ProviderDeps["sessionManager"], postMessage: PostMessageFn): void {
@@ -287,6 +341,7 @@ async function createNewSession(
 ): Promise<void> {
   pendingPlans.delete(sessionManager);
   sessionManager.setActiveSessionId(null);
+  releaseQueueEdit(sessionManager);
   const sessions = sessionManager.listSessions();
 
   postMessage({
@@ -328,15 +383,34 @@ async function handlePrompt(
     normalizedImages.length === 0 &&
     ((options.permissions?.length ?? 0) > 0 || (options.alwaysAllows?.length ?? 0) > 0);
 
-  if (displayPrompt && !isPermissionContinue) {
+  const optimisticId = randomUUID();
+  const optimistic = Boolean(
+    displayPrompt &&
+    !isPermissionContinue &&
+    (options.isAnswers || (options.permissions?.length ?? 0) > 0 || (options.alwaysAllows?.length ?? 0) > 0)
+  );
+  const beforeIds = new Set(
+    optimistic
+      ? sessionManager.listSessionMessages(sessionManager.getActiveSessionId() ?? "").map((message) => message.id)
+      : []
+  );
+  if (optimistic) {
     postMessage({
       type: "userMessage",
+      id: optimisticId,
       content: displayPrompt,
       html: options.isAnswers ? renderMarkdown(displayPrompt) : undefined,
       meta: options.isAnswers ? { isAnswers: true } : undefined,
     });
   }
 
+  const submissionSessionId = sessionManager.getActiveSessionId();
+  const direct =
+    !optimistic &&
+    !isPermissionContinue &&
+    prompt !== "/continue" &&
+    (!submissionSessionId || sessionManager.listQueuedMessages(submissionSessionId).length === 0);
+  if (direct) directSubmissions.set(sessionManager, { sessionId: submissionSessionId });
   postMessage({ type: "loading", value: true });
 
   try {
@@ -349,6 +423,15 @@ async function handlePrompt(
       isAnswers: options.isAnswers,
       planMode: options.planMode === true,
     });
+    if (optimistic) {
+      const committed = sessionManager
+        .listSessionMessages(sessionManager.getActiveSessionId() ?? "")
+        .find(
+          (message) =>
+            message.role === "user" && message.visible && !beforeIds.has(message.id) && message.content === prompt
+        );
+      if (committed) postMessage({ type: "userMessageCommitted", optimisticId, message: committed });
+    }
     await sendSkillsList(sessionManager, postMessage);
 
     const activeSessionId = sessionManager.getActiveSessionId();
@@ -384,6 +467,7 @@ async function handlePrompt(
       html: renderMarkdown(`Request failed: ${message}`),
     });
   } finally {
+    if (direct) directSubmissions.delete(sessionManager);
     const sessionId = sessionManager.getActiveSessionId();
     postMessage({
       type: "loading",
@@ -466,6 +550,7 @@ async function handleSlashCommand(msg: Record<string, unknown>, deps: ProviderDe
         );
       } finally {
         compactions.delete(manager);
+        postUndoState(manager, postMessage);
         postMessage({ type: "commandBusy", value: false });
         const session = manager.getSession(sessionId);
         if (session)
@@ -529,5 +614,143 @@ async function handlePlanImplementationChoice(msg: Record<string, unknown>, deps
     });
   } finally {
     activeRequests.delete(manager);
+    postUndoState(manager, postMessage);
+  }
+}
+
+type QueueEdit = { sessionId: string; id: string };
+const queueEdits = new WeakMap<ProviderDeps["sessionManager"], QueueEdit>();
+
+export function releaseQueueEdit(manager: ProviderDeps["sessionManager"]): void {
+  const edit = queueEdits.get(manager);
+  queueEdits.delete(manager);
+  if (edit) manager.finishQueuedMessageEdit(edit.sessionId, edit.id);
+}
+
+export function postUndoState(manager: ProviderDeps["sessionManager"], postMessage: PostMessageFn): void {
+  const sessionId = manager.getActiveSessionId();
+  const queued = sessionId ? manager.listQueuedMessages(sessionId) : [];
+  const pausedReason = sessionId ? manager.getQueuePausedReason(sessionId) : undefined;
+  const direct = directSubmissions.get(manager);
+  if (sessionId && direct && !direct.id && (!direct.sessionId || direct.sessionId === sessionId) && queued[0]) {
+    direct.sessionId = sessionId;
+    direct.id = queued[0].id;
+  }
+  const preparingId = sessionId ? manager.getPreparingPromptId(sessionId) : undefined;
+  const directId = direct?.sessionId === sessionId ? direct?.id : undefined;
+  const preparing = !pausedReason
+    ? queued.find((message) => message.id === (preparingId ?? directId) && message.id !== queueEdits.get(manager)?.id)
+    : undefined;
+  postMessage({
+    type: "undoState",
+    sessionId,
+    busy: isBusy(manager) || Boolean(sessionId && manager.isSessionRunning(sessionId)),
+    targets: sessionId
+      ? manager.listUndoTargets(sessionId).map(({ message, canRestoreCode }) => ({
+          id: message.id,
+          text: message.content,
+          createTime: message.createTime,
+          imageUrls: promptImages(message),
+          canRestoreCode,
+        }))
+      : [],
+    queued,
+    preparing,
+    pausedReason,
+  });
+}
+
+function promptImages(message: SessionMessage): string[] {
+  if (message.meta?.userPrompt?.imageUrls) return message.meta.userPrompt.imageUrls;
+  const params = Array.isArray(message.contentParams) ? message.contentParams : [message.contentParams];
+  return params.flatMap((param) => {
+    const part = param as { type?: string; image_url?: { url?: string } } | null;
+    return part?.type === "image_url" && typeof part.image_url?.url === "string" ? [part.image_url.url] : [];
+  });
+}
+
+async function handleUndoAction(msg: Record<string, unknown>, deps: ProviderDeps): Promise<void> {
+  const { sessionManager: manager, postMessage } = deps;
+  const sessionId = manager.getActiveSessionId();
+  const reply = (extra: Record<string, unknown>) =>
+    postMessage({
+      type: "undoResult",
+      requestId: msg.requestId,
+      sessionId: msg.sessionId,
+      action: msg.action,
+      ...extra,
+    });
+  try {
+    if (!sessionId || sessionId !== msg.sessionId) throw new Error("This conversation is no longer active.");
+    const id = typeof msg.id === "string" ? msg.id : "";
+    const content = {
+      text: typeof msg.text === "string" ? msg.text.trim() : "",
+      imageUrls: Array.isArray(msg.imageUrls)
+        ? msg.imageUrls.filter((url): url is string => typeof url === "string")
+        : [],
+      skills: Array.isArray(msg.skills) ? (msg.skills as SkillInfo[]) : [],
+      planMode: msg.planMode === true,
+    };
+    if (msg.type === "enqueuePrompt") {
+      if (!content.text && !content.imageUrls.length) throw new Error("Enter a message first.");
+      if (compactions.has(manager)) throw new Error("Wait for compaction to finish.");
+      manager.enqueuePrompt(sessionId, content);
+      pendingPlans.delete(manager);
+      reply({ ok: true });
+    } else if (msg.action === "edit") {
+      if (queueEdits.has(manager)) throw new Error("Finish editing the current message first.");
+      const queued = manager.beginQueuedMessageEdit(sessionId, id);
+      if (!queued) throw new Error("This message is no longer pending.");
+      queueEdits.set(manager, { sessionId, id });
+      reply({ ok: true, id, draft: queued.content });
+    } else if (msg.action === "save" || msg.action === "cancel") {
+      const edit = queueEdits.get(manager);
+      if (edit?.sessionId !== sessionId || edit.id !== id) throw new Error("This edit is no longer available.");
+      if (msg.action === "save" && !content.text && !content.imageUrls.length)
+        throw new Error("Enter a message first.");
+      queueEdits.delete(manager);
+      if (!manager.finishQueuedMessageEdit(sessionId, id, msg.action === "save" ? content : undefined))
+        throw new Error("This message is no longer pending.");
+      reply({ ok: true });
+    } else if (msg.action === "remove") {
+      if (!manager.removeQueuedMessage(sessionId, id)) throw new Error("This message is no longer pending.");
+      if (queueEdits.get(manager)?.id === id) queueEdits.delete(manager);
+      reply({ ok: true, id });
+    } else if (msg.action === "conversation" || msg.action === "code-and-conversation") {
+      if (isBusy(manager) || manager.isSessionRunning(sessionId))
+        throw new Error("Wait for the current request to finish.");
+      if (queueEdits.has(manager)) throw new Error("Finish editing the current message first.");
+      const target = manager.listUndoTargets(sessionId).find((target) => target.message.id === id);
+      if (!target) throw new Error("This message is no longer available.");
+      const errors: string[] = [];
+      if (msg.action === "code-and-conversation") {
+        try {
+          manager.restoreSessionCode(sessionId, id);
+        } catch (error) {
+          errors.push(`File restore failed: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      let restored = false;
+      try {
+        manager.restoreSessionConversation(sessionId, id);
+        restored = true;
+      } catch (error) {
+        errors.push(`Conversation restore failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      pendingPlans.delete(manager);
+      if (restored) {
+        loadSession(sessionId, manager, postMessage, deps.renderMarkdown);
+        await sendSkillsList(manager, postMessage, sessionId);
+      }
+      reply({
+        ok: restored,
+        error: errors.join(" ") || undefined,
+        draft: restored ? { text: target.message.content ?? "", imageUrls: promptImages(target.message) } : undefined,
+      });
+    } else throw new Error("Unknown message action.");
+  } catch (error) {
+    reply({ ok: false, error: error instanceof Error ? error.message : String(error) });
+  } finally {
+    postUndoState(manager, postMessage);
   }
 }
