@@ -529,3 +529,79 @@ for (const protocol of ["kitty", "iTerm.app"]) {
     assert.doesNotMatch(h.output(), /a=T|a=d|1337;File=/, "images must remain stable after moving");
   });
 }
+
+for (const protocol of ["kitty", "iTerm.app", "unknown"]) {
+  test(`resuming image history restores the input cursor after asynchronous previews (${protocol})`, async (t) => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-resume-image-cursor-"));
+    const originalEnv = process.env;
+    process.env = Object.fromEntries(Object.entries(originalEnv).filter(([key]) => !key.startsWith("DEEPCODE_")));
+    t.mock.method(os, "homedir", () => root);
+    syncBuiltinESMExports();
+    fs.mkdirSync(path.join(root, ".deepcode"));
+    fs.writeFileSync(
+      path.join(root, ".deepcode", "settings.json"),
+      JSON.stringify({ apiKey: "test", statusline: { enabled: false } })
+    );
+    const sessionId = "00000000-0000-4000-8000-000000000001";
+    const session = { id: sessionId, summary: "Resume images", status: "interrupted", createTime: "", updateTime: "" };
+    const message: SessionMessage = {
+      id: "resume-user",
+      sessionId,
+      role: "user",
+      content: "Describe the images",
+      contentParams: null,
+      messageParams: null,
+      visible: true,
+      compacted: false,
+      createTime: "",
+      updateTime: "",
+      meta: { userPrompt: { imageUrls: [await imageUrl(82, 282), await imageUrl(208, 192)] } },
+    };
+    t.mock.method(SessionManager.prototype, "initMcpServers", async () => {});
+    t.mock.method(SessionManager.prototype, "listSkills", async () => []);
+    t.mock.method(SessionManager.prototype, "listSessions", () => [session]);
+    t.mock.method(SessionManager.prototype, "getSession", () => session);
+    t.mock.method(SessionManager.prototype, "listSessionMessages", () => [message]);
+    let release!: () => void;
+    const preparation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const png = await sharp({ create: { width: 36, height: 180, channels: 3, background: "red" } })
+      .png()
+      .toBuffer();
+    t.mock.method(ImagePreviewCache.prototype, "get", async () => {
+      await preparation;
+      return { width: 82, height: 282, columns: 4, rows: 10, png };
+    });
+    const h = await nativeTerminal(
+      t,
+      React.createElement(App, { projectRoot: root, resumeSessionId: sessionId }),
+      protocol
+    );
+    t.after(() => {
+      release();
+      t.mock.restoreAll();
+      syncBuiltinESMExports();
+      process.env = originalEnv;
+      fs.rmSync(root, { recursive: true, force: true });
+    });
+    const lastCursorVisibility = () => [...h.output().matchAll(/\x1b\[\?25([hl])/g)].at(-1)?.[1];
+    assert.equal(lastCursorVisibility(), "h", "the empty input must initially have a visible cursor");
+    h.clear();
+    release();
+    await h.waitForOutput(/\[image #2/);
+    await h.flush();
+    assert.equal(lastCursorVisibility(), "h", "history rendering must restore the cursor without a keypress");
+    assert.match(h.output(), /\x1b\[3A\x1b\[3G\x1b\[\?25h/, "the cursor must return to the empty input row and column");
+    if (protocol !== "unknown") {
+      assert.equal(
+        [...h.output().matchAll(/a=T|1337;File=/g)].length,
+        2,
+        "restoring the cursor must not resend images"
+      );
+    }
+    h.clear();
+    await h.send("x");
+    assert.match(h.output(), /\x1b\[4G\x1b\[\?25h/, "typing must move the cursor one cell to the right");
+  });
+}

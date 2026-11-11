@@ -111,6 +111,8 @@ function App({
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
+  const [historyRenderRevision, setHistoryRenderRevision] = useState(0);
+  const handleHistoryRendered = useCallback(() => setHistoryRenderRevision((value) => value + 1), []);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [editingQueue, setEditingQueue] = useState<{ sessionId: string; id: string } | null>(null);
@@ -1231,6 +1233,7 @@ function App({
       showProcessStdout ? "stdout" : "main",
       activeStatus ?? "",
       staticItems.length,
+      historyRenderRevision,
       lastStaticItem?.id ?? "",
       lastStaticItem?.updateTime ?? "",
       ...queuedTargets.map(
@@ -1252,6 +1255,7 @@ function App({
     shouldShowQuestionPrompt,
     showProcessStdout,
     staticItems,
+    historyRenderRevision,
     statusLine,
     view,
   ]);
@@ -1312,7 +1316,13 @@ function App({
 
   return (
     <Box flexDirection="column" width={screenWidth}>
-      <StaticMessageHistory key={welcomeNonce} messages={staticItems} width={screenWidth} isExiting={isExiting}>
+      <StaticMessageHistory
+        key={welcomeNonce}
+        messages={staticItems}
+        width={screenWidth}
+        isExiting={isExiting}
+        onItemsRendered={handleHistoryRendered}
+      >
         {(item, imagePreviews) => {
           if (item.id.startsWith("__welcome__")) {
             return (
