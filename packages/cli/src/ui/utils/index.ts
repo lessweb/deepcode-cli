@@ -62,14 +62,18 @@ export function buildPromptHistory(messages: SessionMessage[]): string[] {
 }
 
 export function buildPromptDraftFromSessionMessage(message: SessionMessage, nonce: number): PromptDraft {
-  const storedImageUrls = message.meta?.userPrompt?.imageUrls;
   return {
     nonce,
     text: typeof message.content === "string" ? message.content : "",
-    imageUrls: Array.isArray(storedImageUrls)
-      ? storedImageUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
-      : extractImageUrlsFromContentParams(message.contentParams),
+    imageUrls: extractMessageImageUrls(message),
   };
+}
+
+export function extractMessageImageUrls(message: SessionMessage): string[] {
+  const storedImageUrls = message.meta?.userPrompt?.imageUrls;
+  return Array.isArray(storedImageUrls)
+    ? storedImageUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
+    : extractImageUrlsFromContentParams(message.contentParams);
 }
 
 export function extractImageUrlsFromContentParams(contentParams: unknown): string[] {

@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
-import { buildPromptHistory, buildStatusLine, formatContextUsage, formatTokenCount } from "../ui/utils/index";
+import {
+  extractMessageImageUrls,
+  buildPromptHistory,
+  buildStatusLine,
+  formatContextUsage,
+  formatTokenCount,
+} from "../ui/utils/index";
 
 test("buildPromptHistory includes only visible non-empty user messages", () => {
   const messages = [
@@ -132,4 +138,14 @@ test("buildStatusLine appends plus only for the selected PLUS connection", () =>
       );
     }
   }
+});
+
+test("message attachments use saved prompt metadata with a legacy contentParams fallback", () => {
+  const message = buildMessage("user", "picture", true);
+  message.contentParams = [{ type: "image_url", image_url: { url: "data:image/png;base64,legacy" } }];
+  assert.deepEqual(extractMessageImageUrls(message), ["data:image/png;base64,legacy"]);
+  message.meta = { userPrompt: { imageUrls: ["file:///saved-image.png"] } };
+  assert.deepEqual(extractMessageImageUrls(message), ["file:///saved-image.png"]);
+  message.meta.userPrompt!.imageUrls = [];
+  assert.deepEqual(extractMessageImageUrls(message), []);
 });

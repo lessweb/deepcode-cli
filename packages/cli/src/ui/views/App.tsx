@@ -1,7 +1,7 @@
 import { isBusyCommandAllowed } from "../core/slash-commands";
 import { getCompletedProposedPlan } from "@vegamo/deepcode-core/common/plan-implementation";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Box, Static, Text, useApp, useStdout, useWindowSize } from "ink";
+import { Box, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
 import { createOpenAIClientFactory } from "@vegamo/deepcode-core";
 import type { PermissionSettingsEdit, PermissionSettingsChanges } from "@vegamo/deepcode-core";
@@ -65,9 +65,10 @@ import type {
   QueuedMessage,
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
-import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
+import { writeStdoutLine } from "../../utils/stdio-helpers";
 import { createTerminalTitle, terminalTitleState } from "../../utils/terminal-title";
 import { writeRawMode } from "../../common/cli-config";
+import { StaticMessageHistory } from "../components/StaticMessageHistory";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -110,6 +111,8 @@ function App({
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
+  const [historyRenderRevision, setHistoryRenderRevision] = useState(0);
+  const handleHistoryRendered = useCallback(() => setHistoryRenderRevision((value) => value + 1), []);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
   const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
   const [editingQueue, setEditingQueue] = useState<{ sessionId: string; id: string } | null>(null);
@@ -306,7 +309,7 @@ function App({
   const resetStaticView = useCallback(
     (loadedMessages: SessionMessage[], options?: { clearScreen?: boolean }): Promise<void> => {
       if (options?.clearScreen) {
-        writeStdout(ANSI_CLEAR_SCREEN);
+        stdout.write(ANSI_CLEAR_SCREEN);
       }
       setMessages([]);
       setWelcomeNonce((n) => n + 1);
@@ -319,7 +322,7 @@ function App({
         }, 0);
       });
     },
-    [navigateToSubView]
+    [navigateToSubView, stdout]
   );
 
   useEffect(() => {
@@ -871,7 +874,7 @@ function App({
     async (sessionId: string) => {
       setCommandNotice(null);
       sessionManager.setActiveSessionId(sessionId);
-      // Clear first so <Static> resets its index to 0.
+      // Replace Static and its replay resources before restoring the selected history.
       await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
       const session = sessionManager.getSession(sessionId);
       setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot, settingsFile)) : "");
@@ -1044,8 +1047,9 @@ function App({
       // re-render a stale welcome screen before handleSelectSession runs.
       setShowWelcome(false);
       setMessages([]);
+      setWelcomeNonce((n) => n + 1);
       // Clear screen to remove stale formatted text.
-      writeStdout(ANSI_CLEAR_SCREEN);
+      stdout.write(ANSI_CLEAR_SCREEN);
 
       setTimeout(() => {
         if (nextMode === RawMode.Raw) {
@@ -1062,7 +1066,7 @@ function App({
         }
       }, 200);
     },
-    [editingQueue, resetStaticView, sessionManager, setMode]
+    [editingQueue, resetStaticView, sessionManager, setMode, stdout]
   );
 
   useEffect(() => {
@@ -1084,7 +1088,7 @@ function App({
     if (mode === RawMode.Raw) {
       // In raw mode, re-render all messages directly to stdout at the new width.
       // Use direct stdout instead of writeRef to avoid Ink interference.
-      writeStdout(ANSI_CLEAR_SCREEN);
+      stdout.write(ANSI_CLEAR_SCREEN);
       const activeSessionId = sessionManager.getActiveSessionId();
       const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
       renderRawModeMessages(allMessages, mode);
@@ -1229,6 +1233,7 @@ function App({
       showProcessStdout ? "stdout" : "main",
       activeStatus ?? "",
       staticItems.length,
+      historyRenderRevision,
       lastStaticItem?.id ?? "",
       lastStaticItem?.updateTime ?? "",
       ...queuedTargets.map(
@@ -1250,6 +1255,7 @@ function App({
     shouldShowQuestionPrompt,
     showProcessStdout,
     staticItems,
+    historyRenderRevision,
     statusLine,
     view,
   ]);
@@ -1310,8 +1316,14 @@ function App({
 
   return (
     <Box flexDirection="column" width={screenWidth}>
-      <Static items={staticItems}>
-        {(item) => {
+      <StaticMessageHistory
+        key={welcomeNonce}
+        messages={staticItems}
+        width={screenWidth}
+        isExiting={isExiting}
+        onItemsRendered={handleHistoryRendered}
+      >
+        {(item, imagePreviews) => {
           if (item.id.startsWith("__welcome__")) {
             return (
               <WelcomeScreen
@@ -1330,10 +1342,12 @@ function App({
               projectRoot={projectRoot}
               collapsed={isCollapsedThinking(item, expandedThinkingId)}
               width={screenWidth}
+              imagePreviews={imagePreviews}
+              permanentImages
             />
           );
         }}
-      </Static>
+      </StaticMessageHistory>
       {view === "chat" &&
         queuedTargets.map(({ message }) => (
           <MessageView key={message.id} message={message} projectRoot={projectRoot} width={screenWidth} />
