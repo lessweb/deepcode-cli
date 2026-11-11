@@ -142,9 +142,9 @@ for (const environment of environments) {
         { columns: 160 }
       )
     );
-    assert.ok(footer.includes(`${label.toLowerCase()} image / rich text`), footer);
-    if (!ctrl) assert.ok(!footer.includes("ctrl+v image / rich text"), footer);
-    if (!alt) assert.ok(!footer.includes("alt+v image / rich text"), footer);
+    assert.ok(footer.includes(`${label.toLowerCase()} image`), footer);
+    if (!ctrl) assert.ok(!footer.includes("ctrl+v image"), footer);
+    if (!alt) assert.ok(!footer.includes("alt+v image"), footer);
 
     // Reload the module so its static help text uses the simulated platform.
     const moduleUrl = new URL(`../cli-args.ts?image-paste-platform=${name}`, import.meta.url).href;

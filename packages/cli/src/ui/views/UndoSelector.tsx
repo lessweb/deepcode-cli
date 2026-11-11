@@ -149,13 +149,7 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
                     </Text>
                     <Text dimColor>
                       {formatTimestamp(target.message.createTime)}
-                      {target.queued
-                        ? " · pending"
-                        : disabled
-                          ? " · unavailable while running"
-                          : target.canRestoreCode
-                            ? " · code checkpoint available"
-                            : " · conversation only"}
+                      {target.queued ? " · pending" : ""}
                     </Text>
                   </Box>
                 </Box>
@@ -213,7 +207,11 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
         )}
         <Box>
           <Text dimColor>
-            {phase === "message" ? "↑/↓ navigate · Enter choose · Esc cancel" : "↑/↓ choose · Enter confirm · Esc back"}
+            {selectionDisabled
+              ? "Unavailable while running"
+              : phase === "message"
+                ? "↑/↓ navigate · Enter choose · Esc cancel"
+                : "↑/↓ choose · Enter confirm · Esc back"}
           </Text>
         </Box>
       </Box>

@@ -293,7 +293,7 @@ export const PromptInput = React.memo(function PromptInput({
       ? "enter save · esc cancel"
       : busy
         ? busyStatusText
-        : `enter send · shift+enter newline · @ files · ${getClipboardPasteShortcutLabel().toLowerCase()} image / rich text · / commands · ctrl+d exit${pasteHint}`;
+        : `enter send · shift+enter newline · @ files · ${getClipboardPasteShortcutLabel().toLowerCase()} image · / commands · ctrl+d exit${pasteHint}`;
   const showFooterText = useMemo(
     () =>
       showMenu ||
