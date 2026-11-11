@@ -48,6 +48,7 @@
       throw new Error("Prompt attachment manager requires promptInput, inputWrap, and toolsLine.");
     }
 
+    const resolveImageUrl = options.resolveImageUrl || ((url) => url);
     let attachments = [];
     let nextAttachmentId = 0;
     let previewPopup = null;
@@ -111,7 +112,7 @@
 
       ensurePreviewPopup();
       previewAnchor = anchor;
-      previewImage.src = attachment.dataUrl;
+      previewImage.src = resolveImageUrl(attachment.dataUrl);
       previewPopup.classList.add("show");
       updatePreviewPosition(anchor);
     }
@@ -169,7 +170,7 @@
 
       const pill = createElement("div", "chat-attached-context-pill");
       const image = createElement("img", "chat-attached-context-pill-image");
-      image.src = attachment.dataUrl;
+      image.src = resolveImageUrl(attachment.dataUrl);
       image.alt = ATTACHMENT_LABEL;
       pill.appendChild(image);
 
@@ -280,6 +281,10 @@
 
     return {
       clear,
+      setImageUrls(urls) {
+        clear();
+        for (const url of urls || []) addAttachmentData({ dataUrl: url });
+      },
       hasAttachments() {
         return attachments.length > 0;
       },

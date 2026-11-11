@@ -22,8 +22,8 @@ import {
   type ResolvedDeepcodingSettings,
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
-import { getNonce, isAllowedExternalUrl } from "./utils.js";
-import { handleWebviewMessage } from "./provider.js";
+import { collectPromptImageUrls, getNonce, isAllowedExternalUrl } from "./utils.js";
+import { handleWebviewMessage, postUndoState, releaseQueueEdit } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
 import { prepareToolDiffContent } from "./tool-diff.js";
 
@@ -41,6 +41,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   private webviewView: vscode.WebviewView | undefined;
   private readonly md: MarkdownIt;
   private readonly sessionManager: SessionManager;
+  private unsubscribeRuntime?: () => void;
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -80,6 +81,10 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       ),
       getResolvedSettings: () => this.resolveCurrentSettings(),
       renderMarkdown: (text) => this.md.render(text),
+      onUserMessage: (message) => {
+        this.sendMessage({ type: "appendMessage", message, shouldConnect: false });
+        postUndoState(this.sessionManager, (message) => this.sendMessage(message));
+      },
       onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => {
         if (!this.webviewView) {
           return;
@@ -91,7 +96,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           const reasoningContent = (message.messageParams as ReasoningMessageParams | null)?.reasoning_content;
           message.html = this.md.render(message.content || reasoningContent || "");
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "appendMessage",
           message: { ...message, content: prepareToolDiffContent(message.role, message.content) },
           shouldConnect,
@@ -101,7 +106,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         if (!this.webviewView) {
           return;
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "sessionStatus",
           sessionId: entry.id,
           status: entry.status,
@@ -116,7 +121,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         if (!this.webviewView) {
           return;
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "llmStreamProgress",
           progress,
         });
@@ -125,21 +130,33 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         if (!this.webviewView) {
           return;
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "llmRetry",
           event,
         });
       },
     });
+    this.unsubscribeRuntime = this.sessionManager.subscribeRuntime(() => {
+      if (this.webviewView) postUndoState(this.sessionManager, (message) => this.sendMessage(message));
+    });
     void this.initializeMcpServers();
   }
 
   dispose(): void {
+    this.unsubscribeRuntime?.();
+    releaseQueueEdit(this.sessionManager);
     this.sessionManager.dispose();
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.webviewView = webviewView;
+    webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) releaseQueueEdit(this.sessionManager);
+    });
+    webviewView.onDidDispose(() => {
+      if (this.webviewView === webviewView) this.webviewView = undefined;
+      releaseQueueEdit(this.sessionManager);
+    });
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -170,7 +187,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
       const handled = await handleWebviewMessage(message, {
         sessionManager: this.sessionManager,
-        postMessage: (m) => this.webviewView?.webview.postMessage(m),
+        postMessage: (m) => this.sendMessage(m),
         renderMarkdown: (text) => this.md.render(text),
         copyToClipboard: (text) => void vscode.env.clipboard.writeText(text),
       });
@@ -242,6 +259,9 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       messages: messages
         .filter((m) => m.visible)
         .map((m) => ({
+          id: m.id,
+          createTime: m.createTime,
+          contentParams: m.contentParams,
           role: m.role,
           content: prepareToolDiffContent(m.role, m.content),
           html:
@@ -294,7 +314,24 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     if (!this.webviewView) {
       return;
     }
-    this.webviewView.webview.postMessage(message);
+    const webview = this.webviewView.webview;
+    const imagePreviews: Record<string, string> = {};
+    const roots = [...(webview.options.localResourceRoots ?? [])];
+    for (const url of collectPromptImageUrls(message)) {
+      try {
+        const uri = vscode.Uri.parse(url);
+        if (uri.scheme !== "file") continue;
+        const parent = vscode.Uri.file(path.dirname(uri.fsPath));
+        if (!roots.some((root) => root.toString() === parent.toString())) roots.push(parent);
+        imagePreviews[url] = webview.asWebviewUri(uri).toString();
+      } catch {
+        /* Ignore malformed legacy attachment URLs. */
+      }
+    }
+    if (roots.length !== webview.options.localResourceRoots?.length) {
+      webview.options = { ...webview.options, localResourceRoots: roots };
+    }
+    webview.postMessage(message && typeof message === "object" ? { ...message, imagePreviews } : message);
   }
 
   private async sendSkillsList(sessionId?: string): Promise<void> {

@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  collectPromptImageUrls,
   PLUS_PACKAGES_URL,
   VALID_PERMISSION_SCOPES,
   getNonce,
@@ -145,4 +146,20 @@ test("getNonce returns different values on successive calls", () => {
   }
   // With 62^32 possible values, 100 calls should almost certainly be unique
   assert.ok(nonces.size > 90, `Expected mostly unique nonces, got ${nonces.size} unique out of 100`);
+});
+
+test("attachment discovery includes queue, drafts and legacy images but ignores text URLs", () => {
+  assert.deepEqual(
+    collectPromptImageUrls({
+      messages: [
+        {
+          content: "file:///not-an-attachment",
+          contentParams: [{ type: "image_url", image_url: { url: "file:///legacy.png" } }],
+        },
+      ],
+      queued: [{ content: { imageUrls: ["file:///pending.png", "file:///legacy.png"] } }],
+      draft: { imageUrls: ["data:image/png;base64,abc"] },
+    }),
+    ["file:///legacy.png", "file:///pending.png", "data:image/png;base64,abc"]
+  );
 });
