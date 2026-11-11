@@ -239,7 +239,7 @@ test("busy /undo keeps history visible but only allows changing pending prompts"
   await h.setBusy(true);
   await h.submit("/undo");
   assert.match(h.latest(), /今天星期几/);
-  assert.match(h.latest(), /Unavailable while running/);
+  assert.match(h.latest(), /↑\/↓ navigate · Esc cancel/);
   assert.doesNotMatch(h.latest(), /Enter choose/);
   assert.doesNotMatch(h.latest(), /Nothing to undo/);
   await h.send("\r");
@@ -253,13 +253,13 @@ test("busy /undo keeps history visible but only allows changing pending prompts"
   assert.match(h.latest(), /pending input/);
   assert.match(h.latest(), / · pending/);
   assert.match(h.latest(), /Enter choose/);
-  assert.doesNotMatch(h.latest(), /Unavailable while running/);
+  assert.doesNotMatch(h.latest(), /↑\/↓ navigate · Esc cancel/);
   await h.send("\x1b[A");
-  assert.match(h.latest(), /Unavailable while running/);
+  assert.match(h.latest(), /↑\/↓ navigate · Esc cancel/);
   assert.doesNotMatch(h.latest(), /Enter choose/);
   await h.send("\x1b[B");
   assert.match(h.latest(), /Enter choose/);
-  assert.doesNotMatch(h.latest(), /Unavailable while running/);
+  assert.doesNotMatch(h.latest(), /↑\/↓ navigate · Esc cancel/);
   await h.send("\r");
   assert.match(h.latest(), /Remove/);
   assert.match(h.latest(), /Edit/);
@@ -273,7 +273,7 @@ test("busy /undo keeps history visible but only allows changing pending prompts"
   await h.setBusy(false);
   await h.submit("/undo");
   assert.match(h.latest(), /Enter choose/);
-  assert.doesNotMatch(h.latest(), /Unavailable while running/);
+  assert.doesNotMatch(h.latest(), /↑\/↓ navigate · Esc cancel/);
   await h.send("\r");
   assert.match(h.latest(), /Restore conversation/);
 });

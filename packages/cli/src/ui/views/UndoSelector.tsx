@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
-import type { UndoTarget, QueuedMessage } from "@vegamo/deepcode-core";
+import type { UndoTarget, QueuedMessage, SessionMessage } from "@vegamo/deepcode-core";
+import { extractImageUrlsFromContentParams } from "../utils";
 
 export type UndoRestoreMode = "code-and-conversation" | "conversation" | "remove" | "edit";
 export type QueueUndoTarget = UndoTarget & { queued?: QueuedMessage };
@@ -145,7 +146,7 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
                   <Text color={disabled ? "gray" : "#229ac3"}>{isActive ? "> " : "  "}</Text>
                   <Box flexDirection="column" flexGrow={1}>
                     <Text color={isActive && !disabled ? "#229ac3" : undefined} bold={isActive} dimColor={disabled}>
-                      {formatUndoMessage(target.message.content)}
+                      {formatUndoMessage(target.message)}
                     </Text>
                     <Text dimColor>
                       {formatTimestamp(target.message.createTime)}
@@ -170,7 +171,7 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
             overflow="hidden"
           >
             <Text dimColor>Selected message:</Text>
-            <Text>{formatUndoMessage(selectedTarget?.message.content ?? "")}</Text>
+            <Text>{formatUndoMessage(selectedTarget?.message)}</Text>
             {!selectedTarget ? (
               <Text>This message is no longer available.</Text>
             ) : selectionDisabled ? (
@@ -208,7 +209,7 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
         <Box>
           <Text dimColor>
             {selectionDisabled
-              ? "Unavailable while running"
+              ? "↑/↓ navigate · Esc cancel"
               : phase === "message"
                 ? "↑/↓ navigate · Enter choose · Esc cancel"
                 : "↑/↓ choose · Enter confirm · Esc back"}
@@ -219,9 +220,13 @@ export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Prop
   );
 }
 
-function formatUndoMessage(content: unknown): string {
+function formatUndoMessage(message?: SessionMessage): string {
+  const content = message?.content;
+  const imageCount =
+    message?.meta?.userPrompt?.imageUrls?.length ?? extractImageUrlsFromContentParams(message?.contentParams).length;
   const text = typeof content === "string" && content.trim() ? content.trim() : "(empty message)";
-  const singleLine = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
+  const prefix = imageCount > 0 ? `(📎 ${imageCount} images) ` : "";
+  const singleLine = prefix + text.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
   return singleLine.length > 90 ? `${singleLine.slice(0, 89)}…` : singleLine;
 }
 
