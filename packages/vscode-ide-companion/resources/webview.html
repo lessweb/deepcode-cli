@@ -30,12 +30,20 @@
             </svg>
           </div>
         </div>
-        <button class="header-new-btn" id="newSessionBtn" title="New chat">
-          <svg class="header-new-icon" viewBox="0 0 1024 1024" width="16" height="16" aria-hidden="true">
-            <path d="M474 152m8 0l60 0q8 0 8 8l0 704q0 8-8 8l-60 0q-8 0-8-8l0-704q0-8 8-8Z"></path>
-            <path d="M168 474m8 0l672 0q8 0 8 8l0 60q0 8-8 8l-672 0q-8 0-8-8l0-60q0-8 8-8Z"></path>
-          </svg>
-        </button>
+        <div class="header-actions">
+          <button class="header-new-btn header-trajectory-btn" id="trajectoryBtn" type="button" title="Trajectory" aria-label="Trajectory">
+            <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true">
+              <path d="M4 4.5v2M4 9.5v2M8 3h5M8 8h4M8 13h5" stroke-linecap="round" />
+              <circle cx="4" cy="3" r="1.5" /><circle cx="4" cy="8" r="1.5" /><circle cx="4" cy="13" r="1.5" />
+            </svg>
+          </button>
+          <button class="header-new-btn" id="newSessionBtn" title="New chat">
+            <svg class="header-new-icon" viewBox="0 0 1024 1024" width="16" height="16" aria-hidden="true">
+              <path d="M474 152m8 0l60 0q8 0 8 8l0 704q0 8-8 8l-60 0q-8 0-8-8l0-704q0-8 8-8Z"></path>
+              <path d="M168 474m8 0l672 0q8 0 8 8l0 60q0 8-8 8l-672 0q-8 0-8-8l0-60q0-8 8-8Z"></path>
+            </svg>
+          </button>
+        </div>
         <div class="session-dropdown" id="sessionDropdown"></div>
       </div>
 
@@ -143,6 +151,7 @@
       const sessionSelectorTitleText = document.getElementById("sessionSelectorTitleText");
       const sessionDropdown = document.getElementById("sessionDropdown");
       const newSessionBtn = document.getElementById("newSessionBtn");
+      document.getElementById("trajectoryBtn").addEventListener("click", () => vscode.postMessage({ type: "openTrajectory" }));
       const sendIcon = document.getElementById("sendIcon");
       const stopIcon = document.getElementById("stopIcon");
       const skillsButton = document.getElementById("skillsButton");

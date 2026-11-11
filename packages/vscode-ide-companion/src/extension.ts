@@ -26,6 +26,7 @@ import { collectPromptImageUrls, getNonce, isAllowedExternalUrl } from "./utils.
 import { handleWebviewMessage, postUndoState, releaseQueueEdit } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
 import { prepareToolDiffContent } from "./tool-diff.js";
+import { buildTrajectory, TrajectoryController, type TrajectoryPanel, type TrajectorySnapshot } from "./trajectory.js";
 
 const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -42,6 +43,8 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   private readonly md: MarkdownIt;
   private readonly sessionManager: SessionManager;
   private unsubscribeRuntime?: () => void;
+  private readonly trajectory: TrajectoryController;
+  private readonly trajectorySnapshots = new WeakMap<TrajectoryPanel, TrajectorySnapshot>();
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -82,10 +85,12 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       getResolvedSettings: () => this.resolveCurrentSettings(),
       renderMarkdown: (text) => this.md.render(text),
       onUserMessage: (message) => {
+        this.trajectory?.invalidate();
         this.sendMessage({ type: "appendMessage", message, shouldConnect: false });
         postUndoState(this.sessionManager, (message) => this.sendMessage(message));
       },
       onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => {
+        this.trajectory?.invalidate();
         if (!this.webviewView) {
           return;
         }
@@ -103,6 +108,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         });
       },
       onSessionEntryUpdated: (entry) => {
+        this.trajectory?.invalidate();
         if (!this.webviewView) {
           return;
         }
@@ -118,6 +124,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         });
       },
       onLlmStreamProgress: (progress: LlmStreamProgress) => {
+        this.trajectory?.stream(progress);
         if (!this.webviewView) {
           return;
         }
@@ -136,7 +143,33 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         });
       },
     });
+    this.trajectory = new TrajectoryController({
+      activeSessionId: () => this.sessionManager.getActiveSessionId(),
+      readSnapshot: () => {
+        const id = this.sessionManager.getActiveSessionId();
+        return buildTrajectory(
+          id ? this.sessionManager.getSession(id) : null,
+          id ? this.sessionManager.listSessionMessages(id) : []
+        );
+      },
+      createPanel: () => this.createTrajectoryPanel(),
+      send: (panel, snapshot, progress) => {
+        const webview = (panel as vscode.WebviewPanel).webview;
+        if (this.trajectorySnapshots.get(panel) === snapshot) {
+          void webview.postMessage({ type: "trajectoryProgress", sessionId: snapshot.sessionId, progress });
+          return;
+        }
+        this.trajectorySnapshots.set(panel, snapshot);
+        const records = snapshot.records.map((record) => ({
+          ...record,
+          html: this.md.render(record.content),
+          imageUrls: record.images,
+        }));
+        this.postToWebview(webview, { type: "trajectorySnapshot", ...snapshot, records, progress });
+      },
+    });
     this.unsubscribeRuntime = this.sessionManager.subscribeRuntime(() => {
+      this.trajectory.invalidate();
       if (this.webviewView) postUndoState(this.sessionManager, (message) => this.sendMessage(message));
     });
     void this.initializeMcpServers();
@@ -144,6 +177,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
   dispose(): void {
     this.unsubscribeRuntime?.();
+    this.trajectory.dispose();
     releaseQueueEdit(this.sessionManager);
     this.sessionManager.dispose();
   }
@@ -167,6 +201,11 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       const msg = message as Record<string, unknown> | undefined;
+
+      if (msg?.type === "openTrajectory") {
+        this.trajectory.open();
+        return;
+      }
 
       // openFile requires vscode API, handle here directly
       if (msg?.type === "openFile") {
@@ -311,10 +350,15 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   }
 
   private sendMessage(message: unknown): void {
+    const type = (message as { type?: string } | null)?.type;
+    if (type === "loadSession" || type === "initializeEmpty") this.trajectory.invalidate();
     if (!this.webviewView) {
       return;
     }
-    const webview = this.webviewView.webview;
+    this.postToWebview(this.webviewView.webview, message);
+  }
+
+  private postToWebview(webview: vscode.Webview, message: unknown): void {
     const imagePreviews: Record<string, string> = {};
     const roots = [...(webview.options.localResourceRoots ?? [])];
     for (const url of collectPromptImageUrls(message)) {
@@ -332,6 +376,38 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       webview.options = { ...webview.options, localResourceRoots: roots };
     }
     webview.postMessage(message && typeof message === "object" ? { ...message, imagePreviews } : message);
+  }
+
+  private createTrajectoryPanel(): vscode.WebviewPanel {
+    const panel = vscode.window.createWebviewPanel(
+      "deepcode.trajectory",
+      "Deep Code Trajectory",
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        localResourceRoots: [this.context.extensionUri],
+        retainContextWhenHidden: true,
+      }
+    );
+    const uri = (name: string) =>
+      panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "resources", name)).toString();
+    const substitutions: Record<string, string> = {
+      nonce: getNonce(),
+      cspSource: panel.webview.cspSource,
+      cssUri: uri("trajectory.css"),
+      jsUri: uri("trajectory.js"),
+    };
+    panel.webview.html = fs
+      .readFileSync(vscode.Uri.joinPath(this.context.extensionUri, "resources", "trajectory.html").fsPath, "utf8")
+      .replace(/\{\{(\w+)\}\}/g, (_, key: string) => substitutions[key] ?? "");
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      if (!message || typeof message !== "object") return;
+      const msg = message as Record<string, unknown>;
+      if (msg.type === "trajectoryCopy" && typeof msg.text === "string") void vscode.env.clipboard.writeText(msg.text);
+      if (msg.type === "openExternal" && isAllowedExternalUrl(msg.url))
+        void vscode.env.openExternal(vscode.Uri.parse(msg.url));
+    });
+    return panel;
   }
 
   private async sendSkillsList(sessionId?: string): Promise<void> {

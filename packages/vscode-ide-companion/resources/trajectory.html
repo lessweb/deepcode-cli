@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} data: blob:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deep Code Trajectory</title>
+    <link rel="stylesheet" href="{{cssUri}}" />
+  </head>
+  <body>
+    <header>
+      <div class="heading">
+        <h1 id="sessionTitle">Trajectory</h1>
+        <span id="sessionStatus" class="badge"></span><span id="usage" class="muted"></span>
+      </div>
+      <div class="toolbar" role="toolbar" aria-label="Trajectory controls">
+        <input id="search" type="search" placeholder="Search trajectory" aria-label="Search trajectory" />
+        <button id="expand">Expand all</button><button id="collapse">Collapse all</button>
+        <label class="time-control"><input id="actualTime" type="checkbox" /> Timestamps</label>
+      </div>
+      <div class="overview-heading"><span class="muted">Overview</span><span id="eventCount" class="muted"></span></div>
+      <div id="timeline" aria-label="Trajectory overview"></div>
+      <div class="legend">
+        <span class="user">User</span><span class="assistant">Assistant</span><span class="tool">Tool</span
+        ><span class="context">Context</span><span id="timeRange" class="muted"></span>
+      </div>
+    </header>
+    <main id="main">
+      <section id="ledger" aria-label="Trajectory events" tabindex="0">
+        <button id="loadEarlier" hidden>Load earlier events</button>
+        <div id="events"></div>
+        <div id="empty" class="empty">Loading trajectory…</div>
+        <div id="progress" role="status" hidden></div>
+      </section>
+      <aside id="details" aria-label="Event details" hidden>
+        <div class="details-heading">
+          <h2 id="detailTitle"></h2>
+          <button id="closeDetails" aria-label="Close details" title="Close details">×</button>
+        </div>
+        <div id="detailMeta" class="muted"></div>
+        <div id="tabs" role="tablist" aria-label="Event content"></div>
+        <div class="detail-actions">
+          <label><input id="wrap" type="checkbox" checked /> Wrap lines</label><button id="copy">Copy</button>
+        </div>
+        <div id="detailBody" role="tabpanel" tabindex="0"></div>
+      </aside>
+    </main>
+    <script nonce="{{nonce}}" src="{{jsUri}}"></script>
+  </body>
+</html>
