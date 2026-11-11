@@ -6,10 +6,12 @@ import { setShellIfWindows, getProjectCode, resolveCurrentSettings } from "@vega
 import { checkForNpmUpdate, promptForPendingUpdate } from "./common/update-check";
 import { AppContainer } from "./ui";
 import type { ParsedCliArgs } from "./cli-args";
-import { writeStderrLine, writeStdoutLine } from "./utils/stdio-helpers";
+import { writeStderrLine } from "./utils/stdio-helpers";
 import type { PackageJson } from "./utils/package";
 import { CLI_VERSION } from "./generated/git-commit";
 import { runExecMode } from "./exec-runner";
+import { TerminalImages } from "./ui/core/terminal-images";
+import { createImageInput } from "./ui/core/terminal-image-input";
 
 export async function runCliApp(parsed: ParsedCliArgs, packageInfo: PackageJson): Promise<void> {
   const projectRoot = process.cwd();
@@ -136,6 +138,8 @@ export async function runCliApp(parsed: ParsedCliArgs, packageInfo: PackageJson)
     resumeSessionId = undefined;
     const appForkSessionId = forkSessionId;
     forkSessionId = undefined;
+    const images = new TerminalImages(process.stdout);
+    const imageInput = createImageInput(process.stdin, images);
     const inkInstance = render(
       <AppContainer
         projectRoot={projectRoot}
@@ -146,18 +150,28 @@ export async function runCliApp(parsed: ParsedCliArgs, packageInfo: PackageJson)
         forkSessionId={typeof appForkSessionId === "string" ? appForkSessionId : undefined}
         onRestart={() => restartRef.current?.()}
       />,
-      { exitOnCtrlC: false }
+      {
+        exitOnCtrlC: false,
+        stdout: images.stdout,
+        stdin: imageInput.stdin,
+        incrementalRendering: Boolean(images.protocol),
+      }
     );
+    imageInput.query();
 
     restartRef.current = () => {
       restarting = true;
-      writeStdoutLine("\u001B[2J\u001B[3J\u001B[H");
+      images.stdout.write("\u001B[2J\u001B[3J\u001B[H\n");
       inkInstance.unmount();
+      imageInput.dispose();
+      images.dispose();
       startApp();
     };
 
     inkInstance.waitUntilExit().then(() => {
       if (!restarting) {
+        imageInput.dispose();
+        images.dispose();
         restartRef.current = null;
         process.exit(0);
       }

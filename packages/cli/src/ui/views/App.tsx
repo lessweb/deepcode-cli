@@ -65,9 +65,10 @@ import type {
   QueuedMessage,
 } from "@vegamo/deepcode-core";
 import { SessionManager } from "@vegamo/deepcode-core";
-import { writeStdout, writeStdoutLine } from "../../utils/stdio-helpers";
+import { writeStdoutLine } from "../../utils/stdio-helpers";
 import { createTerminalTitle, terminalTitleState } from "../../utils/terminal-title";
 import { writeRawMode } from "../../common/cli-config";
+import { usePreparedMessages } from "../hooks/usePreparedMessages";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -306,7 +307,7 @@ function App({
   const resetStaticView = useCallback(
     (loadedMessages: SessionMessage[], options?: { clearScreen?: boolean }): Promise<void> => {
       if (options?.clearScreen) {
-        writeStdout(ANSI_CLEAR_SCREEN);
+        stdout.write(ANSI_CLEAR_SCREEN);
       }
       setMessages([]);
       setWelcomeNonce((n) => n + 1);
@@ -319,7 +320,7 @@ function App({
         }, 0);
       });
     },
-    [navigateToSubView]
+    [navigateToSubView, stdout]
   );
 
   useEffect(() => {
@@ -1045,7 +1046,7 @@ function App({
       setShowWelcome(false);
       setMessages([]);
       // Clear screen to remove stale formatted text.
-      writeStdout(ANSI_CLEAR_SCREEN);
+      stdout.write(ANSI_CLEAR_SCREEN);
 
       setTimeout(() => {
         if (nextMode === RawMode.Raw) {
@@ -1062,7 +1063,7 @@ function App({
         }
       }, 200);
     },
-    [editingQueue, resetStaticView, sessionManager, setMode]
+    [editingQueue, resetStaticView, sessionManager, setMode, stdout]
   );
 
   useEffect(() => {
@@ -1084,7 +1085,7 @@ function App({
     if (mode === RawMode.Raw) {
       // In raw mode, re-render all messages directly to stdout at the new width.
       // Use direct stdout instead of writeRef to avoid Ink interference.
-      writeStdout(ANSI_CLEAR_SCREEN);
+      stdout.write(ANSI_CLEAR_SCREEN);
       const activeSessionId = sessionManager.getActiveSessionId();
       const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
       renderRawModeMessages(allMessages, mode);
@@ -1218,6 +1219,7 @@ function App({
     }
     return messages;
   }, [mode, showWelcome, view, messages, welcomeItem]);
+  const preparedMessages = usePreparedMessages(staticItems, screenWidth);
   const promptCursorLayoutKey = useMemo(() => {
     const lastStaticItem = staticItems.at(-1);
     return [
@@ -1310,7 +1312,7 @@ function App({
 
   return (
     <Box flexDirection="column" width={screenWidth}>
-      <Static items={staticItems}>
+      <Static items={preparedMessages.items}>
         {(item) => {
           if (item.id.startsWith("__welcome__")) {
             return (
@@ -1330,6 +1332,8 @@ function App({
               projectRoot={projectRoot}
               collapsed={isCollapsedThinking(item, expandedThinkingId)}
               width={screenWidth}
+              imagePreviews={preparedMessages.previews.get(item)}
+              permanentImages
             />
           );
         }}

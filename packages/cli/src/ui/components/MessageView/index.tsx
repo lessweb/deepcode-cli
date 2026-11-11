@@ -16,6 +16,8 @@ import {
 } from "./utils";
 import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
+import { extractMessageImageUrls } from "../../utils";
+import { AttachmentPreviews } from "../AttachmentPreviews";
 
 const PROMPT_ECHO_PREFIX_WIDTH = 2;
 const PROMPT_ECHO_MARGIN_LEFT = 1;
@@ -25,6 +27,8 @@ export function MessageView({
   collapsed,
   width = 80,
   projectRoot = process.cwd(),
+  imagePreviews,
+  permanentImages = false,
 }: MessageViewProps): React.ReactElement | null {
   const { mode } = useRawModeContext();
   if (!message.visible) {
@@ -34,12 +38,21 @@ export function MessageView({
   if (message.role === "user") {
     const content = message.content || "(no content)";
     const text = message.meta?.isAnswers ? renderMarkdown(content) : content;
+    const imageUrls = extractMessageImageUrls(message);
     return (
-      <PromptEchoLine
-        text={text}
-        width={width}
-        attachmentCount={Array.isArray(message.contentParams) ? message.contentParams.length : 0}
-      />
+      <Box flexDirection="column" width={width}>
+        <PromptEchoLine text={text} width={width} />
+        {imageUrls.length > 0 ? (
+          <Box marginLeft={PROMPT_ECHO_MARGIN_LEFT + PROMPT_ECHO_PREFIX_WIDTH}>
+            <AttachmentPreviews
+              urls={imageUrls}
+              width={getPromptEchoContentWidth(width)}
+              prepared={imagePreviews}
+              permanent={permanentImages}
+            />
+          </Box>
+        ) : null}
+      </Box>
     );
   }
 
@@ -156,15 +169,7 @@ export function getPromptEchoContentWidth(width: number): number {
   return Math.max(1, width - PROMPT_ECHO_MARGIN_LEFT - PROMPT_ECHO_PREFIX_WIDTH);
 }
 
-function PromptEchoLine({
-  text,
-  width,
-  attachmentCount = 0,
-}: {
-  text: string;
-  width: number;
-  attachmentCount?: number;
-}): React.ReactElement {
+function PromptEchoLine({ text, width }: { text: string; width: number }): React.ReactElement {
   const contentWidth = getPromptEchoContentWidth(width);
   const containerWidth = Math.max(1, width - PROMPT_ECHO_MARGIN_LEFT);
   return (
@@ -176,7 +181,6 @@ function PromptEchoLine({
         <PromptText color="#229ac3" width={contentWidth}>
           {text}
         </PromptText>
-        {attachmentCount > 0 ? <Text color="#229ac3">{`  📎 ${attachmentCount} image attachment(s)`}</Text> : null}
       </Box>
     </Box>
   );

@@ -8,6 +8,7 @@ import chalk from "chalk";
 import { editInExternalEditor } from "../core/external-editor";
 import { ARGS_SEPARATOR } from "../constants";
 import { PromptText } from "../components/PromptText";
+import { AttachmentPreviews } from "../components/AttachmentPreviews";
 import {
   EMPTY_BUFFER,
   PASTE_MARKER_REGEX,
@@ -199,6 +200,9 @@ export const PromptInput = React.memo(function PromptInput({
   const searchFooter = historySearchFooter(search?.query ?? "", screenWidth);
   const [buffer, setBuffer] = useState<PromptBufferState>(EMPTY_BUFFER);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [showImagePreviews, setShowImagePreviews] = useState(false);
+  const [imageLayoutRevision, setImageLayoutRevision] = useState(0);
+  const onImageLayoutChange = React.useCallback(() => setImageLayoutRevision((value) => value + 1), []);
   const [selectedSkills, setSelectedSkills] = useState<SkillInfo[]>([]);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [pendingExit, setPendingExit] = useState(false);
@@ -281,8 +285,14 @@ export const PromptInput = React.memo(function PromptInput({
   );
   const showMenu = slashMenu.length > 0;
   const promptHistoryKey = React.useMemo(() => promptHistory.join("\0"), [promptHistory]);
-  const pasteHint = hasCollapsedMarkers ? " · ctrl+o expand" : hasExpandedRegions ? " · ctrl+o collapse" : "";
-  const processOrPasteHint = isEmpty(buffer) ? " · ctrl+o view output" : pasteHint;
+  const pasteHint = hasCollapsedMarkers
+    ? " · ctrl+o expand"
+    : hasExpandedRegions
+      ? " · ctrl+o collapse"
+      : imageUrls.length > 0
+        ? ` · ctrl+o ${showImagePreviews ? "hide" : "preview"} images`
+        : "";
+  const processOrPasteHint = isEmpty(buffer) && imageUrls.length === 0 ? " · ctrl+o view output" : pasteHint;
   const busyStatusText =
     loadingText && loadingText.trim()
       ? `${loadingText}${processOrPasteHint}`
@@ -328,10 +338,21 @@ export const PromptInput = React.memo(function PromptInput({
         cursorLayoutKey ?? "default",
         pendingMessageCount,
         imageUrls.length,
+        showImagePreviews,
+        imageLayoutRevision,
         planMode ? "plan-mode" : "default-mode",
         selectedSkills.map((skill) => skill.name).join("\u001F"),
       ].join("\u001E"),
-    [cursorLayoutKey, pendingMessageCount, imageUrls.length, planMode, screenWidth, selectedSkills]
+    [
+      cursorLayoutKey,
+      pendingMessageCount,
+      imageUrls.length,
+      showImagePreviews,
+      imageLayoutRevision,
+      planMode,
+      screenWidth,
+      selectedSkills,
+    ]
   );
   useTerminalFocusReporting(stdout, terminalActive);
   useTerminalExtendedKeys(stdout, terminalActive);
@@ -398,6 +419,7 @@ export const PromptInput = React.memo(function PromptInput({
     appliedDraftNonceRef.current = promptDraft.nonce;
     setBuffer({ text: promptDraft.text, cursor: promptDraft.text.length });
     setImageUrls(promptDraft.imageUrls);
+    setShowImagePreviews(false);
     setSelectedSkills(promptDraft.selectedSkills ?? []);
     setShowSkillsDropdown(false);
     setOpenRawModelDropdown(false);
@@ -433,6 +455,7 @@ export const PromptInput = React.memo(function PromptInput({
         historySearch.handleKey(input, key, (text) => {
           setBuffer({ text, cursor: text.length });
           setImageUrls([]);
+          setShowImagePreviews(false);
           setSelectedSkills([]);
           resetPastes();
           clearUndoRedoStacks();
@@ -477,7 +500,11 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.ctrl && (input === "o" || input === "O")) {
-        if (isEmpty(buffer) && onToggleProcessStdout) {
+        if (expandPasteMarkerAtCursor(true)) return;
+        if (imageUrls.length > 0) {
+          setShowImagePreviews((value) => !value);
+          setStatusMessage(null);
+        } else if (isEmpty(buffer) && onToggleProcessStdout) {
           onToggleProcessStdout();
         } else {
           expandPasteMarkerAtCursor();
@@ -578,6 +605,7 @@ export const PromptInput = React.memo(function PromptInput({
       if (isClearImageAttachmentsShortcut(input, key)) {
         if (imageUrls.length > 0) {
           setImageUrls([]);
+          setShowImagePreviews(false);
           setStatusMessage("Cleared attached images");
         } else {
           setStatusMessage("No attached images to clear");
@@ -858,6 +886,7 @@ export const PromptInput = React.memo(function PromptInput({
     setBuffer(EMPTY_BUFFER);
     clearUndoRedoStacks();
     setImageUrls([]);
+    setShowImagePreviews(false);
     setSelectedSkills([]);
     setShowSkillsDropdown(false);
     exitHistoryBrowsing();
@@ -1062,9 +1091,14 @@ export const PromptInput = React.memo(function PromptInput({
         </Box>
       ) : null}
       {(!search || search.preview === null) && imageUrls.length > 0 ? (
-        <Box>
-          <Text color="magenta">{formatImageAttachmentStatus(imageUrls.length)}</Text>
-          <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
+        <Box flexDirection="column">
+          <Box>
+            <Text color="magenta">{formatImageAttachmentStatus(imageUrls.length)}</Text>
+            <Text dimColor>{` (${IMAGE_ATTACHMENT_CLEAR_HINT})`}</Text>
+          </Box>
+          {showImagePreviews && !editingExternally ? (
+            <AttachmentPreviews urls={imageUrls} width={screenWidth} onLayoutChange={onImageLayoutChange} />
+          ) : null}
         </Box>
       ) : null}
       {(!search || search.preview === null) && selectedSkills.length > 0 ? (
