@@ -1,5 +1,6 @@
 /* global acquireVsCodeApi */
 (function () {
+  const SHOW_EDIT_BUTTON = false;
   const vscode = acquireVsCodeApi();
   const $ = (id) => document.getElementById(id);
   const state = {
@@ -248,7 +249,7 @@
     const editing = state.drafts.has(state.tab);
     body.classList.toggle("editing", editing);
     $("details").classList.toggle("editing", editing);
-    $("edit").hidden = !record.editable || editing;
+    $("edit").hidden = !SHOW_EDIT_BUTTON || !record.editable || editing;
     $("edit").disabled = state.running || Boolean(state.pending);
     $("delete").disabled = state.running || Boolean(state.pending);
     $("save").disabled = state.running || Boolean(state.pending);
