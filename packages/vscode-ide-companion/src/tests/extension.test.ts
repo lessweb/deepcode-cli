@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { handleWebviewMessage, loadSession, postUndoState, releaseQueueEdit, type ProviderDeps } from "../provider.js";
+import {
+  handleWebviewMessage,
+  loadSession,
+  refreshSessionHistory,
+  postUndoState,
+  releaseQueueEdit,
+  type ProviderDeps,
+} from "../provider.js";
 
 import { PromptQueue } from "../../../core/src/prompt-queue.js";
 
@@ -1054,4 +1061,65 @@ test("messages submitted while busy remain pending until core prepares them", as
   const state = deps.messages.filter((m: any) => m.type === "undoState").at(-1) as any;
   assert.equal(state.preparing, undefined);
   assert.equal(state.queued.length, 1);
+});
+
+test("blocked /continue displays the reason and settles loading without changing the wait", async () => {
+  for (const status of ["permission_denied", "ask_permission", "waiting_for_user"]) {
+    const deps = createDeps({ sessions: [{ id: "session-1", summary: "test", status }] });
+    const reason = `Cannot continue: ${status}`;
+    deps.sessionManager.handleUserPrompt = async () => {
+      throw new Error(reason);
+    };
+    await handleWebviewMessage({ type: "slashCommand", command: "continue" }, deps);
+    assert.ok(deps.messages.some((message: any) => message.type === "commandNotice" && message.text === reason));
+    assert.ok(
+      deps.messages.some(
+        (message: any) => message.type === "loading" && message.value === false && message.status === status
+      )
+    );
+    assert.equal(deps.sessionManager.getSession("session-1")?.status, status);
+  }
+});
+
+test("history refresh preserves the backend queue edit until save or cancel", async () => {
+  const deps = createDeps();
+  const queued = deps.sessionManager.enqueuePrompt("session-1", { text: "queued", imageUrls: ["file:///draft.png"] });
+  for (const action of ["save", "cancel"]) {
+    await handleWebviewMessage(
+      { type: "undoAction", sessionId: "session-1", action: "edit", id: queued.id, requestId: "edit" },
+      deps
+    );
+    const edit = [...deps.messages].reverse().find((message: any) => message.type === "undoResult") as any;
+    assert.equal(edit.error, undefined);
+    deps.messages.length = 0;
+    const originalActive = deps.sessionManager.setActiveSessionId;
+    deps.sessionManager.setActiveSessionId = () => {
+      throw Error("history refresh must not activate a session");
+    };
+    refreshSessionHistory("session-1", deps.sessionManager, deps.postMessage, deps.renderMarkdown);
+    deps.sessionManager.setActiveSessionId = originalActive;
+    assert.equal((deps.messages[0] as any).type, "refreshSessionHistory");
+    assert.ok(!deps.messages.some((message: any) => message.type === "loadSession"));
+    assert.equal(
+      deps.sessionManager.beginQueuedMessageEdit("session-1", queued.id),
+      undefined,
+      "existing queue edit lock retained"
+    );
+    await handleWebviewMessage(
+      {
+        type: "undoAction",
+        sessionId: "session-1",
+        action,
+        id: queued.id,
+        requestId: action,
+        text: "saved draft",
+        imageUrls: ["file:///draft.png"],
+      },
+      deps
+    );
+    const result = [...deps.messages].reverse().find((message: any) => message.type === "undoResult") as any;
+    assert.equal(result.error, undefined);
+    assert.ok(deps.sessionManager.beginQueuedMessageEdit("session-1", queued.id), "save/cancel releases lock");
+    deps.sessionManager.finishQueuedMessageEdit("session-1", queued.id);
+  }
 });

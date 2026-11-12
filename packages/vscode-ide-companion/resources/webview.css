@@ -112,6 +112,9 @@ body {
 }
 
 /* Header New Button */
+.header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.header-trajectory-btn { color: var(--vscode-descriptionForeground); }
+.header-new-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .header-new-btn {
   border: none;
   border-radius: 4px;

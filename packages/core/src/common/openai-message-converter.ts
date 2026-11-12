@@ -1,3 +1,4 @@
+import { getCurrentToolCallBatch } from "./tool-call-batch";
 import type { ChatCompletionMessageParam, ChatCompletionContentPart } from "openai/resources/chat/completions";
 import { supportsMultimodal, type MultimodalMode } from "./model-capabilities";
 import type { SessionMessage } from "../session";
@@ -74,26 +75,16 @@ export class OpenAIMessageConverter {
   }
 
   /**
-   * Returns the trailing assistant message with pending (unexecuted) tool calls,
-   * if one exists at the end of the conversation.
+   * Returns unfinished calls from the current assistant batch, including partially
+   * completed batches whose latest messages are tool results.
    */
   getTrailingPendingToolCallMessage(
     messages: SessionMessage[]
   ): { message: SessionMessage; toolCalls: unknown[] } | { message: null; toolCalls: [] } {
-    const activeMessages = messages.filter((message) => !message.compacted);
-    const latestMessage = activeMessages[activeMessages.length - 1];
-    if (!latestMessage || latestMessage.role !== "assistant") {
-      return { message: null, toolCalls: [] };
-    }
-
-    const toolCalls = this.getAssistantToolCalls(latestMessage);
-    if (toolCalls.length === 0) {
-      return { message: null, toolCalls: [] };
-    }
-    return {
-      message: latestMessage,
-      toolCalls: toolCalls.filter((toolCall) => Boolean(this.getToolCallId(toolCall))),
-    };
+    const batch = getCurrentToolCallBatch(messages);
+    return batch.message && batch.pending.length
+      ? { message: batch.message, toolCalls: batch.pending }
+      : { message: null, toolCalls: [] };
   }
 
   // ---------------------------------------------------------------------------

@@ -306,24 +306,49 @@ export function loadSession(
     askPermissions: session.askPermissions,
     processes: serializeProcesses(session.processes),
     sessions: toSessionList(sessions),
-    messages: messages
-      .filter((m) => m.visible)
-      .map((m) => ({
-        id: m.id,
-        createTime: m.createTime,
-        contentParams: m.contentParams,
-        role: m.role,
-        content: prepareToolDiffContent(m.role, m.content),
-        html:
-          m.role !== "tool" && (m.role !== "user" || m.meta?.isAnswers)
-            ? renderMarkdown(
-                m.content || (m.messageParams as { reasoning_content?: string } | null)?.reasoning_content || ""
-              )
-            : undefined,
-        meta: m.meta,
-      })),
+    messages: serializeSessionMessages(messages, renderMarkdown),
   });
   postUndoState(sessionManager, postMessage);
+}
+
+function serializeSessionMessages(messages: SessionMessage[], renderMarkdown: (text: string) => string) {
+  return messages
+    .filter((m) => m.visible)
+    .map((m) => ({
+      id: m.id,
+      createTime: m.createTime,
+      contentParams: m.contentParams,
+      role: m.role,
+      content: prepareToolDiffContent(m.role, m.content),
+      html:
+        m.role !== "tool" && (m.role !== "user" || m.meta?.isAnswers)
+          ? renderMarkdown(
+              m.content || (m.messageParams as { reasoning_content?: string } | null)?.reasoning_content || ""
+            )
+          : undefined,
+      meta: m.meta,
+    }));
+}
+
+/** Refresh persisted history without switching sessions or releasing a composer/queue draft. */
+export function refreshSessionHistory(
+  sessionId: string,
+  manager: Pick<SessionManager, "getSession" | "listSessionMessages" | "listSessions">,
+  postMessage: PostMessageFn,
+  renderMarkdown: (text: string) => string
+): void {
+  const session = manager.getSession(sessionId);
+  if (!session) return;
+  postMessage({
+    type: "refreshSessionHistory",
+    sessionId,
+    summary: session.summary || "Untitled",
+    status: session.status,
+    askPermissions: session.askPermissions,
+    pluginRateLimitedTool: session.pluginRateLimitedTool ?? null,
+    messages: serializeSessionMessages(manager.listSessionMessages(sessionId), renderMarkdown),
+    sessions: toSessionList(manager.listSessions()),
+  });
 }
 
 function showSessionsList(sessionManager: ProviderDeps["sessionManager"], postMessage: PostMessageFn): void {
@@ -462,10 +487,12 @@ async function handlePrompt(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    postMessage({
-      type: "assistant",
-      html: renderMarkdown(`Request failed: ${message}`),
-    });
+    if (prompt === "/continue") postMessage({ type: "commandNotice", text: message });
+    else
+      postMessage({
+        type: "assistant",
+        html: renderMarkdown(`Request failed: ${message}`),
+      });
   } finally {
     if (direct) directSubmissions.delete(sessionManager);
     const sessionId = sessionManager.getActiveSessionId();

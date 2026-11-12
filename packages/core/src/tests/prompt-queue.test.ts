@@ -365,7 +365,7 @@ test("a plain answer resumes questions but cannot approve a subsequent write", a
   for (const status of ["ask_permission", "permission_denied"] as const) {
     if (status === "permission_denied") manager.denySessionPermission(id);
     await manager.handleUserPrompt({ text: "yes" });
-    await manager.handleUserPrompt({ text: "/continue" });
+    await assert.rejects(manager.handleUserPrompt({ text: "/continue" }), /Cannot continue:/);
     assert.equal(manager.getSession(id)?.status, status);
     assert.equal(requests, 2);
     assert.equal(fs.existsSync(filePath), false);

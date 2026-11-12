@@ -30,12 +30,18 @@
             </svg>
           </div>
         </div>
-        <button class="header-new-btn" id="newSessionBtn" title="New chat">
-          <svg class="header-new-icon" viewBox="0 0 1024 1024" width="16" height="16" aria-hidden="true">
-            <path d="M474 152m8 0l60 0q8 0 8 8l0 704q0 8-8 8l-60 0q-8 0-8-8l0-704q0-8 8-8Z"></path>
-            <path d="M168 474m8 0l672 0q8 0 8 8l0 60q0 8-8 8l-672 0q-8 0-8-8l0-60q0-8 8-8Z"></path>
-          </svg>
-        </button>
+        <div class="header-actions">
+          <button class="header-new-btn header-trajectory-btn" id="trajectoryBtn" type="button" title="Trajectory" aria-label="Trajectory">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <path d="M6.18,19.83Q5,18.65 5,17V8.82Q4.13,8.5 3.56,7.74Q3,6.97 3,6Q3,4.75 3.88,3.88T6,3T8.13,3.88T9,6Q9,6.97 8.44,7.74T7,8.82V17q0,0.82 0.59,1.41T9,19q0.83,0 1.41-0.59T11,17V7q0-1.65 1.18-2.83T15,3t2.82,1.17T19,7v8.17q0.88,0.33 1.44,1.09T21,18q0,1.25-0.88,2.13T18,21t-2.13-0.88T15,18q0-0.98 0.56-1.75T17,15.18V7q0-0.82-0.59-1.41T15,5T13.59,5.59Q13,6.18 13,7V17q0,1.65-1.17,2.82T9,21T6.18,19.83ZM6,7Q6.43,7 6.71,6.71Q7,6.43 7,6T6.71,5.29T6,5Q5.58,5 5.29,5.29T5,6T5.29,6.71T6,7ZM18,19q0.43,0 0.71-0.29Q19,18.43 19,18t-0.29-0.71T18,17t-0.71,0.29T17,18t0.29,0.71T18,19ZM6,6ZM18,18Z" />
+            </svg>
+          </button>
+          <button class="header-new-btn" id="newSessionBtn" title="New chat">
+            <svg class="header-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M11,21V13H3V11h8V3h2v8h8v2H13v8H11Z" />
+            </svg>
+          </button>
+        </div>
         <div class="session-dropdown" id="sessionDropdown"></div>
       </div>
 
@@ -143,6 +149,7 @@
       const sessionSelectorTitleText = document.getElementById("sessionSelectorTitleText");
       const sessionDropdown = document.getElementById("sessionDropdown");
       const newSessionBtn = document.getElementById("newSessionBtn");
+      document.getElementById("trajectoryBtn").addEventListener("click", () => vscode.postMessage({ type: "openTrajectory" }));
       const sendIcon = document.getElementById("sendIcon");
       const stopIcon = document.getElementById("stopIcon");
       const skillsButton = document.getElementById("skillsButton");
@@ -204,6 +211,7 @@
       let currentAskPermissions = [];
       let permissionPromptState = null;
       let pendingPermissionReply = null;
+      let reviewingDeniedPermission = false;
       let currentPluginRateLimitedTool = null;
       const dismissedPluginRateLimitSessions = new Set();
 
@@ -1506,6 +1514,7 @@
       }
 
       function submitPermissionResult(result) {
+        reviewingDeniedPermission = false;
         permissionPromptState = null;
         currentAskPermissions = [];
         if (result.hasDeny) {
@@ -1576,21 +1585,33 @@
         permissionPromptHost.innerHTML = `
           <div class="permission-card permission-denied-card">
             <div class="permission-title">Permission denied</div>
-            <div class="permission-description">Add a reply, then press Enter to continue with the denial.</div>
+            <div class="permission-description">${pendingPermissionReply
+              ? "Add a reply, then press Enter to continue with the denial."
+              : currentAskPermissions.length
+                ? "Review the permission request before continuing."
+                : "The saved permission request is no longer available."}</div>
+            ${currentAskPermissions.length ? '<div class="permission-actions"><button type="button" class="permission-action permission-review">Review permissions</button></div>' : ""}
           </div>
         `;
         permissionPromptHost.hidden = false;
+        permissionPromptHost.querySelector(".permission-review")?.addEventListener("click", () => {
+          reviewingDeniedPermission = true;
+          pendingPermissionReply = null;
+          permissionPromptState = null;
+          renderPermissionPrompt();
+        });
       }
 
       function renderPermissionPrompt() {
         if (!permissionPromptHost) {
           return;
         }
-        if (pendingPermissionReply && currentSessionStatus === "permission_denied") {
+        if (currentSessionStatus !== "permission_denied") reviewingDeniedPermission = false;
+        if (currentSessionStatus === "permission_denied" && !reviewingDeniedPermission) {
           renderPermissionDeniedNotice();
           return;
         }
-        if (currentSessionStatus !== "ask_permission" || currentAskPermissions.length === 0) {
+        if ((currentSessionStatus !== "ask_permission" && !reviewingDeniedPermission) || currentAskPermissions.length === 0) {
           permissionPromptHost.innerHTML = "";
           permissionPromptHost.hidden = true;
           permissionPromptState = null;
@@ -2150,6 +2171,41 @@
         lastMessageRole = null;
       }
 
+      function renderSessionHistory(history) {
+        clearMessages();
+        currentThinkingBubble = null;
+        history.forEach((msg, index) => {
+          // 判断是否需要连接到上一个消息
+          let shouldConnect = false;
+          if (index > 0) {
+            const prevMsg = history[index - 1];
+            shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
+          }
+          addMessageBubble(msg, shouldConnect);
+        });
+
+        // 更新 lastMessageRole 为最后一条消息的role
+        if (history.length > 0) {
+          lastMessageRole = history[history.length - 1].role;
+        }
+
+        // 批量更新所有连接线的高度
+        requestAnimationFrame(() => {
+          updateAllConnectionLines();
+        });
+
+        // 找最后一条 asThinking 为 true 的消息并展开
+        const thinkingBubbles = messages.querySelectorAll('.bubble.assistant[data-thinking="true"]');
+        if (thinkingBubbles.length > 0) {
+          const lastThinkingBubble = thinkingBubbles[thinkingBubbles.length - 1];
+          if (currentThinkingBubble && currentThinkingBubble !== lastThinkingBubble) {
+            setThinkingBubbleExpanded(currentThinkingBubble, false);
+          }
+          setThinkingBubbleExpanded(lastThinkingBubble, true);
+          currentThinkingBubble = lastThinkingBubble;
+        }
+      }
+
       function updateSessionDropdown(sessions) {
         allSessions = sessions || [];
         sessionDropdown.innerHTML = "";
@@ -2236,7 +2292,8 @@
         const groups = {
           today: [],
           yesterday: [],
-          pastWeek: []
+          pastWeek: [],
+          earlier: []
         };
 
         // 筛选并分组会话
@@ -2250,12 +2307,13 @@
             groups.yesterday.push(session);
           } else if (sessionDay.getTime() > lastWeek.getTime() && sessionDay.getTime() < yesterday.getTime()) {
             groups.pastWeek.push(session);
+          } else {
+            groups.earlier.push(session);
           }
-          // 超过7天的数据不显示
         });
 
         // 如果没有会话
-        const totalCount = groups.today.length + groups.yesterday.length + groups.pastWeek.length;
+        const totalCount = groups.today.length + groups.yesterday.length + groups.pastWeek.length + groups.earlier.length;
         if (totalCount === 0) {
           const emptyDiv = document.createElement("div");
           emptyDiv.className = "session-dropdown-empty";
@@ -2309,10 +2367,12 @@
         const todayGroup = renderGroup("Today", groups.today);
         const yesterdayGroup = renderGroup("Yesterday", groups.yesterday);
         const pastWeekGroup = renderGroup("Past Week", groups.pastWeek);
+        const earlierGroup = renderGroup("Earlier", groups.earlier);
 
         if (todayGroup) sessionDropdownList.appendChild(todayGroup);
         if (yesterdayGroup) sessionDropdownList.appendChild(yesterdayGroup);
         if (pastWeekGroup) sessionDropdownList.appendChild(pastWeekGroup);
+        if (earlierGroup) sessionDropdownList.appendChild(earlierGroup);
       }
 
       function formatSessionTime(dateString) {
@@ -2752,6 +2812,24 @@
           if (!sessionDropdown.classList.contains("show")) toggleSessionDropdown();
           return;
         }
+        if (message.type === "refreshSessionHistory") {
+          if (message.sessionId !== currentSessionId) return;
+          const previousTop = messages.scrollTop;
+          const requests = normalizeAskPermissions(message.askPermissions);
+          // Permission choices refer to the history before this edit; rebuild those controls only.
+          permissionPromptState = null;
+          pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
+          currentAskPermissions = requests;
+          currentPluginRateLimitedTool = normalizePluginRateLimitedTool(message.pluginRateLimitedTool);
+          if (sessionSelectorTitleText) sessionSelectorTitleText.textContent = message.summary;
+          renderSessionHistory(message.messages || []);
+          messages.scrollTop = previousTop;
+          setLoading(commandBusy || isBusyStatus(message.status), message.status);
+          renderPluginRateLimitNotice();
+          if (Array.isArray(message.sessions)) updateSessionDropdown(message.sessions);
+          return;
+        }
         if (message.type === "initializeEmpty" || message.type === "loadSession") {
           // Carry forward drafts saved before per-session draft storage was introduced.
           if (!hasLoadedSession && !savedState.drafts && savedState.promptText) {
@@ -2785,6 +2863,7 @@
           currentPluginRateLimitedTool = null;
           permissionPromptState = null;
           pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
           updateContextMeter(message.tokenTelemetry);
           attachmentManager?.clear();
           setLoading(false, currentSessionStatus);
@@ -2809,6 +2888,7 @@
           currentAskPermissions = normalizeAskPermissions(message.askPermissions);
           permissionPromptState = null;
           pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
           updateContextMeter(message.tokenTelemetry);
           if ('processes' in message) {
             currentRunningProcesses = message.processes;
@@ -2832,36 +2912,7 @@
             draftBeforeHistory = null;
             pendingUserPrompt = null;
 
-            message.messages.forEach((msg, index) => {
-              // 判断是否需要连接到上一个消息
-              let shouldConnect = false;
-              if (index > 0) {
-                const prevMsg = message.messages[index - 1];
-                shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
-              }
-              addMessageBubble(msg, shouldConnect);
-            });
-
-            // 更新 lastMessageRole 为最后一条消息的role
-            if (message.messages.length > 0) {
-              lastMessageRole = message.messages[message.messages.length - 1].role;
-            }
-
-            // 批量更新所有连接线的高度
-            requestAnimationFrame(() => {
-              updateAllConnectionLines();
-            });
-
-            // 找最后一条 asThinking 为 true 的消息并展开
-            const thinkingBubbles = messages.querySelectorAll('.bubble.assistant[data-thinking="true"]');
-            if (thinkingBubbles.length > 0) {
-              const lastThinkingBubble = thinkingBubbles[thinkingBubbles.length - 1];
-              if (currentThinkingBubble && currentThinkingBubble !== lastThinkingBubble) {
-                setThinkingBubbleExpanded(currentThinkingBubble, false);
-              }
-              setThinkingBubbleExpanded(lastThinkingBubble, true);
-              currentThinkingBubble = lastThinkingBubble;
-            }
+            renderSessionHistory(message.messages);
           }
 
           if (reloadQueueDraft && message.sessionId === savedState.sessionId) {
