@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import type { SessionMessage } from "./session";
+import { generateToolCallId, getCurrentToolCallBatch } from "./common/tool-call-batch";
+import { parseToolCallForPermissions, type PermissionPlan, type PermissionToolCall } from "./common/permissions";
 
 export interface SessionMessageTarget {
   messageId: string;
@@ -87,6 +89,43 @@ function messagePaths(message: SessionMessage): string[][] {
     paths.push(["meta", "function", "name"], ["meta", "function", "arguments"]);
   }
   return paths;
+}
+
+/** Refresh authorization only when an unfinished call's function changes. Mutates the edited history. */
+export function refreshEditedToolPermissions(
+  original: SessionMessage[],
+  edited: SessionMessage[],
+  computePermissions: (toolCalls: unknown[]) => PermissionPlan
+): PermissionPlan | undefined {
+  const { message, pending } = getCurrentToolCallBatch(edited);
+  if (!message) return;
+
+  const previousCalls = new Map<string, PermissionToolCall>();
+  for (const call of getCurrentToolCallBatch(original).pending) {
+    const parsed = parseToolCallForPermissions(call);
+    if (parsed) previousCalls.set(parsed.id, parsed);
+  }
+  const obsoleteIds = new Set<string>();
+  for (const call of pending) {
+    const parsed = parseToolCallForPermissions(call);
+    const previous = parsed && previousCalls.get(parsed.id);
+    if (!parsed || !previous || isDeepStrictEqual(previous.function, parsed.function)) continue;
+    obsoleteIds.add(parsed.id);
+    // A one-shot reply for the original arguments cannot authorize the edited call.
+    object(call).id = generateToolCallId();
+  }
+  if (!obsoleteIds.size) return;
+
+  const plan = computePermissions(pending);
+  const replacedIds = new Set([...obsoleteIds, ...plan.permissions.map((permission) => permission.toolCallId)]);
+  message.meta = {
+    ...message.meta,
+    permissions: [
+      ...(message.meta?.permissions ?? []).filter((permission) => !replacedIds.has(permission.toolCallId)),
+      ...plan.permissions,
+    ],
+  };
+  return plan;
 }
 
 /** Edit a copy of the history; the caller persists it only after all validation succeeds. */

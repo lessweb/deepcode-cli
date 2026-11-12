@@ -570,6 +570,33 @@ test("OpenAIMessageConverter.getTrailingPendingToolCallMessage skips compacted m
   assert.deepEqual(result.toolCalls, []);
 });
 
+test("pending tools resume partial batches in call order without repeating stored results", () => {
+  const calls = ["c1", "c2", "c3"].map((id) => ({ id, function: { name: "Read", arguments: "{}" } }));
+  const history = [assistantMsg("a", calls), toolMsg("t3", "c3", "third"), toolMsg("t1", "c1", "first")];
+  const c = converter();
+  assert.deepEqual(c.getTrailingPendingToolCallMessage(history).toolCalls, [calls[1]]);
+  history.push(toolMsg("t2", "c2", "second"));
+  assert.deepEqual(c.getTrailingPendingToolCallMessage(history).toolCalls, []);
+});
+
+test("contextual tool followups retain the batch, but new instructions or assistant messages supersede it", () => {
+  const calls = [{ id: "c1", function: { name: "Read", arguments: "{}" } }];
+  const history = [
+    assistantMsg("a", calls),
+    msg({ role: "system", content: "context" }),
+    msg({ role: "user", content: "tool context", meta: { isToolFollowUp: true } }),
+  ];
+  const c = converter();
+  assert.deepEqual(c.getTrailingPendingToolCallMessage(history).toolCalls, calls);
+  for (const boundary of [
+    userMsg("u", "new task"),
+    assistantMsg("a2"),
+    msg({ role: "user", meta: { isAnswers: true } }),
+  ]) {
+    assert.deepEqual(c.getTrailingPendingToolCallMessage([...history, boundary]).toolCalls, []);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // findToolFunction
 // ---------------------------------------------------------------------------

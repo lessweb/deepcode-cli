@@ -23,7 +23,7 @@ import {
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
 import { collectPromptImageUrls, getNonce, isAllowedExternalUrl } from "./utils.js";
-import { handleWebviewMessage, postUndoState, releaseQueueEdit } from "./provider.js";
+import { handleWebviewMessage, postUndoState, releaseQueueEdit, refreshSessionHistory } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
 import { prepareToolDiffContent } from "./tool-diff.js";
 import { buildTrajectory, TrajectoryController, type TrajectoryPanel, type TrajectorySnapshot } from "./trajectory.js";
@@ -428,7 +428,23 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
               throw new Error("Invalid message edit.");
             this.sessionManager.editSessionMessage(sessionId, record.source, msg.tab as SessionMessageTab, msg.text);
           }
-          this.loadSession(sessionId);
+          refreshSessionHistory(
+            sessionId,
+            this.sessionManager,
+            (message) => this.sendMessage(message),
+            (text) => this.md.render(text)
+          );
+          const updatedRecord =
+            msg.type === "trajectoryEdit"
+              ? buildTrajectory(
+                  this.sessionManager.getSession(sessionId),
+                  this.sessionManager.listSessionMessages(sessionId)
+                ).records.find(
+                  (item) =>
+                    item.source.messageId === record.source.messageId &&
+                    item.source.toolCallIndex === record.source.toolCallIndex
+                )
+              : undefined;
           postUndoState(this.sessionManager, (message) => this.sendMessage(message));
           this.trajectory.invalidate();
           void panel.webview.postMessage({
@@ -436,6 +452,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
             requestId: msg.requestId,
             sessionId,
             recordId: msg.recordId,
+            nextRecordId: updatedRecord?.id,
             tab: msg.tab,
           });
         } catch (error) {

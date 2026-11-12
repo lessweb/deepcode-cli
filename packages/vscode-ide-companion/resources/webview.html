@@ -2171,6 +2171,41 @@
         lastMessageRole = null;
       }
 
+      function renderSessionHistory(history) {
+        clearMessages();
+        currentThinkingBubble = null;
+        history.forEach((msg, index) => {
+          // 判断是否需要连接到上一个消息
+          let shouldConnect = false;
+          if (index > 0) {
+            const prevMsg = history[index - 1];
+            shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
+          }
+          addMessageBubble(msg, shouldConnect);
+        });
+
+        // 更新 lastMessageRole 为最后一条消息的role
+        if (history.length > 0) {
+          lastMessageRole = history[history.length - 1].role;
+        }
+
+        // 批量更新所有连接线的高度
+        requestAnimationFrame(() => {
+          updateAllConnectionLines();
+        });
+
+        // 找最后一条 asThinking 为 true 的消息并展开
+        const thinkingBubbles = messages.querySelectorAll('.bubble.assistant[data-thinking="true"]');
+        if (thinkingBubbles.length > 0) {
+          const lastThinkingBubble = thinkingBubbles[thinkingBubbles.length - 1];
+          if (currentThinkingBubble && currentThinkingBubble !== lastThinkingBubble) {
+            setThinkingBubbleExpanded(currentThinkingBubble, false);
+          }
+          setThinkingBubbleExpanded(lastThinkingBubble, true);
+          currentThinkingBubble = lastThinkingBubble;
+        }
+      }
+
       function updateSessionDropdown(sessions) {
         allSessions = sessions || [];
         sessionDropdown.innerHTML = "";
@@ -2777,6 +2812,24 @@
           if (!sessionDropdown.classList.contains("show")) toggleSessionDropdown();
           return;
         }
+        if (message.type === "refreshSessionHistory") {
+          if (message.sessionId !== currentSessionId) return;
+          const previousTop = messages.scrollTop;
+          const requests = normalizeAskPermissions(message.askPermissions);
+          // Permission choices refer to the history before this edit; rebuild those controls only.
+          permissionPromptState = null;
+          pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
+          currentAskPermissions = requests;
+          currentPluginRateLimitedTool = normalizePluginRateLimitedTool(message.pluginRateLimitedTool);
+          if (sessionSelectorTitleText) sessionSelectorTitleText.textContent = message.summary;
+          renderSessionHistory(message.messages || []);
+          messages.scrollTop = previousTop;
+          setLoading(commandBusy || isBusyStatus(message.status), message.status);
+          renderPluginRateLimitNotice();
+          if (Array.isArray(message.sessions)) updateSessionDropdown(message.sessions);
+          return;
+        }
         if (message.type === "initializeEmpty" || message.type === "loadSession") {
           // Carry forward drafts saved before per-session draft storage was introduced.
           if (!hasLoadedSession && !savedState.drafts && savedState.promptText) {
@@ -2859,36 +2912,7 @@
             draftBeforeHistory = null;
             pendingUserPrompt = null;
 
-            message.messages.forEach((msg, index) => {
-              // 判断是否需要连接到上一个消息
-              let shouldConnect = false;
-              if (index > 0) {
-                const prevMsg = message.messages[index - 1];
-                shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
-              }
-              addMessageBubble(msg, shouldConnect);
-            });
-
-            // 更新 lastMessageRole 为最后一条消息的role
-            if (message.messages.length > 0) {
-              lastMessageRole = message.messages[message.messages.length - 1].role;
-            }
-
-            // 批量更新所有连接线的高度
-            requestAnimationFrame(() => {
-              updateAllConnectionLines();
-            });
-
-            // 找最后一条 asThinking 为 true 的消息并展开
-            const thinkingBubbles = messages.querySelectorAll('.bubble.assistant[data-thinking="true"]');
-            if (thinkingBubbles.length > 0) {
-              const lastThinkingBubble = thinkingBubbles[thinkingBubbles.length - 1];
-              if (currentThinkingBubble && currentThinkingBubble !== lastThinkingBubble) {
-                setThinkingBubbleExpanded(currentThinkingBubble, false);
-              }
-              setThinkingBubbleExpanded(lastThinkingBubble, true);
-              currentThinkingBubble = lastThinkingBubble;
-            }
+            renderSessionHistory(message.messages);
           }
 
           if (reloadQueueDraft && message.sessionId === savedState.sessionId) {

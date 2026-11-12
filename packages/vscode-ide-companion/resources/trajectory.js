@@ -460,6 +460,11 @@
           return;
         }
         state.drafts.delete(pending.tab);
+        if (data.nextRecordId && data.nextRecordId !== state.selected) {
+          const selected = state.records.find((record) => record.id === state.selected);
+          if (selected) selected.id = data.nextRecordId;
+          state.selected = data.nextRecordId;
+        }
       }
       renderDetails();
       return;

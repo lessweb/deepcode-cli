@@ -69,6 +69,7 @@ import {
   type AskPermissionRequest,
   type MessageToolPermission,
   type PermissionReply,
+  type PermissionPlan,
   type PermissionToolCall,
   type UserToolPermission,
 } from "./common/permissions";
@@ -102,10 +103,17 @@ import {
   MAX_LLM_RETRIES,
   waitForLlmRetry,
 } from "./common/llm-retry";
-import { getSessionWaitReason, reconcileSessionWaitState } from "./session-wait-state";
+import { generateToolCallId, getCurrentToolCallBatch } from "./common/tool-call-batch";
+import {
+  assertCurrentPermissionReplies,
+  getSessionWaitReason,
+  reconcileSessionWaitState,
+  type SessionWaitState,
+} from "./session-wait-state";
 import {
   editSessionMessageHistory,
   deleteSessionMessageHistory,
+  refreshEditedToolPermissions,
   type SessionMessageTarget,
   type SessionMessageTab,
 } from "./session-message-edit";
@@ -1811,6 +1819,8 @@ ${agentInstructions}
       return;
     }
     controller?.signal.throwIfAborted();
+    if (userPrompt.permissions?.length)
+      assertCurrentPermissionReplies(this.listSessionMessages(sessionId), userPrompt.permissions);
     this.activeSessionId = sessionId;
     if (!hasUserPermissionReplies(userPrompt) && !userPrompt.isAnswers && !this.isContinuePrompt(userPrompt)) {
       const abort = () => this.interruptSession(sessionId);
@@ -1846,6 +1856,28 @@ ${agentInstructions}
       if (PERMISSION_SCOPES.includes(scope)) grants.add(scope);
     }
     if (grants.size) this.sessionPermissionAllows.set(sessionId, grants);
+  }
+
+  private computeToolPermissions(
+    sessionId: string,
+    toolCalls: unknown[],
+    replies: UserToolPermission[] = []
+  ): PermissionPlan {
+    const plan = computeToolCallPermissions({
+      sessionId,
+      projectRoot: this.projectRoot,
+      toolCalls,
+      settings: this.getResolvedSettings().permissions,
+      forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
+      sessionAllows: this.sessionPermissionAllows.get(sessionId),
+      readPermissionExemptPaths: this.getReadPermissionExemptPaths(sessionId),
+      resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
+    });
+    const answeredIds = new Set(replies.map((reply) => reply.toolCallId));
+    return {
+      ...plan,
+      askPermissions: plan.askPermissions.filter((request) => !answeredIds.has(request.toolCallId)),
+    };
   }
 
   private isContinuePrompt(userPrompt: UserPromptContent): boolean {
@@ -1985,9 +2017,25 @@ ${agentInstructions}
           this.listSessionMessages(sessionId)
         );
         if (pendingToolCallMessage.toolCalls.length > 0) {
+          const plan = this.computeToolPermissions(
+            sessionId,
+            pendingToolCallMessage.toolCalls,
+            permissionPrompt?.permissions
+          );
+          if (plan.askPermissions.length) {
+            this.updateSessionEntry(sessionId, (entry) => ({
+              ...entry,
+              status: "ask_permission",
+              failReason: null,
+              askPermissions: plan.askPermissions,
+              toolCalls: pendingToolCallMessage.toolCalls,
+              updateTime: new Date().toISOString(),
+            }));
+            return;
+          }
           const toolAppendResult = await this.appendToolMessages(sessionId, pendingToolCallMessage.toolCalls, {
             permissionOverrides: permissionPrompt?.permissions,
-            messagePermissions: pendingToolCallMessage.message?.meta?.permissions,
+            messagePermissions: plan.permissions,
           });
           await this.appendDeferredPermissionPrompt(sessionId, permissionPrompt, sessionController);
           // Permission replies are one-shot: do not reuse decisions or append the deferred user prompt again on later tool-call batches.
@@ -1995,7 +2043,10 @@ ${agentInstructions}
           if (this.isInterrupted(sessionId)) {
             return;
           }
-          if (toolAppendResult.waitingForUser) {
+          if (
+            toolAppendResult.waitingForUser ||
+            getCurrentToolCallBatch(this.listSessionMessages(sessionId)).questions.length
+          ) {
             this.updateSessionEntry(sessionId, (entry) => ({
               ...entry,
               toolCalls: pendingToolCallMessage.toolCalls,
@@ -2043,18 +2094,7 @@ ${agentInstructions}
         if (reasoningSummary !== undefined) {
           assistantMessage.meta = { ...assistantMessage.meta, reasoningSummary };
         }
-        const permissionPlan = toolCalls
-          ? computeToolCallPermissions({
-              sessionId,
-              projectRoot: this.projectRoot,
-              toolCalls,
-              settings: this.getResolvedSettings().permissions,
-              forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
-              sessionAllows: this.sessionPermissionAllows.get(sessionId),
-              readPermissionExemptPaths: this.getReadPermissionExemptPaths(sessionId),
-              resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
-            })
-          : null;
+        const permissionPlan = toolCalls ? this.computeToolPermissions(sessionId, toolCalls) : null;
         if (permissionPlan) {
           assistantMessage.meta = {
             ...(assistantMessage.meta ?? {}),
@@ -2951,15 +2991,21 @@ ${agentInstructions}
     sessionId: string,
     update: (messages: SessionMessage[]) => SessionMessage[]
   ): void {
-    if (!this.getSession(sessionId)) throw new Error("Session was not found.");
+    const entry = this.getSession(sessionId);
+    if (!entry) throw new Error("Session was not found.");
     if (this.isSessionRunning(sessionId)) throw new Error("Wait for the session to finish before editing messages.");
-    this.replaceSessionHistory(sessionId, update(this.listSessionMessages(sessionId)));
+    const original = this.listSessionMessages(sessionId);
+    const updated = update(original);
+    const plan = refreshEditedToolPermissions(original, updated, (toolCalls) =>
+      this.computeToolPermissions(sessionId, toolCalls)
+    );
+    this.replaceSessionHistory(sessionId, updated, reconcileSessionWaitState(entry, updated, plan));
   }
 
   private replaceSessionHistory(
     sessionId: string,
     messages: SessionMessage[],
-    state?: Pick<SessionEntry, "status" | "failReason" | "askPermissions" | "toolCalls" | "processes">
+    state?: SessionWaitState & { processes?: SessionEntry["processes"] }
   ): void {
     const normalized = messages.map((message) => this.normalizeSessionMessage(message));
     this.saveSessionMessages(sessionId, normalized);
@@ -3572,10 +3618,6 @@ ${agentInstructions}
     };
   }
 
-  private generateToolCallId(): string {
-    return crypto.randomBytes(16).toString("hex");
-  }
-
   private normalizeLlmToolCalls(rawToolCalls: unknown[] | null | undefined): unknown[] | null {
     if (!Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
       return null;
@@ -3594,7 +3636,7 @@ ${agentInstructions}
 
       return {
         ...record,
-        id: this.generateToolCallId(),
+        id: generateToolCallId(),
       };
     });
   }
