@@ -15,10 +15,6 @@ from pathlib import Path
 from typing import Any, Sequence
 
 
-IMAGE_GEN_URL = 'https://deepcode.vegamo.cn/api/plugin/image-gen'
-CALC_IMAGE_GEN_COST_URL = (
-    'https://deepcode.vegamo.cn/api/plugin/calc-image-gen-cost'
-)
 SETTINGS_PATH = Path.home() / '.deepcode-plus' / 'settings.json'
 MACHINE_ID_PATH = Path.home() / '.deepcode' / 'machine-id'
 RATIOS = ('1:1', '3:4', '4:3', '16:9', '9:16', '2:3', '3:2', '21:9')
@@ -30,24 +26,40 @@ class ImageGeneratorError(RuntimeError):
     pass
 
 
-def load_plus_api_key(settings_path: Path) -> str:
-    try:
-        settings = json.loads(settings_path.read_text(encoding='utf-8'))
-        api_key = settings['env']['PLUS_API_KEY']
-    except FileNotFoundError as exc:
-        raise ImageGeneratorError(
-            f'Settings file does not exist: {settings_path}'
-        ) from exc
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
-        raise ImageGeneratorError(
-            f'Settings file must contain env.PLUS_API_KEY: {settings_path}'
-        ) from exc
+def resolve_host(api_key=None):
+    if api_key is None:
+        return 'https://deepcode.vegamo.cn'
+    if not isinstance(api_key, str):
+        raise ImageGeneratorError('Invalid PLUS_API_KEY.')
+    key = api_key.strip()
+    if not key.startswith('sk-') or len(key[3:]) not in (24, 26):
+        raise ImageGeneratorError('Invalid PLUS_API_KEY.')
+    return ('https://www.deepcodeplus.com' if len(key[3:]) == 26
+            else 'https://deepcode.vegamo.cn')
 
-    if not isinstance(api_key, str) or not api_key.strip():
-        raise ImageGeneratorError(
-            f'Settings file must contain env.PLUS_API_KEY: {settings_path}'
-        )
-    return api_key.strip()
+
+def load_plus_api_key(settings_path: Path, required: bool = True) -> str | None:
+    try:
+        settings = json.loads(settings_path.expanduser().read_text(encoding='utf-8'))
+    except FileNotFoundError as exc:
+        if not required:
+            return None
+        raise ImageGeneratorError(f'Please configure env.PLUS_API_KEY in {settings_path}.') from exc
+    except (OSError, ValueError) as exc:
+        raise ImageGeneratorError(f'Unable to read PLUS settings: {settings_path}') from exc
+    env = settings.get('env') if isinstance(settings, dict) else None
+    if not isinstance(env, dict) or 'PLUS_API_KEY' not in env:
+        if not required:
+            return None
+        raise ImageGeneratorError(f'Please configure env.PLUS_API_KEY in {settings_path}.')
+    key = env['PLUS_API_KEY']
+    try:
+        if not isinstance(key, str):
+            raise ImageGeneratorError('Invalid PLUS_API_KEY.')
+        resolve_host(key)
+    except ImageGeneratorError as exc:
+        raise ImageGeneratorError(f'{exc} Settings: {settings_path}') from exc
+    return key.strip()
 
 
 def get_machine_id() -> str | None:
@@ -149,9 +161,9 @@ def request_json(
     return response_data
 
 
-def calculate_cost(payload: dict[str, object]) -> int:
+def calculate_cost(payload: dict[str, object], api_key: str | None = None) -> int:
     response_data = request_json(
-        CALC_IMAGE_GEN_COST_URL,
+        resolve_host(api_key) + "/api/plugin/calc-image-gen-cost",
         payload,
         None,
         timeout=30,
@@ -167,7 +179,7 @@ def calculate_cost(payload: dict[str, object]) -> int:
 
 def generate_image(payload: dict[str, object], api_key: str) -> str:
     response_data = request_json(
-        IMAGE_GEN_URL,
+        resolve_host(api_key) + "/api/plugin/image-gen",
         payload,
         api_key,
         timeout=360,
@@ -245,11 +257,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def run(args: argparse.Namespace) -> dict[str, object]:
+    api_key = load_plus_api_key(args.settings, required=args.command != 'cost')
     payload = build_payload(args)
-    credits = calculate_cost(payload)
+    credits = calculate_cost(payload, api_key)
 
     if args.command == 'cost':
         return {'credits': credits}
+    if api_key is None:
+        raise ImageGeneratorError(f'Please configure env.PLUS_API_KEY in {args.settings}.')
     if args.confirmed_credits < 0:
         raise ImageGeneratorError('Confirmed credits must not be negative.')
     if credits != args.confirmed_credits:
@@ -258,7 +273,6 @@ def run(args: argparse.Namespace) -> dict[str, object]:
             'Ask the user to confirm the new cost before generating.'
         )
 
-    api_key = load_plus_api_key(args.settings.expanduser())
     image_url = generate_image(payload, api_key)
     result: dict[str, object] = {
         'credits': credits,

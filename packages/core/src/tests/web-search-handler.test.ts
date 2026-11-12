@@ -60,82 +60,90 @@ test(
   }
 );
 
-test("WebSearch uses the default API when no script is configured", async () => {
-  const workspace = createTempWorkspace();
-  const starts: Array<{ id: string | number; command: string }> = [];
-  const exits: Array<string | number> = [];
-  const fetchCalls: Array<{ input: string | URL; init?: RequestInit }> = [];
+for (const baseURL of ["https://example.com/v1", "https://api.deepseek.com"]) {
+  for (const [key, host] of [
+    [undefined, "https://deepcode.vegamo.cn"],
+    ["sk-aaaaaaaaaaaaaaaaaaaaaaaa", "https://deepcode.vegamo.cn"],
+    ["sk-bbbbbbbbbbbbbbbbbbbbbbbbbb", "https://www.deepcodeplus.com"],
+  ] as const) {
+    test(`WebSearch uses the default API when no script is configured (${baseURL}, ${key?.length ?? "absent"})`, async () => {
+      const workspace = createTempWorkspace();
+      const starts: Array<{ id: string | number; command: string }> = [];
+      const exits: Array<string | number> = [];
+      const fetchCalls: Array<{ input: string | URL; init?: RequestInit }> = [];
 
-  const fakeClient = {
-    chat: {
-      completions: {
-        create: async ({ messages }: { messages: Array<{ content: string }> }) => {
-          const prompt = messages[0]?.content ?? "";
-          if (prompt.includes("Return strict JSON:")) {
-            return {
-              choices: [
-                {
-                  message: {
-                    content:
-                      '{"dominant_language":"en","reason":"Most Node.js release notes are published in English."}',
-                  },
-                },
-              ],
-            };
-          }
-          throw new Error(`Unexpected chat prompt: ${prompt}`);
-        },
-      },
-    },
-  } as unknown as OpenAI;
-
-  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
-    fetchCalls.push({ input, init });
-    return {
-      ok: true,
-      json: async () => ({
-        success: true,
-        result: JSON.stringify(
-          {
-            organic_results: [
-              {
-                title: "Node.js Releases",
-                link: "https://nodejs.org/en/about/previous-releases",
-              },
-            ],
+      const fakeClient = {
+        chat: {
+          completions: {
+            create: async ({ messages }: { messages: Array<{ content: string }> }) => {
+              const prompt = messages[0]?.content ?? "";
+              if (prompt.includes("Return strict JSON:")) {
+                return {
+                  choices: [
+                    {
+                      message: {
+                        content:
+                          '{"dominant_language":"en","reason":"Most Node.js release notes are published in English."}',
+                      },
+                    },
+                  ],
+                };
+              }
+              throw new Error(`Unexpected chat prompt: ${prompt}`);
+            },
           },
-          null,
-          2
-        ),
-      }),
-    } as Response;
-  }) as typeof fetch;
+        },
+      } as unknown as OpenAI;
 
-  const result = await handleWebSearchTool(
-    { query: "latest node release" },
-    createContext(workspace, {
-      baseURL: "https://example.com/v1",
-      client: fakeClient,
-      machineId: "machine-id-123",
-      plusApiKey: "sk-plus-test",
-      onProcessStart: (id, command) => starts.push({ id, command }),
-      onProcessExit: (id) => exits.push(id),
-    })
-  );
+      globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+        fetchCalls.push({ input, init });
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            result: JSON.stringify(
+              {
+                organic_results: [
+                  {
+                    title: "Node.js Releases",
+                    link: "https://nodejs.org/en/about/previous-releases",
+                  },
+                ],
+              },
+              null,
+              2
+            ),
+          }),
+        } as Response;
+      }) as typeof fetch;
 
-  assert.equal(result.ok, true);
-  assert.match(result.output ?? "", /Node\.js Releases/);
-  assert.equal(result.metadata?.resolvedQuery, "latest node release");
-  assert.equal(starts.length, 1);
-  assert.equal(starts[0].id, exits[0]);
-  assert.equal(starts[0].command, "WebSearch: latest node release");
-  assert.equal(fetchCalls.length, 1);
-  assert.equal(String(fetchCalls[0].input), "https://deepcode.vegamo.cn/api/plugin/web-search");
-  assert.equal(fetchCalls[0].init?.method, "POST");
-  assert.deepEqual(JSON.parse(String(fetchCalls[0].init?.body)), { query: "latest node release" });
-  assert.equal((fetchCalls[0].init?.headers as Record<string, string>).Token, "machine-id-123");
-  assert.equal((fetchCalls[0].init?.headers as Record<string, string>)["PLUS-API-KEY"], "sk-plus-test");
-});
+      const result = await handleWebSearchTool(
+        { query: "latest node release" },
+        createContext(workspace, {
+          baseURL,
+          client: fakeClient,
+          machineId: "machine-id-123",
+          plusApiKey: key,
+          onProcessStart: (id, command) => starts.push({ id, command }),
+          onProcessExit: (id) => exits.push(id),
+        })
+      );
+
+      assert.equal(result.ok, true);
+      assert.match(result.output ?? "", /Node\.js Releases/);
+      assert.equal(result.metadata?.resolvedQuery, "latest node release");
+      assert.equal(starts.length, 1);
+      assert.equal(starts[0].id, exits[0]);
+      assert.equal(starts[0].command, "WebSearch: latest node release");
+      assert.equal(fetchCalls.length, 1);
+      assert.equal(String(fetchCalls[0].input), `${host}/api/plugin/web-search`);
+      assert.equal(fetchCalls[0].init?.method, "POST");
+      assert.deepEqual(JSON.parse(String(fetchCalls[0].init?.body)), { query: "latest node release" });
+      assert.equal((fetchCalls[0].init?.headers as Record<string, string>).Token, "machine-id-123");
+      assert.equal((fetchCalls[0].init?.headers as Record<string, string>)["PLUS-API-KEY"], key);
+    });
+  }
+}
 
 test("WebSearch reports and records a default API rate limit error", async () => {
   const workspace = createTempWorkspace();
@@ -217,16 +225,19 @@ test("WebSearch matches rate limit errors case-sensitively", async () => {
   assert.deepEqual(rateLimitedTools, []);
 });
 
-test("WebSearch accepts a completed DeepSeek response with partial web search failures", async () => {
+test("WebSearch translates the query before using the default API with the DeepSeek base URL", async () => {
   const workspace = createTempWorkspace();
   const starts: Array<{ id: string | number; command: string }> = [];
   const exits: Array<string | number> = [];
-  const responseRequests: Array<Record<string, unknown>> = [];
+  const searchQueries: unknown[] = [];
+  const llmRequests: Array<Record<string, unknown>> = [];
 
   const fakeClient = {
     chat: {
       completions: {
-        create: async ({ messages }: { messages: Array<{ content: string }> }) => {
+        create: async (request: { messages: Array<{ content: string }> }) => {
+          llmRequests.push(request);
+          const { messages } = request;
           const prompt = messages[0]?.content ?? "";
           if (prompt.includes("Return strict JSON:")) {
             return {
@@ -247,26 +258,21 @@ test("WebSearch accepts a completed DeepSeek response with partial web search fa
         },
       },
     },
-    responses: {
-      create: async (request: Record<string, unknown>) => {
-        responseRequests.push(request);
-        return {
-          status: "completed",
-          output: [
-            { type: "web_search_call", status: "completed" },
-            { type: "web_search_call", status: "failed" },
-          ],
-          output_text: "Node.js 24 is the latest release.",
-        };
-      },
-    },
   } as unknown as OpenAI;
+
+  globalThis.fetch = (async (_input: string | URL, init?: RequestInit) => {
+    searchQueries.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ success: true, result: "Node.js 24 is the latest release." }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
 
   const result = await handleWebSearchTool(
     { query: "Node.js 最新版本" },
     createContext(workspace, {
       client: fakeClient,
       model: "configured-model",
+      machineId: "machine-id-123",
       baseURL: "https://api.deepseek.com",
       onProcessStart: (id, command) => starts.push({ id, command }),
       onProcessExit: (id) => exits.push(id),
@@ -278,121 +284,15 @@ test("WebSearch accepts a completed DeepSeek response with partial web search fa
   assert.equal(result.metadata?.originalQuery, "Node.js 最新版本");
   assert.equal(result.metadata?.resolvedQuery, "latest Node.js release");
   assert.equal(result.metadata?.translated, true);
-  assert.deepEqual(responseRequests, [
-    {
-      model: "deepseek-v4-flash",
-      input: "latest Node.js release",
-      tools: [{ type: "web_search" }],
-      tool_choice: "required",
-    },
-  ]);
+  assert.equal(llmRequests.length, 2);
+  for (const request of llmRequests) {
+    assert.deepEqual(request.thinking, { type: "disabled" });
+    assert.ok(!("reasoning_effort" in request));
+  }
+  assert.deepEqual(searchQueries, [{ query: "latest Node.js release" }]);
   assert.equal(starts.length, 1);
   assert.equal(starts[0].command, "WebSearch: latest Node.js release");
   assert.deepEqual(exits, [starts[0].id]);
-});
-
-test("WebSearch treats an incomplete empty DeepSeek response as a successful empty result", async () => {
-  const workspace = createTempWorkspace();
-  const fakeClient = {
-    chat: {
-      completions: {
-        create: async () => ({
-          choices: [
-            {
-              message: {
-                content: '{"dominant_language":"en","reason":"English sources are more useful."}',
-              },
-            },
-          ],
-        }),
-      },
-    },
-    responses: {
-      create: async () => ({
-        status: "incomplete",
-        output: [],
-        output_text: "  ",
-      }),
-    },
-  } as unknown as OpenAI;
-
-  const result = await handleWebSearchTool(
-    { query: "latest node release" },
-    createContext(workspace, {
-      client: fakeClient,
-      baseURL: "https://api.deepseek.com",
-    })
-  );
-
-  assert.equal(result.ok, true);
-  assert.equal(result.output, "No web search results were returned.");
-});
-
-test("WebSearch rejects DeepSeek request and provider failures", async () => {
-  const responseCases = [
-    {
-      response: null,
-      requestError: new Error("network unavailable"),
-      error: "WebSearch default mode failed: network unavailable",
-    },
-    {
-      response: null,
-      requestError: new Error("429 rate limit exceeded"),
-      error: "WebSearch default mode failed: 429 rate limit exceeded",
-    },
-    {
-      response: {
-        status: "failed",
-        output: [{ type: "web_search_call", status: "completed" }],
-        output_text: "A failed response.",
-      },
-      error: "WebSearch default mode failed: DeepSeek Responses API returned status failed.",
-    },
-  ];
-
-  for (const responseCase of responseCases) {
-    const workspace = createTempWorkspace();
-    const starts: Array<{ id: string | number; command: string }> = [];
-    const exits: Array<string | number> = [];
-    const fakeClient = {
-      chat: {
-        completions: {
-          create: async () => ({
-            choices: [
-              {
-                message: {
-                  content: '{"dominant_language":"en","reason":"English sources are more useful."}',
-                },
-              },
-            ],
-          }),
-        },
-      },
-      responses: {
-        create: async () => {
-          if (responseCase.requestError) {
-            throw responseCase.requestError;
-          }
-          return responseCase.response;
-        },
-      },
-    } as unknown as OpenAI;
-
-    const result = await handleWebSearchTool(
-      { query: "latest node release" },
-      createContext(workspace, {
-        client: fakeClient,
-        baseURL: "https://api.deepseek.com",
-        onProcessStart: (id, command) => starts.push({ id, command }),
-        onProcessExit: (id) => exits.push(id),
-      })
-    );
-
-    assert.equal(result.ok, false);
-    assert.equal(result.error, responseCase.error);
-    assert.equal(starts.length, 1);
-    assert.deepEqual(exits, [starts[0].id]);
-  }
 });
 
 test("WebSearch returns a configuration error when neither a script nor an LLM client is available", async () => {
@@ -436,7 +336,7 @@ function createContext(
       client: options.client ?? null,
       model: options.model ?? "test-model",
       baseURL: options.baseURL,
-      thinkingEnabled: false,
+      thinkingEnabled: true,
       webSearchTool: options.webSearchTool,
       env: options.env,
       machineId: options.machineId,

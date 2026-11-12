@@ -6,7 +6,7 @@ const os = require("os");
 const path = require("path");
 
 function usage() {
-  return "Usage: node scripts/find-skill.js <skill-name-or-path> [project-root]";
+  return "Usage: node scripts/find-skill.cjs <skill-name-or-path> [project-root]";
 }
 
 function loadMatter() {

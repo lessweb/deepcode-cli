@@ -35,7 +35,7 @@ npm install -g @vegamo/deepcode-cli
 ```json
 {
   "env": {
-    "MODEL": "deepseek-v4-pro",
+    "MODEL": "deepseek-flash",
     "BASE_URL": "https://api.deepseek.com",
     "API_KEY": "sk-..."
   },
@@ -76,7 +76,11 @@ Skills 会按以下优先级扫描：
 | `/resume`   | 选择历史对话继续                         |
 | `/fork`     | 从当前对话创建独立的新会话                    |
 | `/continue` | 继续当前对话，或选择历史对话恢复                 |
+| `/compact`  | 手动压缩当前对话上下文                       |
+| `/copy`     | 将最近一条助手回复的文本复制到剪贴板               |
 | `/model`    | 切换模型、思考模式和推理强度                   |
+| `/experimental` | 配置实验功能，如思维链摘要                  |
+| `/permissions` | 配置工具权限                          |
 | `/raw`      | 切换显示模式（Normal / Lite / Raw 滚动回溯） |
 | `/init`     | 初始化 AGENTS.md 文件                 |
 | `/skills`   | 列出可用 skills                      |
@@ -88,13 +92,15 @@ Skills 会按以下优先级扫描：
 |---------------|--------------------|
 | `Enter`       | 发送消息               |
 | `Shift+Enter` | 插入换行（也可用 `Ctrl+J`） |
-| `Ctrl+V`      | 从剪贴板粘贴图片           |
+| `Ctrl+V`      | 从剪贴板粘贴图片（Windows系统是`Alt+V`）           |
+| `Ctrl+Y`      | 将输入框中的文本复制到剪贴板 |
+| `Ctrl+R`      | 搜索当前及历史会话中的用户输入    |
 | `Esc`         | 中断当前模型回复           |
 | 连续 `Ctrl+D`   | 退出                 |
 
 ## 支持的模型
 
-- `deepseek-flash`（推荐使用）
+- `deepseek-flash`（即 V4.1 Flash，推荐使用）
 - `deepseek-v4-pro`
 - `deepseek-v4-flash`
 - `deepseek-v4-flash-vision-exp`
@@ -116,19 +122,15 @@ Deep Code 的收益来自于工具约束、上下文管理、Agent Skills 和权
 
 ### Deep Code 是否支持理解图片？
 
-支持。`deepseek-flash` 模型支持直接读取本地图片或使用`ctrl+v`从剪贴板粘贴图片，让模型直接看到图片内容。
+支持。`deepseek-flash` 模型支持直接读取本地图片或使用`ctrl+v`（Windows系统是`alt+v`）从剪贴板粘贴图片，让模型直接看到图片内容。
 
 `deepseek-v4-pro`、`deepseek-v4-flash` 等非多模态模型仍会使用 `UnderstandImage` 识图工具。Deep Code 会自动判断模型能力，也可通过 `multimodal` 配置项手动覆盖。
 
 默认情况下，图片会以 base64 内联发送给模型。启用 `filesApiEnabled` 后，Deep Code 会使用 DeepSeek Files API 上传图片并在请求中复用 `file_id`。详见 [docs/configuration.md](docs/configuration.md#deepseek-files-api)。
 
-### 怎样在任务完成后自动给 Slack 发消息？
-
-编写一个调用 Slack webhook 的 Shell 通知脚本，然后在 `~/.deepcode/settings.json` 中将 `notify` 字段设为该脚本的完整路径即可。详细步骤请参考 [docs/notify.md](docs/notify.md)。
-
 ### 怎样启用联网搜索功能？
 
-Deep Code 已支持 [DeepSeek Responses API](https://api-docs.deepseek.com/zh-cn/guides/responses_api/#tools) 的原生联网搜索能力。如果你希望使用自定义脚本进行联网搜索，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径即可。详细步骤可参考：https://github.com/qorzj/web_search_cli
+Deep Code 已支持 [DeepSeek 官方网页搜索](https://api-docs.deepseek.com/zh-cn/guides/search)，在 `~/.deepcode/settings.json` 中将 `deepseekSearchApiEnabled` 设为 `true` 即可启用。如果你希望使用自定义脚本进行联网搜索，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径即可。详细步骤可参考：https://github.com/qorzj/web_search_cli
 
 ### 如何配置 MCP？
 
@@ -138,7 +140,7 @@ Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览�
 
 ### 如何配置 Deep Code 任务完成后发送通知？
 
-当 AI 助手完成一轮任务后，Deep Code 可以自动执行一个通知脚本，将任务结果发送到你指定的渠道（如 Slack、系统通知等）。
+在 `~/.deepcode/settings.json` 中，将 `notify` 字段设为可执行通知脚本的完整路径。AI 助手完成一轮任务后，Deep Code 会自动执行该脚本，向 Slack 等渠道发送消息或弹出系统通知。
 
 详细配置指南：[docs/notify.md](docs/notify.md)
 
@@ -148,18 +150,21 @@ Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览�
 
 ### 是否支持 Coding Plan？
 
-支持。只要把 `~/.deepcode/settings.json` 的 `env.BASE_URL` 配置为 OpenAI 兼容的接口地址就行。以火山方舟的 Coding Plan 为例：
+支持。只要把 `~/.deepcode/settings.json` 的 `env.BASE_URL` 配置为 OpenAI 兼容的接口地址就行。
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+如果使用 [DeepCode Plus 订阅套餐](https://deepcode.vegamo.cn/plus/plan)，可直接运行`deepcode --plus`，在提示后粘贴你的 API Key 并回车，CLI 会自动写入配置，无需手动编辑文件：
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-···（粘贴后回车）
 ```
+
+## DeepCode Plus
+
+DeepCode Plus 旨在提供一站式的 AI 编程与创作体验。它提供 DeepSeek 模型订阅套餐，并支持图片理解、联网搜索、图片生成和视频生成等增强功能。它完全可选，使用 Deep Code 并不需要订阅 Plus。
+
+ - 中文版: https://deepcode.vegamo.cn
+ - 国际版: https://www.deepcodeplus.com
 
 ## 贡献
 

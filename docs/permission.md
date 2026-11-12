@@ -7,8 +7,11 @@ Deep Code 内置了一套细粒度的权限控制机制，在 AI 助手执行工
 每次 AI 助手调用工具时，系统会自动分析该操作涉及的**权限范围（Permission Scope）**，然后根据 `settings.json` 中的权限配置做出决策。对于需要用户确认的操作，会在终端中弹出交互式选择界面，用户可以选择：
 
 - **Yes** — 仅本次放行
-- **Yes, and always allow** — 本次放行，并将该权限范围写入项目配置文件，后续同类操作不再询问
+- **Yes, during this session** — 当前会话本次运行期间，同一类操作不再询问，也不写入权限配置
+- **Yes, and always allow** — 本次放行，并将该权限范围写入项目配置文件，后续同类操作不再询问；Plan Mode 下不提供此选项
 - **No** — 拒绝本次操作
+
+`unknown` 范围只提供 **Yes** 和 **No**。已配置为拒绝的操作仍会保持拒绝。
 
 ## 权限范围
 
@@ -33,7 +36,15 @@ Deep Code 定义了以下 12 种权限范围，覆盖了工具调用的各类风
 
 ## 权限配置
 
-在 `~/.deepcode/settings.json`（用户级）或 `.deepcode/settings.json`（项目级）中通过 `permissions` 字段配置：
+在 `~/.deepcode/settings.json`（用户级）或 `.deepcode/settings.json`（项目级）中通过 `permissions` 字段配置。
+
+也可以在交互界面输入 `/permissions` 打开权限编辑器。如果当前项目已有项目级配置，就修改项目级配置；否则修改用户级配置。编辑器支持：
+
+- 将默认模式设为 `allowAll` 或 `askAll`，选择后返回主菜单。
+- 将各权限范围设为自动允许、拒绝、询问，或跟随默认配置。
+- 预览当前项目的实际生效配置。所有修改统一通过主菜单的 **Save** 保存；在子菜单按 `Esc` 返回上一页并保留修改，在主菜单按 `Esc` 关闭编辑器并放弃尚未保存的修改。
+
+手动配置时，使用 `permissions` 字段：
 
 ```json
 {
@@ -98,12 +109,8 @@ Deep Code 定义了以下 12 种权限范围，覆盖了工具调用的各类风
 - 其他操作都需要用户确认。
 
 
-## 持久化机制
+## 授权有效期
 
-当用户在权限提示中选择 "Yes, and always allow" 后，对应的权限范围会被写入当前项目的 `.deepcode/settings.json` 文件中：
+选择 **Yes, and always allow** 会把对应权限范围保存到当前项目的 `.deepcode/settings.json`，之后的新会话和重新启动都会沿用该选择，不再询问同类操作。
 
-- 新增范围会追加到 `permissions.allow` 列表
-- 如果该范围之前存在于 `deny` 或 `ask` 中，会被自动移除
-- 不会重复写入已存在的范围
-
-这样后续同类操作就不再询问。
+选择 **Yes, during this session** 只对当前会话的本次运行有效，不写入权限配置。暂时切换到其他会话再切回来时仍然有效；新会话、fork 会话和重新启动后恢复的会话都需要重新授权。

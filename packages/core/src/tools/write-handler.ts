@@ -2,15 +2,23 @@ import * as fs from "fs";
 import { z } from "zod";
 import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
 import {
-  buildDiffPreview,
+  buildFileDiff,
   ensureParentDirectory,
   hasFileChangedSinceState,
   normalizeContent,
+  newFileLineEnding,
   readTextFileWithMetadata,
   writeTextFile,
 } from "../common/file-utils";
 import { executeValidatedTool } from "../common/validate";
-import { getFileState, isAbsoluteFilePath, isFullFileView, normalizeFilePath, recordFileState } from "../common/state";
+import {
+  createFullFileSnippet,
+  getFileState,
+  isAbsoluteFilePath,
+  isFullFileView,
+  normalizeFilePath,
+  recordFileState,
+} from "../common/state";
 
 const writeSchema = z.strictObject({
   file_path: z.string().min(1, "file_path is required."),
@@ -96,8 +104,8 @@ export async function handleWriteTool(
 
         const existingMetadata = existingFile ? readTextFileWithMetadata(filePath) : null;
         const encoding = existingMetadata?.encoding ?? "utf8";
-        const lineEndings = existingMetadata?.lineEndings ?? (input.content.includes("\r\n") ? "CRLF" : "LF");
-        const diffPreview = buildDiffPreview(filePath, existingMetadata?.content ?? null, normalizedContent);
+        const lineEndings = existingMetadata?.lineEndings ?? newFileLineEnding(filePath);
+        const diff = buildFileDiff(filePath, existingMetadata?.content ?? null, normalizedContent);
         context.signal?.throwIfAborted();
         context.onBeforeFileMutation?.(filePath);
         context.signal?.throwIfAborted();
@@ -116,6 +124,13 @@ export async function handleWriteTool(
           },
           { incrementVersion: true }
         );
+        const snippet = createFullFileSnippet(
+          context.sessionId,
+          filePath,
+          1,
+          freshMetadata.content.split("\n").length,
+          freshMetadata.content
+        );
 
         return {
           ok: true,
@@ -128,7 +143,16 @@ export async function handleWriteTool(
             encoding: freshMetadata.encoding,
             line_endings: freshMetadata.lineEndings,
             cache_refreshed: true,
-            diff_preview: diffPreview,
+            ...(snippet && {
+              snippet: {
+                id: snippet.id,
+                filePath: snippet.filePath,
+                startLine: snippet.startLine,
+                endLine: snippet.endLine,
+              },
+            }),
+            diff_preview: diff.preview,
+            diff_details: diff.details,
             ...repairMetadata,
           },
         };

@@ -34,7 +34,6 @@ export {
   toggleSkillSelection,
   removeCurrentSlashToken,
   isClearImageAttachmentsShortcut,
-  isRawModeShortcut,
   getPromptReturnKeyAction,
   renderBufferWithCursor,
   buildInitPromptSubmission,
@@ -85,8 +84,10 @@ export {
   findExactSlashCommand,
   formatSlashCommandDescription,
   formatSlashCommandLabel,
+  resolveSlashSubmission,
   type SlashCommandKind,
   type SlashCommandItem,
+  type SlashSubmission,
 } from "./core/slash-commands";
 export {
   filterFileMentionItems,
@@ -99,3 +100,5 @@ export {
 } from "./core/file-mentions";
 export { findExpandedThinkingId, isCollapsedThinking } from "./core/thinking-state";
 export { buildExitSummaryText, buildPluginRateLimitHintText, buildResumeHintText } from "./exit-summary";
+
+export { isHistorySearchShortcut } from "./hooks/useHistorySearch";

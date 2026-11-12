@@ -3,7 +3,15 @@ import * as os from "os";
 import * as path from "path";
 import OpenAI from "openai";
 import { Agent, fetch as undiciFetch } from "undici";
-import { readDeepcodePlusApiKey, resolveCurrentSettings, type ReasoningEffort } from "../settings";
+import { resolveCurrentSettings, type ReasoningEffort } from "../settings";
+import {
+  resolveEffectivePlusSettings,
+  resolveOpenAIConnection,
+  withPlusSubscription,
+  type OpenAIConnectionContext,
+} from "./plus-subscription";
+import type { CreateOpenAIClient } from "./tool-types";
+export { resolveOpenAIConnection, DEEPCODE_PLUS_BASE_URL } from "./plus-subscription";
 
 // Custom undici Agent with a 180-second keepAlive timeout.  The default
 // global fetch (undici) only keeps connections alive for 4 seconds, which
@@ -19,22 +27,21 @@ const keepAliveAgent = new Agent({ keepAliveTimeout: 180_000 });
 let cachedOpenAI: OpenAI | null = null;
 let cachedOpenAIKey = "";
 
-export const DEEPCODE_PLUS_BASE_URL = "https://deepcode.vegamo.cn/plugin/openai";
-
-export function resolveOpenAIConnection(
-  settings: { apiKey?: string; baseURL: string },
-  plusApiKey?: string
-): { apiKey?: string; baseURL: string } {
-  if (settings.apiKey) {
-    return { apiKey: settings.apiKey, baseURL: settings.baseURL };
-  }
-  if (plusApiKey) {
-    return { apiKey: plusApiKey, baseURL: DEEPCODE_PLUS_BASE_URL };
-  }
-  return { apiKey: undefined, baseURL: settings.baseURL };
+export function createOpenAIClientFactory(
+  projectRoot: string = process.cwd(),
+  settingsFile?: string
+): CreateOpenAIClient {
+  return withPlusSubscription(
+    () => resolveCurrentSettings(projectRoot, settingsFile),
+    (context) => createOpenAIClient(projectRoot, context, settingsFile)
+  );
 }
 
-export function createOpenAIClient(projectRoot: string = process.cwd()): {
+export function createOpenAIClient(
+  projectRoot: string = process.cwd(),
+  context?: OpenAIConnectionContext,
+  settingsFile?: string
+): {
   client: OpenAI | null;
   apiKey?: string;
   model: string;
@@ -46,13 +53,18 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
   telemetryEnabled: boolean;
   notify?: string;
   webSearchTool?: string;
+  deepseekSearchApiEnabled?: boolean;
   env: Record<string, string>;
   machineId?: string;
   plusApiKey?: string;
+  usingPlus: boolean;
+  configurationError?: string;
 } {
-  const settings = resolveCurrentSettings(projectRoot);
-  const plusApiKey = readDeepcodePlusApiKey();
-  const connection = resolveOpenAIConnection(settings, plusApiKey);
+  const settings = resolveCurrentSettings(projectRoot, settingsFile);
+  const plusSettings = context ? undefined : resolveEffectivePlusSettings(settings);
+  const plusApiKey = context ? context.plusApiKey : plusSettings?.apiKey;
+  const connection =
+    context?.connection ?? resolveOpenAIConnection(settings, plusApiKey, plusSettings?.subscriptionPlan);
   if (!connection.apiKey) {
     return {
       client: null,
@@ -66,9 +78,12 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
       telemetryEnabled: settings.telemetryEnabled,
       notify: settings.notify,
       webSearchTool: settings.webSearchTool,
+      deepseekSearchApiEnabled: settings.deepseekSearchApiEnabled,
       env: settings.env,
       machineId: getMachineId(),
       plusApiKey,
+      usingPlus: connection.usingPlus,
+      configurationError: connection.configurationError,
     };
   }
 
@@ -86,9 +101,12 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
       telemetryEnabled: settings.telemetryEnabled,
       notify: settings.notify,
       webSearchTool: settings.webSearchTool,
+      deepseekSearchApiEnabled: settings.deepseekSearchApiEnabled,
       env: settings.env,
       machineId: getMachineId(),
       plusApiKey,
+      usingPlus: connection.usingPlus,
+      configurationError: connection.configurationError,
     };
   }
 
@@ -125,9 +143,12 @@ export function createOpenAIClient(projectRoot: string = process.cwd()): {
     telemetryEnabled: settings.telemetryEnabled,
     notify: settings.notify,
     webSearchTool: settings.webSearchTool,
+    deepseekSearchApiEnabled: settings.deepseekSearchApiEnabled,
     env: settings.env,
     machineId: getMachineId(),
     plusApiKey,
+    usingPlus: connection.usingPlus,
+    configurationError: connection.configurationError,
   };
 }
 

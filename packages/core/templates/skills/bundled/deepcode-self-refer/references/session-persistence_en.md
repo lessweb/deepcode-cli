@@ -32,7 +32,7 @@ The project storage directory contains these main files and directories:
 - Latest tool-call data, token usage, and active token count.
 - Metadata for subprocesses still tracked by the session.
 
-The default session title comes from the first 100 characters of the first user prompt. Renaming a session from the session list updates the title in the index.
+After the first message, Deep Code generates a session title in the background. While generation is pending or if it fails, the first 100 characters of the initial prompt remain as the title. A forked session receives a new title based on recent conversation after its first new message. You can also rename a session from the session list. The terminal tab displays the current session title.
 
 ### Message Files
 
@@ -109,7 +109,7 @@ These states are persisted in `sessions-index.json`, so they remain visible in t
 
 ## How `/undo` Uses Persistent Data
 
-`/undo` candidates come from visible, non-compacted user messages. Each candidate is checked for an associated `checkpointHash`, and Deep Code verifies whether the checkpoint can be restored.
+`/undo` candidates come from visible user messages whose original records are still stored. Each candidate is checked for an associated `checkpointHash`, and Deep Code verifies whether the checkpoint can be restored.
 
 Depending on the selected mode, Deep Code can perform these operations:
 

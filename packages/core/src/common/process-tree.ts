@@ -3,7 +3,7 @@ import { spawnSync } from "child_process";
 type TaskkillSpawnSync = (
   command: string,
   args: string[],
-  options: { stdio: "ignore"; windowsHide: true }
+  options: { stdio: "ignore"; windowsHide: true; timeout: number; killSignal: "SIGKILL" }
 ) => { status: number | null; error?: Error };
 
 export type KillProcessTreeDeps = {
@@ -43,6 +43,8 @@ export function runWindowsTaskkill(pid: number, spawnSyncImpl: TaskkillSpawnSync
   const result = spawnSyncImpl("taskkill", ["/PID", String(pid), "/T", "/F"], {
     stdio: "ignore",
     windowsHide: true,
+    timeout: 1_000,
+    killSignal: "SIGKILL",
   });
   return !result.error && result.status === 0;
 }

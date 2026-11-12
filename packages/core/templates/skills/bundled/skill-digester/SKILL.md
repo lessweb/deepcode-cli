@@ -28,10 +28,10 @@ First classify the request:
    - Locate the skill by running the bundled Node script from this skill directory:
 
      ```bash
-     node ~/.deepcode/skills/skill-digester/scripts/find-skill.js "<skill-name-or-path>" "<project-root>"
+     node ~/.deepcode/skills/skill-digester/scripts/find-skill.cjs "<skill-name-or-path>" "<project-root>"
      ```
 
-     If this skill is loaded from a project-level or different user-level path, use the `scripts/find-skill.js` file next to this `SKILL.md` instead.
+     If this skill is loaded from a project-level or different user-level path, use the `scripts/find-skill.cjs` file next to this `SKILL.md` instead.
 
    - The script searches the same roots Deep Code CLI scans, in priority order:
      1. Project native skills: `./.deepcode/skills/<folder>/SKILL.md`
@@ -103,7 +103,7 @@ Use this workflow when the user asks to install an Agent Skill. Installation alw
      - `./...` relative to the current project root.
      - Absolute paths as written.
      - A `SKILL.md` path means its parent directory is the source skill directory.
-   - If the user provided a skill name instead of a path, locate it with `scripts/find-skill.js` using the same command and match rules as the digest workflow.
+   - If the user provided a skill name instead of a path, locate it with `scripts/find-skill.cjs` using the same command and match rules as the digest workflow.
    - If the user did not provide a skill name or path, use `AskUserQuestion` to ask for the source skill name or path.
    - The source directory must contain `SKILL.md`. If it does not, report that the path is not an Agent Skill and ask for another source only if the user still wants to install.
 

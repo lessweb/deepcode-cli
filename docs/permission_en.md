@@ -7,8 +7,11 @@ Deep Code includes a fine-grained permission control mechanism. Before the AI as
 Each time the AI assistant invokes a tool, the system automatically analyzes the **permission scopes** involved and makes a decision based on the permission configuration in `settings.json`. For operations requiring user confirmation, an interactive prompt appears in the terminal with the following choices:
 
 - **Yes** — Allow this one time only
-- **Yes, and always allow** — Allow this time and persistently save the scope to the project configuration so future calls skip the prompt
+- **Yes, during this session** — Do not ask again for the same kind of operation during this run of the current session, without writing to permission configuration
+- **Yes, and always allow** — Allow this time and save the scope to the project configuration so future calls skip the prompt; this option is unavailable in Plan Mode
 - **No** — Deny this operation
+
+The `unknown` scope offers only **Yes** and **No**. Operations configured as denied remain denied.
 
 ## Permission Scopes
 
@@ -33,7 +36,15 @@ There is also a special `unknown` scope used when the LLM cannot classify a comm
 
 ## Permission Configuration
 
-Configure permissions in `~/.deepcode/settings.json` (user-level) or `.deepcode/settings.json` (project-level) via the `permissions` field:
+Configure permissions in `~/.deepcode/settings.json` (user-level) or `.deepcode/settings.json` (project-level) via the `permissions` field.
+
+You can also enter `/permissions` in the interactive UI to open the permission editor. If the current project already has project-level configuration, the editor changes that configuration; otherwise, it changes user-level configuration. The editor supports:
+
+- Setting the default mode to `allowAll` or `askAll`, then returning to the home menu.
+- Setting each permission scope to allow, deny, ask, or follow the default configuration.
+- Previewing the configuration that actually applies to the current project. All changes are saved together by selecting **Save** on the home menu. Pressing `Esc` in a submenu returns to the previous page and keeps your changes; pressing `Esc` on the home menu closes the editor and discards unsaved changes.
+
+For manual configuration, use the `permissions` field:
 
 ```json
 {
@@ -97,12 +108,8 @@ With this configuration:
 - Reading/writing inside the workspace and querying Git history → auto-allowed
 - All other operations → require user confirmation
 
-## Persistence
+## Authorization Duration
 
-When you select "Yes, and always allow" in a permission prompt, the corresponding scope is written to the project's `.deepcode/settings.json`:
+Selecting **Yes, and always allow** saves the scope to the current project's `.deepcode/settings.json`. New sessions and future restarts keep using that choice and do not prompt again for the same kind of operation.
 
-- The scope is appended to the `permissions.allow` list
-- If the scope was previously in `deny` or `ask`, it is automatically removed
-- Duplicate scopes are not written again
-
-This means subsequent calls involving the same scope will no longer prompt for confirmation.
+Selecting **Yes, during this session** applies only to this run of the current session and is not written to permission configuration. It remains available if you switch away and back to the session. New sessions, forked sessions, and sessions restored after a restart require authorization again.

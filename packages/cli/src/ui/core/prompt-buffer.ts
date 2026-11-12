@@ -1,3 +1,5 @@
+import { getSlashToken } from "@vegamo/deepcode-core/common/slash-commands";
+
 export type PromptBufferState = {
   text: string;
   cursor: number;
@@ -154,11 +156,7 @@ export function isEmpty(state: PromptBufferState): boolean {
 }
 
 export function getCurrentSlashToken(state: PromptBufferState): string | null {
-  const text = state.text;
-  if (text.length === 0 || !text.startsWith("/")) {
-    return null;
-  }
-  return text;
+  return getSlashToken(state.text);
 }
 
 /**

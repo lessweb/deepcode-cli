@@ -72,27 +72,31 @@ Skills 会按以下优先级扫描：
 
 ## 斜杠命令与按键功能
 
-| 斜杠命令    | 操作                                         |
-| ----------- | -------------------------------------------- |
-| `/`         | 打开 skills / 命令菜单                       |
-| `/new`      | 开始新对话                                   |
-| `/resume`   | 选择历史对话继续                             |
-| `/continue` | 继续当前对话，或选择历史对话恢复             |
-| `/model`    | 切换模型、思考模式和推理强度                 |
-| `/raw`      | 切换显示模式（Normal / Lite / Raw 滚动回溯） |
-| `/init`     | 初始化 AGENTS.md 文件                        |
-| `/skills`   | 列出可用 skills                              |
-| `/mcp`      | 查看 MCP 服务器状态和可用工具                |
-| `/undo`     | 将代码和/或对话恢复到之前的状态              |
-| `/exit`     | 退出（也可用连续 `Ctrl+D`）                  |
+| 斜杠命令        | 操作                                         |
+| --------------- | -------------------------------------------- |
+| `/`             | 打开 skills / 命令菜单                       |
+| `/new`          | 开始新对话                                   |
+| `/resume`       | 选择历史对话继续                             |
+| `/continue`     | 继续当前对话，或选择历史对话恢复             |
+| `/compact`      | 手动压缩当前对话上下文                       |
+| `/copy`         | 将最近一条助手回复的文本复制到剪贴板         |
+| `/model`        | 切换模型、思考模式和推理强度                 |
+| `/experimental` | 配置实验功能，如思维链摘要                   |
+| `/raw`          | 切换显示模式（Normal / Lite / Raw 滚动回溯） |
+| `/init`         | 初始化 AGENTS.md 文件                        |
+| `/skills`       | 列出可用 skills                              |
+| `/mcp`          | 查看 MCP 服务器状态和可用工具                |
+| `/undo`         | 将代码和/或对话恢复到之前的状态              |
+| `/exit`         | 退出（也可用连续 `Ctrl+D`）                  |
 
-| 按键          | 操作                        |
-| ------------- | --------------------------- |
-| `Enter`       | 发送消息                    |
-| `Shift+Enter` | 插入换行（也可用 `Ctrl+J`） |
-| `Ctrl+V`      | 从剪贴板粘贴图片            |
-| `Esc`         | 中断当前模型回复            |
-| 连续 `Ctrl+D` | 退出                        |
+| 按键          | 操作                                     |
+| ------------- | ---------------------------------------- |
+| `Enter`       | 发送消息                                 |
+| `Shift+Enter` | 插入换行（也可用 `Ctrl+J`）              |
+| `Ctrl+V`      | 从剪贴板粘贴图片（Windows系统是`Alt+V`） |
+| `Ctrl+Y`      | 将输入框中的文本复制到剪贴板             |
+| `Esc`         | 中断当前模型回复                         |
+| 连续 `Ctrl+D` | 退出                                     |
 
 ## 支持的模型
 
@@ -110,19 +114,15 @@ Skills 会按以下优先级扫描：
 
 ### Deep Code 是否支持理解图片？
 
-支持。`deepseek-flash` 和 `deepseek-v4-flash-vision-exp` 模型支持直接读取本地图片或使用`ctrl+v`从剪贴板粘贴图片，让模型直接看到图片内容。
+支持。`deepseek-flash` 和 `deepseek-v4-flash-vision-exp` 模型支持直接读取本地图片或使用`ctrl+v`（Windows系统是`alt+v`）从剪贴板粘贴图片，让模型直接看到图片内容。
 
 `deepseek-v4-pro`、`deepseek-v4-flash` 等非多模态模型仍会使用 `UnderstandImage` 识图工具。Deep Code 会自动判断模型能力，也可通过 `multimodal` 配置项手动覆盖。
 
 默认情况下，图片会以 base64 内联发送给模型。启用 `filesApiEnabled` 后，Deep Code 会使用 DeepSeek Files API 上传图片并在请求中复用 `file_id`。
 
-### 怎样在任务完成后自动给 Slack 发消息？
-
-编写一个调用 Slack webhook 的 Shell 通知脚本，然后在 `~/.deepcode/settings.json` 中将 `notify` 字段设为该脚本的完整路径即可。详细步骤请参考 [docs/notify.md](docs/notify.md)。
-
 ### 怎样启用联网搜索功能？
 
-未配置 `webSearchTool` 时，如果 `BASE_URL` 是 `https://api.deepseek.com`，Deep Code 会使用 DeepSeek Responses API 的联网搜索能力，并固定使用 `deepseek-v4-flash`；其他 API 地址仍使用 Deep Code Web Search API。如果希望使用自定义脚本，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径，自定义脚本始终优先。详细步骤可参考：https://github.com/qorzj/web_search_cli
+Deep Code 已支持 [DeepSeek 官方网页搜索](https://api-docs.deepseek.com/zh-cn/guides/search)，在 `~/.deepcode/settings.json` 中将 `deepseekSearchApiEnabled` 设为 `true` 即可启用。如果你希望使用自定义脚本进行联网搜索，可以在 `~/.deepcode/settings.json` 中将 `webSearchTool` 设为脚本的完整路径即可。详细步骤可参考：https://github.com/qorzj/web_search_cli
 
 ### 如何配置 MCP？
 
@@ -132,7 +132,7 @@ Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览�
 
 ### 如何配置 Deep Code 任务完成后发送通知？
 
-当 AI 助手完成一轮任务后，Deep Code 可以自动执行一个通知脚本，将任务结果发送到你指定的渠道（如 Slack、系统通知等）。
+在 `~/.deepcode/settings.json` 中，将 `notify` 字段设为可执行通知脚本的完整路径。AI 助手完成一轮任务后，Deep Code 会自动执行该脚本，向 Slack 等渠道发送消息或弹出系统通知。
 
 详细配置指南：[docs/notify.md](docs/notify.md)
 
@@ -142,17 +142,13 @@ Deep Code 支持 MCP（Model Context Protocol），可以连接 GitHub、浏览�
 
 ### 是否支持 Coding Plan？
 
-支持。只要把 `~/.deepcode/settings.json` 的 `env.BASE_URL` 配置为 OpenAI 兼容的接口地址就行。以火山方舟的 Coding Plan 为例：
+支持。只要把 `~/.deepcode/settings.json` 的 `env.BASE_URL` 配置为 OpenAI 兼容的接口地址就行。
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+如果使用 [DeepCode Plus 订阅套餐](https://deepcode.vegamo.cn/plus/plan)，可直接运行`deepcode --plus`，在提示后粘贴你的 API Key 并回车，CLI 会自动写入配置，无需手动编辑文件：
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-···（粘贴后回车）
 ```
 
 ## 贡献

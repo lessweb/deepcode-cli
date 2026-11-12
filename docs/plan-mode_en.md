@@ -55,7 +55,7 @@ The following actions are **not allowed**:
 
 ### Permission Restrictions
 
-Even if your `settings.json` is configured to auto-allow write, delete, or similar operations, Plan Mode **forcibly escalates these to "ask."** Specifically, the following permission scopes always require confirmation in Plan Mode:
+Even if your `settings.json` is configured to auto-allow write, delete, or similar operations, Plan Mode **forcibly escalates these to "ask."** Specifically, the following permission scopes require confirmation the first time they are used in Plan Mode:
 
 | Permission scope | Description |
 | ---------------- | ----------- |
@@ -65,7 +65,7 @@ Even if your `settings.json` is configured to auto-allow write, delete, or simil
 | `delete-out-cwd` | Delete files outside the workspace |
 | `mutate-git-log` | Modify Git history |
 
-This ensures that Plan Mode won't accidentally modify your code, even with permissive settings.
+This ensures that Plan Mode won't modify your code before you confirm, even with permissive settings.
 
 ## The Proposed Plan
 

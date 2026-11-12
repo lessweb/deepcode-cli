@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { useInput } from "ink";
 import DropdownMenu from "../DropdownMenu";
-import type { ModelConfigSelection, ReasoningEffort } from "@vegamo/deepcode-core";
+import SaveScopeSelector from "../SaveScopeSelector";
+import {
+  getDefaultSettingsTarget,
+  type ModelConfigSelection,
+  type ReasoningEffort,
+  type SettingsTarget,
+} from "@vegamo/deepcode-core";
 
 type ModelStep = "model" | "thinking";
 
@@ -37,15 +43,17 @@ function getThinkingOptionIndex(config: Pick<ModelConfigSelection, "thinkingEnab
 
 type Props = {
   open: boolean;
+  projectRoot: string;
   modelConfig: ModelConfigSelection;
   width: number;
   onClose: () => void;
-  onModelConfigChange: (selection: ModelConfigSelection) => string | Promise<string>;
+  onModelConfigChange: (selection: ModelConfigSelection, target: SettingsTarget) => string | Promise<string>;
   onStatusMessage?: (message: string | null) => void;
 };
 
 const ModelsDropdown: React.FC<Props> = ({
   open,
+  projectRoot,
   modelConfig,
   width,
   onClose,
@@ -55,18 +63,20 @@ const ModelsDropdown: React.FC<Props> = ({
   const [step, setStep] = useState<ModelStep | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
+  const [target, setTarget] = useState<SettingsTarget>("user");
 
   // Initialize state when opened
   useEffect(() => {
     if (open) {
       const currentIndex = MODEL_COMMAND_MODELS.findIndex((m) => m === modelConfig.model);
       setPendingModel(null);
+      setTarget(getDefaultSettingsTarget(projectRoot));
       setStep("model");
       setActiveIndex(currentIndex >= 0 ? currentIndex : 0);
     } else {
       setStep(null);
     }
-  }, [open, modelConfig.model]);
+  }, [open, modelConfig.model, projectRoot]);
 
   // Validate activeIndex bounds
   useEffect(() => {
@@ -95,7 +105,8 @@ const ModelsDropdown: React.FC<Props> = ({
       reasoningEffort: option.reasoningEffort ?? modelConfig.reasoningEffort,
     };
     onClose();
-    Promise.resolve(onModelConfigChange(selection))
+    Promise.resolve()
+      .then(() => onModelConfigChange(selection, target))
       .then((message) => {
         if (message) {
           onStatusMessage?.(message);
@@ -115,6 +126,10 @@ const ModelsDropdown: React.FC<Props> = ({
 
       const optionCount = step === "model" ? MODEL_COMMAND_MODELS.length : MODEL_COMMAND_THINKING_OPTIONS.length;
 
+      if (step === "thinking" && !key.ctrl && !key.meta && !key.shift && (key.leftArrow || key.rightArrow)) {
+        setTarget(key.leftArrow ? "user" : "project");
+        return;
+      }
       if (key.upArrow) {
         setActiveIndex((idx) => (idx - 1 + optionCount) % optionCount);
         return;
@@ -143,7 +158,7 @@ const ModelsDropdown: React.FC<Props> = ({
     step === "model"
       ? MODEL_COMMAND_MODELS.map((model) => ({
           key: model,
-          label: model,
+          label: model === "deepseek-flash" ? "deepseek-flash (V4.1 Flash)" : model,
           description: model === modelConfig.model ? "current model" : "",
           selected: model === (pendingModel ?? modelConfig.model),
         }))
@@ -163,6 +178,7 @@ const ModelsDropdown: React.FC<Props> = ({
       activeIndex={activeIndex}
       activeColor="#229ac3"
       maxVisible={6}
+      footer={step === "thinking" ? <SaveScopeSelector target={target} /> : undefined}
     />
   );
 };

@@ -19,6 +19,7 @@ import {
   DEFAULT_MODEL,
   applyModelConfigSelection,
   readDeepcodePlusApiKey,
+  readDeepcodePlusSettings,
   resolveSettings,
   resolveSettingsSources,
 } from "../settings";
@@ -30,10 +31,10 @@ test("readDeepcodePlusApiKey reads only a non-empty env key", () => {
   const settingsPath = path.join(tempDir, "settings.json");
 
   try {
-    fs.writeFileSync(settingsPath, JSON.stringify({ env: { PLUS_API_KEY: "  sk-plus-test  " } }));
-    assert.equal(readDeepcodePlusApiKey(settingsPath), "sk-plus-test");
+    fs.writeFileSync(settingsPath, JSON.stringify({ env: { PLUS_API_KEY: "  sk-aaaaaaaaaaaaaaaaaaaaaaaa  " } }));
+    assert.equal(readDeepcodePlusApiKey(settingsPath), "sk-aaaaaaaaaaaaaaaaaaaaaaaa");
 
-    for (const settings of [{}, { env: {} }, { env: { PLUS_API_KEY: "   " } }, { env: { PLUS_API_KEY: 123 } }]) {
+    for (const settings of [{}, { env: {} }]) {
       fs.writeFileSync(settingsPath, JSON.stringify(settings));
       assert.equal(readDeepcodePlusApiKey(settingsPath), undefined);
     }
@@ -286,9 +287,9 @@ test("resolveSettings derives model-specific context window defaults", () => {
   );
 
   assert.equal(regular.contextWindow, 256 * 1024);
-  assert.equal(regular.autoCompactWindow, 128 * 1024);
+  assert.equal(regular.autoCompactWindow, Math.floor(256 * 1024 * 0.8));
   assert.equal(deepseekV4.contextWindow, 1024 * 1024);
-  assert.equal(deepseekV4.autoCompactWindow, 512 * 1024);
+  assert.equal(deepseekV4.autoCompactWindow, Math.floor(1024 * 1024 * 0.8));
 });
 
 test("resolveSettings parses numeric and K/M context window settings", () => {
@@ -296,6 +297,7 @@ test("resolveSettings parses numeric and K/M context window settings", () => {
     {
       contextWindow: " 2m ",
       autoCompactWindow: 300_000,
+      retainTokens: 32000,
     },
     { model: "default-model", baseURL: "https://default.example.com" },
     TEST_PROCESS_ENV
@@ -313,7 +315,7 @@ test("resolveSettings derives auto compact window from the configured context wi
   );
 
   assert.equal(resolved.contextWindow, 512 * 1024);
-  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+  assert.equal(resolved.autoCompactWindow, Math.floor(512 * 1024 * 0.8));
 });
 
 test("resolveSettings ignores invalid windows and caps auto compact window at context window", () => {
@@ -329,7 +331,7 @@ test("resolveSettings ignores invalid windows and caps auto compact window at co
   );
 
   assert.equal(invalid.contextWindow, 256 * 1024);
-  assert.equal(invalid.autoCompactWindow, 128 * 1024);
+  assert.equal(invalid.autoCompactWindow, Math.floor(256 * 1024 * 0.8));
   assert.equal(capped.contextWindow, 128 * 1024);
   assert.equal(capped.autoCompactWindow, 128 * 1024);
 });
@@ -358,7 +360,7 @@ test("resolveSettingsSources skips invalid higher-priority context window values
   );
 
   assert.equal(resolved.contextWindow, 512 * 1024);
-  assert.equal(resolved.autoCompactWindow, 256 * 1024);
+  assert.equal(resolved.autoCompactWindow, Math.floor(512 * 1024 * 0.8));
 });
 
 test("resolveSettings reads TEMPERATURE, THINKING_ENABLED, REASONING_EFFORT, and DEBUG_LOG_ENABLED from env", () => {
@@ -815,22 +817,25 @@ test("buildNotifyEnv injects DURATION without context", () => {
   assert.equal(env.FAIL_REASON, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
+  assert.equal(env.SESSION_ID, undefined);
 });
 
-test("buildNotifyEnv injects STATUS, FAIL_REASON, BODY, and TITLE from context", () => {
+test("buildNotifyEnv injects STATUS, FAIL_REASON, BODY, TITLE, and SESSION_ID from context", () => {
   const context: NotifyContext = {
+    sessionId: "session-123",
     status: "failed",
     failReason: "API key not found",
     body: "Hello, this is the last assistant message.",
     title: "Fix login bug",
   };
-  const env = buildNotifyEnv(5000, { HOME: "/tmp/home" }, context);
+  const env = buildNotifyEnv(5000, { HOME: "/tmp/home", SESSION_ID: "stale-session-id" }, context);
   assert.equal(env.HOME, "/tmp/home");
   assert.equal(env.DURATION, "5");
   assert.equal(env.STATUS, "failed");
   assert.equal(env.FAIL_REASON, "API key not found");
   assert.equal(env.BODY, "Hello, this is the last assistant message.");
   assert.equal(env.TITLE, "Fix login bug");
+  assert.equal(env.SESSION_ID, "session-123");
 });
 
 test("buildNotifyEnv omits optional context fields when not provided", () => {
@@ -842,6 +847,7 @@ test("buildNotifyEnv omits optional context fields when not provided", () => {
       FAIL_REASON: "stale-failure",
       BODY: "stale-body",
       TITLE: "stale-title",
+      SESSION_ID: "stale-session-id",
     },
     { status: "completed" }
   );
@@ -849,23 +855,26 @@ test("buildNotifyEnv omits optional context fields when not provided", () => {
   assert.equal(env.FAIL_REASON, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
+  assert.equal(env.SESSION_ID, undefined);
 });
 
 test("buildNotifyEnv ignores empty strings in context", () => {
   const env = buildNotifyEnv(
     1000,
-    { HOME: "/tmp/home" },
+    { HOME: "/tmp/home", SESSION_ID: "stale-session-id" },
     {
       status: "",
       failReason: "",
       body: "",
       title: "",
+      sessionId: "",
     }
   );
   assert.equal(env.STATUS, undefined);
   assert.equal(env.FAIL_REASON, undefined);
   assert.equal(env.BODY, undefined);
   assert.equal(env.TITLE, undefined);
+  assert.equal(env.SESSION_ID, undefined);
 });
 
 test("buildNotifyEnv preserves special characters in body and title", () => {
@@ -906,6 +915,7 @@ test(
 
     const context: NotifyContext = {
       status: "completed",
+      sessionId: "session-123",
       body: "Task finished successfully.",
       title: "Fix login bug",
     };
@@ -922,6 +932,7 @@ test(
     assert.equal(calls[0]?.options.env?.FAIL_REASON, undefined);
     assert.equal(calls[0]?.options.env?.BODY, "Task finished successfully.");
     assert.equal(calls[0]?.options.env?.TITLE, "Fix login bug");
+    assert.equal(calls[0]?.options.env?.SESSION_ID, "session-123");
     assert.equal(calls[1]?.command, "/bin/sh");
     assert.deepEqual(calls[1]?.args, ["/tmp/notify.sh"]);
     assert.equal(calls[1]?.options.cwd, "/tmp/project");
@@ -929,6 +940,7 @@ test(
     assert.equal(calls[1]?.options.env?.STATUS, "completed");
     assert.equal(calls[1]?.options.env?.BODY, "Task finished successfully.");
     assert.equal(calls[1]?.options.env?.TITLE, "Fix login bug");
+    assert.equal(calls[1]?.options.env?.SESSION_ID, "session-123");
   }
 );
 
@@ -938,7 +950,7 @@ test("resolveSettings applies deepseek-flash capabilities and respects explicit 
   assert.equal(resolved.model, "deepseek-flash");
   assert.equal(resolved.thinkingEnabled, true);
   assert.equal(resolved.contextWindow, 1024 * 1024);
-  assert.equal(resolved.autoCompactWindow, 512 * 1024);
+  assert.equal(resolved.autoCompactWindow, Math.floor(1024 * 1024 * 0.8));
 
   const overridden = resolveSettings(
     { model: "deepseek-flash", thinkingEnabled: false, contextWindow: "512K", autoCompactWindow: "128K" },
@@ -948,4 +960,64 @@ test("resolveSettings applies deepseek-flash capabilities and respects explicit 
   assert.equal(overridden.thinkingEnabled, false);
   assert.equal(overridden.contextWindow, 512 * 1024);
   assert.equal(overridden.autoCompactWindow, 128 * 1024);
+});
+
+test("PLUS settings normalize subscriptionPlan and keep it separate from env", () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-plus-plan-"));
+  const settingsPath = path.join(tempDir, "settings.json");
+  try {
+    for (const value of ["default", "on", "off", "invalid", null, 1, undefined]) {
+      fs.writeFileSync(
+        settingsPath,
+        JSON.stringify({ subscriptionPlan: value, env: { PLUS_API_KEY: " sk-aaaaaaaaaaaaaaaaaaaaaaaa " } })
+      );
+      assert.deepEqual(readDeepcodePlusSettings(settingsPath), {
+        apiKey: "sk-aaaaaaaaaaaaaaaaaaaaaaaa",
+        subscriptionPlan: value === "on" || value === "off" ? value : "default",
+      });
+    }
+    for (const value of [null, [], {}, { env: { subscriptionPlan: "on" } }]) {
+      fs.writeFileSync(settingsPath, JSON.stringify(value));
+      assert.equal(readDeepcodePlusSettings(settingsPath).subscriptionPlan, "default");
+      assert.equal(readDeepcodePlusSettings(settingsPath).apiKey, undefined);
+    }
+    fs.writeFileSync(settingsPath, "invalid json");
+    assert.deepEqual(readDeepcodePlusSettings(settingsPath), { subscriptionPlan: "default" });
+    assert.deepEqual(readDeepcodePlusSettings(path.join(tempDir, "absent")), { subscriptionPlan: "default" });
+  } finally {
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("retention settings default and override as a pair across configuration sources", () => {
+  const resolve = (user: any, project: any = {}) =>
+    resolveSettingsSources(user, project, { model: "test", baseURL: "https://example.com" }, {});
+  assert.equal(resolve({}).retainRatio, 0.16);
+  assert.equal(resolve({}).retainTokens, undefined);
+  const absolute = resolve({ retainRatio: 0.2 }, { retainTokens: 0 });
+  assert.equal(absolute.retainTokens, 0);
+  assert.equal(absolute.retainRatio, undefined);
+  const ratio = resolve({ retainTokens: 1000 }, { retainRatio: 0.1 });
+  assert.equal(ratio.retainRatio, 0.1);
+  assert.equal(ratio.retainTokens, undefined);
+  assert.equal(resolve({ retainTokens: 1000 }).retainTokens, 1000);
+  assert.equal(resolve({ retainRatio: 0.2 }).retainRatio, 0.2);
+});
+
+test("retention settings reject conflicting, invalid and oversized budgets", () => {
+  const resolve = (user: any, project: any = {}) =>
+    resolveSettingsSources(user, project, { model: "test", baseURL: "https://example.com" }, {});
+  const conflict = { retainRatio: 0.16, retainTokens: 1000 };
+  assert.throws(() => resolve(conflict, { retainTokens: 2000 }), /mutually exclusive/);
+  assert.throws(() => resolve({}, conflict), /mutually exclusive/);
+  for (const retainRatio of [0, -1, 1.1, Infinity, NaN, "0.16", null])
+    assert.throws(() => resolve({ retainRatio }), /retainRatio/);
+  for (const retainTokens of [-1, 1.5, Infinity, NaN, "32K", null])
+    assert.throws(() => resolve({}, { retainTokens }), /retainTokens/);
+  assert.throws(() => resolve({ contextWindow: 100000, autoCompactWindow: 10000 }), /must be less/);
+  assert.throws(
+    () => resolve({ contextWindow: 100000, autoCompactWindow: 50000, retainTokens: 50000 }),
+    /must be less/
+  );
+  assert.throws(() => resolve({ retainRatio: 1 }), /must be less/);
 });

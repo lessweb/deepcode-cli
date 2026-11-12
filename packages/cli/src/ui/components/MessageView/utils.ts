@@ -1,3 +1,5 @@
+import { getDiffDetails, getDiffFilePath, parseLegacyDiffPreview } from "@vegamo/deepcode-core";
+import { formatDisplayPath } from "../../core/display-path";
 import type { DiffPreviewLine, ToolSummary } from "./types";
 import type { SessionMessage } from "@vegamo/deepcode-core";
 import { RawMode } from "../../contexts";
@@ -31,6 +33,11 @@ export function firstNonEmptyLine(value: string): string {
     }
   }
   return "";
+}
+
+/** Prefer the assistant's own text, using the generated summary only for display. */
+export function getThinkingDisplayContent(message: SessionMessage): string {
+  return message.content?.trim() || message.meta?.reasoningSummary?.trim() || "";
 }
 
 /**
@@ -71,9 +78,13 @@ export function formatBashStatusParams(params: string): string {
 }
 
 /** Formats a tool's parameters for status display, compacting multi-line Bash commands and truncating others. */
-export function formatToolStatusParams(summary: ToolSummary): string {
+export function formatToolStatusParams(summary: ToolSummary, projectRoot = process.cwd()): string {
   if (summary.name.toLowerCase() === "bash") {
     return formatBashStatusParams(summary.params);
+  }
+  if (["edit", "write"].includes(summary.name.toLowerCase())) {
+    const filePath = getDiffFilePath(summary.metadata);
+    if (filePath) return formatDisplayPath(filePath, projectRoot);
   }
   const params = firstNonEmptyLine(summary.params);
   return truncate(params, 120);
@@ -195,31 +206,18 @@ export function getToolDiffPreviewLines(summary: ToolSummary): DiffPreviewLine[]
   if (!summary.ok || !["edit", "write"].includes(summary.name.toLowerCase())) {
     return [];
   }
-  const diffPreview = summary.metadata?.diff_preview;
-  if (typeof diffPreview !== "string" || !diffPreview.trim()) {
-    return [];
-  }
-  return parseDiffPreview(diffPreview);
+  return (getDiffDetails(summary.metadata)?.lines ?? []).map((line) => ({
+    ...line,
+    marker: line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ",
+  }));
 }
 
-/** Parses a unified-diff-style preview string into an array of structured diff lines. */
+/** Parses a stored legacy preview, including its original context-position convention. */
 export function parseDiffPreview(diffPreview: string): DiffPreviewLine[] {
-  return diffPreview
-    .split("\n")
-    .filter((line) => line && !line.startsWith("--- ") && !line.startsWith("+++ ") && !line.startsWith("@@ "))
-    .map((line) => {
-      if (line.startsWith("+")) {
-        return { marker: "+", content: line.slice(1), kind: "added" };
-      }
-      if (line.startsWith("-")) {
-        return { marker: "-", content: line.slice(1), kind: "removed" };
-      }
-      return {
-        marker: " ",
-        content: line.startsWith(" ") ? line.slice(1) : line,
-        kind: "context",
-      };
-    });
+  return parseLegacyDiffPreview(diffPreview).lines.map((line) => ({
+    ...line,
+    marker: line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ",
+  }));
 }
 
 export function renderMessageToStdout(message: SessionMessage, mode: RawMode): string {
@@ -227,10 +225,18 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     return "";
   }
 
+  if (
+    mode === RawMode.Raw &&
+    message.role !== "user" &&
+    (message.role !== "assistant" || message.meta?.asThinking || !message.content?.trim())
+  ) {
+    return "";
+  }
+
   if (message.role === "user") {
     const content = message.content || "(no content)";
     const text = message.meta?.isAnswers ? renderMarkdown(content) : content;
-    return chalk(`> ${text}`);
+    return mode === RawMode.Raw ? chalk.hex("#229ac3")(`> ${text}`) : chalk(`> ${text}`);
   }
 
   if (message.role === "assistant") {
@@ -238,7 +244,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
     const content = (message.content || "").trim();
 
     if (isThinking) {
-      const summary = buildThinkingSummary(content, message.messageParams, mode);
+      const summary = buildThinkingSummary(getThinkingDisplayContent(message), message.messageParams, mode);
       return `${chalk("✧")} ${chalk("Thinking")}${summary ? ` ${chalk(summary)}` : ""}`;
     }
 
@@ -259,7 +265,7 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
 
     const planLines = getUpdatePlanPreviewLines(summary);
     if (planLines.length > 0) {
-      const planText = planLines.map((line) => `  ${line}`).join("\n");
+      const planText = planLines.map((line) => `  ${formatPlanPreviewLine(line)}`).join("\n");
       return `${statusLine}\n${chalk.dim("  └ Plan")}\n${planText}${result}`;
     }
 
@@ -277,6 +283,22 @@ export function renderMessageToStdout(message: SessionMessage, mode: RawMode): s
   }
 
   return "";
+}
+
+export function formatPlanPreviewLine(line: string): string {
+  const match = /^([ \t]*)- \[([x> ])\](?:[ \t]+(.*))?$/.exec(line);
+  if (!match) {
+    return line;
+  }
+
+  const [, indent, status, text = ""] = match;
+  if (status === "x") {
+    return `${indent}${chalk.green("✔")} ${text}`;
+  }
+  if (status === ">") {
+    return `${indent}${chalk.yellow("●")} ${chalk.bold(text)}`;
+  }
+  return `${indent}○ ${text}`;
 }
 
 export function getUpdatePlanPreviewLines(summary: ToolSummary): string[] {

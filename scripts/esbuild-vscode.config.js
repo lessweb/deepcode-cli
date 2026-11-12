@@ -37,4 +37,15 @@ await build({
   },
 });
 
+await build({
+  entryPoints: [join(vscodeRoot, "src", "composer.ts")],
+  bundle: true,
+  platform: "browser",
+  format: "iife",
+  globalName: "DeepcodeComposer",
+  target: "es2022",
+  outfile: join(outDir, "composer.js"),
+  sourcemap: true,
+});
+
 console.log(`\n✅  ${outfile} built successfully\n\n`);

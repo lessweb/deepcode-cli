@@ -6,11 +6,21 @@ type ThinkingConfig = {
 
 type ThinkingRequestOptions = {
   thinking?: ThinkingConfig;
-  extra_body?: {
-    reasoning_effort?: ReasoningEffort;
-  };
+  // Top level, not `extra_body`: `extra_body` is a Python-SDK convention. The Node OpenAI SDK sends it
+  // as a literal JSON key, which the DeepSeek API ignores.
+  reasoning_effort?: ReasoningEffort;
 };
 
+export function buildThinkingRequestOptions(
+  thinkingEnabled: false,
+  baseURL?: string,
+  reasoningEffort?: ReasoningEffort
+): { thinking: { type: "disabled" } };
+export function buildThinkingRequestOptions(
+  thinkingEnabled: boolean,
+  baseURL?: string,
+  reasoningEffort?: ReasoningEffort
+): ThinkingRequestOptions;
 export function buildThinkingRequestOptions(
   thinkingEnabled: boolean,
   _baseURL?: string,
@@ -20,6 +30,6 @@ export function buildThinkingRequestOptions(
 
   return {
     thinking,
-    ...(thinkingEnabled ? { extra_body: { reasoning_effort: reasoningEffort } } : {}),
+    ...(thinkingEnabled ? { reasoning_effort: reasoningEffort } : {}),
   };
 }

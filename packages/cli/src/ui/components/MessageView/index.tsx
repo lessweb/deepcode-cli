@@ -1,21 +1,35 @@
+import { getDiffDetails, getDiffFilePath } from "@vegamo/deepcode-core";
+import { formatDisplayPath } from "../../core/display-path";
 import React from "react";
 import { Box, Text } from "ink";
+import { PromptText } from "../PromptText";
 import { renderMarkdown, renderMarkdownSegments } from "./markdown";
 import {
   buildThinkingSummary,
   buildToolSummary,
+  formatPlanPreviewLine,
   formatStatusName,
   formatToolStatusParams,
   getToolDiffPreviewLines,
   getUpdatePlanPreviewLines,
+  getThinkingDisplayContent,
 } from "./utils";
 import type { DiffPreviewLine, MessageViewProps } from "./types";
 import { RawMode, useRawModeContext } from "../../contexts";
+import { extractMessageImageUrls } from "../../utils";
+import { AttachmentPreviews } from "../AttachmentPreviews";
 
 const PROMPT_ECHO_PREFIX_WIDTH = 2;
 const PROMPT_ECHO_MARGIN_LEFT = 1;
 
-export function MessageView({ message, collapsed, width = 80 }: MessageViewProps): React.ReactElement | null {
+export function MessageView({
+  message,
+  collapsed,
+  width = 80,
+  projectRoot = process.cwd(),
+  imagePreviews,
+  permanentImages = false,
+}: MessageViewProps): React.ReactElement | null {
   const { mode } = useRawModeContext();
   if (!message.visible) {
     return null;
@@ -24,12 +38,21 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
   if (message.role === "user") {
     const content = message.content || "(no content)";
     const text = message.meta?.isAnswers ? renderMarkdown(content) : content;
+    const imageUrls = extractMessageImageUrls(message);
     return (
-      <PromptEchoLine
-        text={text}
-        width={width}
-        attachmentCount={Array.isArray(message.contentParams) ? message.contentParams.length : 0}
-      />
+      <Box flexDirection="column" width={width}>
+        <PromptEchoLine text={text} width={width} />
+        {imageUrls.length > 0 ? (
+          <Box marginLeft={PROMPT_ECHO_MARGIN_LEFT + PROMPT_ECHO_PREFIX_WIDTH}>
+            <AttachmentPreviews
+              urls={imageUrls}
+              width={getPromptEchoContentWidth(width)}
+              prepared={imagePreviews}
+              permanent={permanentImages}
+            />
+          </Box>
+        ) : null}
+      </Box>
     );
   }
 
@@ -38,7 +61,8 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
     const content = (message.content || "").trim();
 
     if (isThinking) {
-      const summary = buildThinkingSummary(content, message.messageParams, mode);
+      const thinkingContent = getThinkingDisplayContent(message);
+      const summary = buildThinkingSummary(thinkingContent, message.messageParams, mode);
       if (collapsed !== false) {
         return (
           <Box marginLeft={1} marginBottom={1} marginY={0}>
@@ -48,9 +72,9 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
       }
       return (
         <Box marginLeft={1} flexDirection="column" marginBottom={1} marginY={0}>
-          <StatusLine width={width} bulletColor="gray" name="Thinking" params={content ? "" : summary} />
+          <StatusLine width={width} bulletColor="gray" name="Thinking" params={thinkingContent ? "" : summary} />
           <Box flexDirection="column" marginLeft={2}>
-            {content ? <Text dimColor>{renderMarkdown(content)}</Text> : null}
+            {thinkingContent ? <Text dimColor>{renderMarkdown(thinkingContent)}</Text> : null}
           </Box>
         </Box>
       );
@@ -97,6 +121,7 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
   if (message.role === "tool") {
     const summary = buildToolSummary(message);
     const diffLines = getToolDiffPreviewLines(summary);
+    const diff = getDiffDetails(summary.metadata);
     const planLines = getUpdatePlanPreviewLines(summary);
     return (
       <Box flexDirection="column" marginLeft={1} marginBottom={1} marginY={0}>
@@ -104,9 +129,16 @@ export function MessageView({ message, collapsed, width = 80 }: MessageViewProps
           width={width}
           bulletColor={summary.ok ? "green" : "red"}
           name={formatStatusName(summary.name)}
-          params={formatToolStatusParams(summary)}
+          params={formatToolStatusParams(summary, projectRoot)}
         />
-        {diffLines.length > 0 ? <DiffPreview lines={diffLines} /> : null}
+        {diff && diffLines.length > 0 ? (
+          <DiffPreview
+            lines={diffLines}
+            filePath={formatDisplayPath(getDiffFilePath(summary.metadata), projectRoot)}
+            added={diff.added}
+            removed={diff.removed}
+          />
+        ) : null}
         {planLines.length > 0 ? <PlanPreview lines={planLines} /> : null}
       </Box>
     );
@@ -137,15 +169,7 @@ export function getPromptEchoContentWidth(width: number): number {
   return Math.max(1, width - PROMPT_ECHO_MARGIN_LEFT - PROMPT_ECHO_PREFIX_WIDTH);
 }
 
-function PromptEchoLine({
-  text,
-  width,
-  attachmentCount = 0,
-}: {
-  text: string;
-  width: number;
-  attachmentCount?: number;
-}): React.ReactElement {
+function PromptEchoLine({ text, width }: { text: string; width: number }): React.ReactElement {
   const contentWidth = getPromptEchoContentWidth(width);
   const containerWidth = Math.max(1, width - PROMPT_ECHO_MARGIN_LEFT);
   return (
@@ -154,10 +178,9 @@ function PromptEchoLine({
         <Text color="#229ac3">{"> "}</Text>
       </Box>
       <Box flexGrow={1} flexShrink={1} width={contentWidth}>
-        <Text color="#229ac3" wrap="hard">
+        <PromptText color="#229ac3" width={contentWidth}>
           {text}
-        </Text>
-        {attachmentCount > 0 ? <Text color="#229ac3">{`  📎 ${attachmentCount} image attachment(s)`}</Text> : null}
+        </PromptText>
       </Box>
     </Box>
   );
@@ -200,15 +223,30 @@ function StatusLine({
   );
 }
 
-function DiffPreview({ lines }: { lines: DiffPreviewLine[] }): React.ReactElement {
+export function DiffPreview({
+  lines,
+  filePath,
+  added,
+  removed,
+}: {
+  lines: DiffPreviewLine[];
+  filePath: string;
+  added: number;
+  removed: number;
+}): React.ReactElement {
+  const numberWidth = Math.max(1, ...lines.map((line) => String(line.lineNumber ?? "").length));
   return (
     <Box flexDirection="column" marginLeft={2}>
-      <Text dimColor>└ Changes</Text>
+      <Text wrap="truncate-middle">
+        <Text dimColor>{`└ ${filePath} · `}</Text>
+        <Text color="green">{`+${added}`}</Text> <Text color="red">{`-${removed}`}</Text>
+      </Text>
       <Box flexDirection="column" marginLeft={2}>
         {lines.map((line, index) => (
           <Text key={`${index}-${line.marker}-${line.content}`} wrap="truncate-end">
+            <Text color="gray">{`${String(line.lineNumber ?? "").padStart(numberWidth)} `}</Text>
             <Text color={line.kind === "added" ? "green" : line.kind === "removed" ? "red" : "gray"}>
-              {line.marker}
+              {`${line.marker} `}
             </Text>
             <Text color={line.kind === "added" ? "green" : line.kind === "removed" ? "red" : undefined}>
               {line.content}
@@ -227,7 +265,7 @@ function PlanPreview({ lines }: { lines: string[] }): React.ReactElement {
       <Box flexDirection="column" marginLeft={2}>
         {lines.map((line, index) => (
           <Text key={`${index}-${line}`} wrap="wrap">
-            {line}
+            {formatPlanPreviewLine(line)}
           </Text>
         ))}
       </Box>

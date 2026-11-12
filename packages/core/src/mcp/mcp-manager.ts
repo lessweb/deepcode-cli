@@ -1,6 +1,8 @@
 import { createHash } from "crypto";
 import { McpClient, type McpToolDefinition, type McpPromptDefinition, type McpResourceDefinition } from "./mcp-client";
 import type { McpServerConfig } from "../settings";
+import type { ToolDefinition } from "../prompt";
+import { prepareMcpInputSchema, type PreparedMcpInputSchema } from "./mcp-schema";
 
 const MCP_STARTUP_TIMEOUT_MS = process.env.DEEPCODE_MCP_TIMEOUT
   ? parseInt(process.env.DEEPCODE_MCP_TIMEOUT, 10)
@@ -59,6 +61,7 @@ function buildMcpNamespacedName(
 export class McpManager {
   private clients: McpClient[] = [];
   private tools: McpToolEntry[] = [];
+  private toolSchemas = new WeakMap<McpToolDefinition, PreparedMcpInputSchema>();
   private prompts: Array<{
     serverName: string;
     namespacedName: string;
@@ -303,32 +306,22 @@ export class McpManager {
     return result;
   }
 
-  getMcpToolDefinitions(): Array<{
-    type: "function";
-    function: {
-      name: string;
-      description: string;
-      parameters: {
-        type: "object";
-        properties: Record<string, unknown>;
-        required?: string[];
-        additionalProperties?: boolean;
-      };
-    };
-  }> {
+  private getToolSchema(tool: McpToolDefinition): PreparedMcpInputSchema {
+    let schema = this.toolSchemas.get(tool);
+    if (!schema) {
+      schema = prepareMcpInputSchema(tool.inputSchema);
+      this.toolSchemas.set(tool, schema);
+    }
+    return schema;
+  }
+
+  getMcpToolDefinitions(): ToolDefinition[] {
     return this.tools.map((t) => ({
       type: "function" as const,
       function: {
         name: t.namespacedName,
         description: this.buildMcpToolDescription(t),
-        parameters: {
-          type: "object" as const,
-          properties: t.definition.inputSchema.properties,
-          required: t.definition.inputSchema.required,
-          ...(t.definition.inputSchema.additionalProperties !== undefined
-            ? { additionalProperties: t.definition.inputSchema.additionalProperties }
-            : {}),
-        },
+        parameters: this.getToolSchema(t.definition).parameters,
       },
     }));
   }
@@ -340,15 +333,20 @@ export class McpManager {
   async executeMcpTool(
     name: string,
     args: Record<string, unknown>,
-    timeoutMs = MCP_CALL_TOOL_TIMEOUT_MS
+    timeoutMs = MCP_CALL_TOOL_TIMEOUT_MS,
+    signal?: AbortSignal
   ): Promise<{ ok: boolean; name: string; output?: string; error?: string }> {
+    signal?.throwIfAborted();
     const tool = this.tools.find((t) => t.namespacedName === name);
     if (!tool) {
       return { ok: false, name, error: `Unknown MCP tool: ${name}` };
     }
 
     try {
-      const result = await tool.client.callTool(tool.originalName, args, timeoutMs);
+      const validationError = this.getToolSchema(tool.definition).validateArguments?.(args);
+      if (validationError) return { ok: false, name, error: validationError };
+      const result = await tool.client.callTool(tool.originalName, args, timeoutMs, signal);
+      signal?.throwIfAborted();
       const text = result.content
         .filter((c) => c.type === "text" && c.text)
         .map((c) => c.text)
@@ -359,6 +357,7 @@ export class McpManager {
         output: text || JSON.stringify(result.content),
       };
     } catch (err) {
+      signal?.throwIfAborted();
       return {
         ok: false,
         name,

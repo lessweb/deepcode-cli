@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; img-src {{cspSource}} data: blob:; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deep Code Trajectory</title>
+    <link rel="stylesheet" href="{{cssUri}}" />
+  </head>
+  <body>
+    <header>
+      <div class="heading">
+        <h1 id="sessionTitle">Trajectory</h1>
+        <span id="sessionStatus" class="badge"></span><span id="usage" class="muted"></span>
+      </div>
+      <div class="toolbar" role="toolbar" aria-label="Trajectory controls">
+        <input id="search" type="search" placeholder="Search trajectory" aria-label="Search trajectory" />
+        <button id="expand">Expand all</button><button id="collapse">Collapse all</button>
+        <label class="time-control"><input id="actualTime" type="checkbox" /> Timestamps</label>
+      </div>
+      <div class="overview-heading"><span class="muted">Overview</span><span id="eventCount" class="muted"></span></div>
+      <div id="timeline" aria-label="Trajectory overview"></div>
+      <div class="legend">
+        <span class="user">User</span><span class="assistant">Assistant</span><span class="tool">Tool</span
+        ><span class="context">Context</span><span id="timeRange" class="muted"></span>
+      </div>
+    </header>
+    <main id="main">
+      <section id="ledger" aria-label="Trajectory events" tabindex="0">
+        <button id="loadEarlier" hidden>Load earlier events</button>
+        <div id="events"></div>
+        <div id="empty" class="empty">Loading trajectory…</div>
+        <div id="progress" role="status" hidden></div>
+      </section>
+      <aside id="details" aria-label="Event details" hidden>
+        <div class="details-heading">
+          <h2 id="detailTitle"></h2>
+          <div class="detail-buttons">
+            <button
+              id="fullscreen"
+              class="icon-button"
+              aria-label="Full screen"
+              data-tooltip="Full screen"
+              aria-pressed="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path id="fullscreenIcon" d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" />
+              </svg>
+            </button>
+            <button id="closeDetails" aria-label="Close details" title="Close details">×</button>
+          </div>
+        </div>
+        <div id="detailMeta" class="muted"></div>
+        <div class="tabs-heading">
+          <div id="tabs" role="tablist" aria-label="Event content"></div>
+          <button id="delete" class="icon-button" aria-label="Delete" data-tooltip="Delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />
+            </svg>
+          </button>
+        </div>
+        <div class="detail-actions">
+          <label><input id="wrap" type="checkbox" checked /> Wrap lines</label>
+          <div class="detail-buttons">
+            <button id="copy" class="icon-button" aria-label="Copy" data-tooltip="Copy">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <g id="copyIcon">
+                  <rect x="8" y="8" width="12" height="13" rx="2" />
+                  <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+                </g>
+                <path id="copyDone" d="m5 12 4 4L19 6" hidden />
+              </svg>
+            </button>
+            <button id="edit" class="icon-button" aria-label="Edit" data-tooltip="Edit" hidden>
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m15 5 4 4M4 16l12-12a2.8 2.8 0 0 1 4 4L8 20l-5 1z" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="detailBody" role="tabpanel" tabindex="0"></div>
+        <div id="editError" role="alert" hidden></div>
+        <div id="editActions" hidden><button id="save">Save</button><button id="cancel">Cancel</button></div>
+      </aside>
+    </main>
+    <script nonce="{{nonce}}" src="{{jsUri}}"></script>
+  </body>
+</html>

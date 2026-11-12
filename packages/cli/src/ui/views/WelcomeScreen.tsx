@@ -1,13 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text } from "ink";
-import * as os from "node:os";
-import path from "node:path";
 import type { SkillInfo } from "@vegamo/deepcode-core";
 import type { ResolvedDeepcodingSettings } from "@vegamo/deepcode-core";
 import { buildSlashCommands, BUILTIN_SLASH_COMMANDS, formatSlashCommandDescription } from "../core/slash-commands";
 import { ThemedGradient } from "./ThemedGradient";
 import { AsciiLogo } from "../ascii-art";
 import { useAppContext } from "../contexts";
+import { formatHomeRelativePath } from "../core/display-path";
+import { getClipboardPasteShortcutLabel } from "../../utils/clipboard-paste-shortcut";
+
+export { formatHomeRelativePath } from "../core/display-path";
 
 type WelcomeScreenProps = {
   projectRoot: string;
@@ -19,11 +21,11 @@ type WelcomeScreenProps = {
 const TITLE_PANEL_WIDTH = 70;
 const PANEL_CONTENT_HEIGHT = 8;
 
-const SHORTCUT_TIPS = [
+const shortcutTips = () => [
   { label: "Enter", description: "Send the prompt" },
   { label: "Shift+Enter", description: "Insert a newline" },
-  { label: "Ctrl+V", description: "Paste an image from the clipboard" },
-  { label: "Ctrl+R", description: "Open raw display mode selection" },
+  { label: getClipboardPasteShortcutLabel(), description: "Paste an image or rich text from the clipboard" },
+  { label: "Ctrl+R", description: "Search prompt history" },
   { label: "Esc", description: "Interrupt the current model turn" },
   { label: "/", description: "Open the skills and commands menu" },
   { label: "Ctrl+D twice", description: "Quit Deep Code CLI" },
@@ -39,11 +41,12 @@ export function WelcomeScreen({ projectRoot, settings, skills, width }: WelcomeS
   const panelWidth = compact ? undefined : Math.min(width, 72);
 
   return (
-    <Box flexDirection="column" marginY={1}>
+    // Static output does not inherit the terminal width; constrain it before clipping the logo.
+    <Box flexDirection="column" width={width} marginY={1}>
       <Box flexDirection="column" width={panelWidth}>
         <Box flexDirection="column" paddingX={1}>
-          <Box flexDirection="column" justifyContent="center" paddingX={1}>
-            <Box justifyContent="center" width={compact ? undefined : TITLE_PANEL_WIDTH}>
+          <Box flexDirection="column" justifyContent="center" paddingX={1} overflowX="hidden">
+            <Box justifyContent="center" width={TITLE_PANEL_WIDTH} flexShrink={0}>
               <ThemedGradient>{AsciiLogo}</ThemedGradient>
             </Box>
           </Box>
@@ -98,20 +101,6 @@ function SettingRow({ label, value }: { label: string; value: string }): React.R
   );
 }
 
-export function formatHomeRelativePath(value: string, home = os.homedir()): string {
-  const normalizedValue = path.resolve(value);
-  const normalizedHome = path.resolve(home);
-  const relative = path.relative(normalizedHome, normalizedValue);
-
-  if (relative === "") {
-    return "~";
-  }
-  if (!relative.startsWith("..") && !path.isAbsolute(relative)) {
-    return `~${path.sep}${relative}`;
-  }
-  return normalizedValue;
-}
-
 export function buildWelcomeTips(skills: SkillInfo[]): Array<{ label: string; description: string }> {
   const slashTips = buildSlashCommands(skills)
     .filter((item) => item.kind !== "skill" || item.skill?.isLoaded)
@@ -122,7 +111,7 @@ export function buildWelcomeTips(skills: SkillInfo[]): Array<{ label: string; de
 
   return [
     ...slashTips,
-    ...SHORTCUT_TIPS.filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
+    ...shortcutTips().filter((tip) => !BUILTIN_SLASH_COMMANDS.some((command) => command.label === tip.label)),
   ];
 }
 

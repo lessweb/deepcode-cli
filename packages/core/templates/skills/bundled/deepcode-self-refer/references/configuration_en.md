@@ -24,28 +24,33 @@ Deep Code uses the `settings.json` file for persistent configuration, supporting
 
 The following are all the top-level fields supported in `settings.json`, along with the sub-fields inside `env`:
 
-| Field                      | Type          | Description                                                                                                    |
-| -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------- |
-| `env`                      | object        | Group of environment variables (see sub-field table below)                                                     |
-| `contextWindow`            | number/string | Context-window limit as an exact token count or `128K`/`1M` value                                              |
-| `autoCompactWindow`        | number/string | Auto-compaction threshold; defaults to 50% of the final context window                                         |
-| `model`                    | string        | Model name. Defaults to `deepseek-v4-flash` and takes precedence over `env.MODEL`                              |
-| `thinkingEnabled`          | boolean       | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)                                    |
-| `reasoningEffort`          | string        | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)                                           |
-| `filesApiEnabled`          | boolean       | Send images through the DeepSeek Files API (default `false`)                                                   |
-| `filesApiTimeoutMs`        | number        | Per-image Files API timeout; defaults to `60000`, maximum `600000` ms                                          |
-| `fileExpiresAfterSeconds`  | number        | Remote file lifetime, default `604800` seconds                                                                 |
-| `fileRefreshMarginSeconds` | number        | Refresh cached IDs below this remaining lifetime, default `3600` seconds                                       |
-| `fileQuotaCleanupBatch`    | number        | Oldest Deep Code files removed during quota recovery, default `100`                                            |
-| `maxRequestFilesBytes`     | number        | Raw image byte limit per request, default `134217728` (128 MiB)                                                |
-| `debugLogEnabled`          | boolean       | Enable debug log output (default `false`)                                                                      |
-| `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                              |
-| `notify`                   | string        | Full path to a task-completion notification script (e.g., Slack notification script)                           |
-| `webSearchTool`            | string        | Full path to a custom web search script                                                                        |
-| `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                         |
-| `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                  |
-| `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md)) |
-| `enabledSkills`            | object        | Per-skill enable/disable map, keyed by skill name                                                              |
+| Field                      | Type          | Description                                                                                                          |
+| -------------------------- | ------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `env`                      | object        | Group of environment variables (see sub-field table below)                                                           |
+| `contextWindow`            | number/string | Context-window limit as an exact token count or `128K`/`1M` value                                                    |
+| `autoCompactWindow`        | number/string | Auto-compaction threshold; defaults to 80% of the context window and may trigger earlier to reserve room for replies |
+| `retainRatio`              | number        | Recent conversation retained as a fraction of the context window minus the output reserve; defaults to `0.16`        |
+| `retainTokens`             | number        | Absolute token budget for recent conversation; mutually exclusive with `retainRatio`                                 |
+| `model`                    | string        | Model name. Defaults to `deepseek-v4-flash` and takes precedence over `env.MODEL`                                    |
+| `thinkingEnabled`          | boolean       | Whether to enable thinking mode (enabled by default for DeepSeek V4 series)                                          |
+| `reasoningEffort`          | string        | Reasoning intensity: `"low"`, `"high"`, or `"max"` (default `"max"`)                                                 |
+| `experimental`             | object        | Experimental features, such as reasoning summaries (see below)                                                       |
+| `filesApiEnabled`          | boolean       | Send images through the DeepSeek Files API (default `false`)                                                         |
+| `filesApiTimeoutMs`        | number        | Per-image Files API timeout; defaults to `60000`, maximum `600000` ms                                                |
+| `fileExpiresAfterSeconds`  | number        | Remote file lifetime, default `604800` seconds                                                                       |
+| `fileRefreshMarginSeconds` | number        | Refresh cached IDs below this remaining lifetime, default `3600` seconds                                             |
+| `fileQuotaCleanupBatch`    | number        | Oldest Deep Code files removed during quota recovery, default `100`                                                  |
+| `maxRequestFilesBytes`     | number        | Raw image byte limit per request, default `134217728` (128 MiB)                                                      |
+| `debugLogEnabled`          | boolean       | Enable debug log output (default `false`)                                                                            |
+| `telemetryEnabled`         | boolean       | Enable anonymous usage reporting (default `true`)                                                                    |
+| `notify`                   | string        | Full path to a task-status notification script (e.g., Slack notification script)                                     |
+| `webSearchTool`            | string        | Full path to a custom web search script                                                                              |
+| `deepseekSearchApiEnabled` | boolean       | Use DeepSeek official web search (default `false`)                                                                   |
+| `mcpServers`               | object        | MCP server configurations (keys are service names, values are McpServerConfig objects)                               |
+| `temperature`              | number        | Sampling temperature for LLM, from `0` to `2`                                                                        |
+| `permissions`              | object        | Permission policy and additional `addWorkingDirs` workspace roots (see [permission_en.md](./permission_en.md))       |
+| `enabledSkills`            | object        | Per-skill enable/disable map, keyed by skill name                                                                    |
+| `history`                  | object        | Persistence and size limit for user input history                                                                    |
 
 #### `env` Sub-fields
 
@@ -72,7 +77,24 @@ The following are all the top-level fields supported in `settings.json`, along w
 }
 ```
 
-The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 50% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
+The default context window is `256K` for regular models and `1M` for DeepSeek V4 models. If the auto-compaction threshold is omitted, it is 80% of the final context window. Invalid values are ignored, and an auto-compaction threshold larger than the context window is capped at the context window.
+
+#### Compaction retention
+
+`retainRatio` and `retainTokens` are top-level `settings.json` fields. Set at most one per configuration file. A project-level setting replaces the user-level retention choice; otherwise, the user setting is inherited. With neither set, `retainRatio` defaults to `0.16`.
+
+`retainRatio` must be a number in `(0, 1]`. Its budget is the context window minus the output reserve, multiplied by the ratio and rounded down. `retainTokens` must be a non-negative integer; `0` requests no extra tail retention. Strings such as `"32K"` are not supported.
+
+The resulting budget must be strictly below the effective auto-compaction threshold. Invalid configurations produce an error rather than silently reducing the retention budget. A low threshold may require an explicit smaller retention budget:
+
+```json
+{
+  "autoCompactWindow": "180K",
+  "retainTokens": 32768
+}
+```
+
+These settings apply to automatic compaction. Tool calls and their results stay together, so the retained tail may exceed the budget. Manual compaction and context-overflow recovery continue to use no extra tail retention.
 
 #### `thinkingEnabled` — Thinking Mode
 
@@ -91,6 +113,30 @@ When thinking mode is enabled, controls the depth of the model’s reasoning:
 | `high` | Higher reasoning depth with relatively lower token usage |
 | `low`  | Lower reasoning depth with lower token usage             |
 
+#### `experimental` — Experimental Features
+
+Use `/experimental`, select **Reasoning summary**, then choose `on` / `off` to enable or disable reasoning summaries.
+
+You can also edit `settings.json` directly. This example enables reasoning summaries:
+
+```json
+{
+  "experimental": {
+    "reasoningSummary": "on",
+    "reasoningSummaryModel": "deepseek-flash"
+  }
+}
+```
+
+| Sub-field               | Type   | Default            | Description                                                       |
+| ----------------------- | ------ | ------------------ | ----------------------------------------------------------------- |
+| `reasoningSummary`      | string | `"off"`            | Enable or disable reasoning summaries with `"on"` or `"off"`      |
+| `reasoningSummaryModel` | string | `"deepseek-flash"` | Model used to generate summaries; configured in the settings file |
+
+When enabled, if the model returns at least 400 characters of reasoning with no response body and the current session title is non-empty, an additional model request condenses the reasoning into one or two sentences. When displaying thinking messages, the CLI prefers the summary if the response body is empty. Summaries are only used for display and are not sent back to the model as assistant response text.
+
+Summary requests always disable thinking mode, regardless of the main conversation's thinking settings. If summary generation fails, times out, or returns empty text, the conversation continues as usual.
+
 #### DeepSeek Files API
 
 When `BASE_URL` is `https://api.deepseek.com`, enabling `filesApiEnabled` uploads images to the fixed `https://api.deepseek.com/files` endpoint and sends `file_id` references in chat requests. Other API endpoints do not enable this feature. An upload or cache-refresh failure fails the request; disabling the setting preserves the existing image path.
@@ -108,19 +154,20 @@ When `BASE_URL` is `https://api.deepseek.com`, enabling `filesApiEnabled` upload
 
 Each file is limited to 64 MiB, and the upload timeout cannot exceed 10 minutes. Remote IDs are cached in `~/.deepcode/files-api-cache.json` without storing the plaintext API key. During quota recovery, only the oldest files whose names start with `deepcode-` are removed before one retry.
 
-#### `notify` — Task Completion Notification
+#### `notify` — Task Status Notifications
 
-Set a full path to a shell script. When the AI assistant finishes a round of tasks, the script is executed automatically, which can be used to send notifications (e.g., a Slack message).
+Set a full path to a shell script. When a session completes, fails, waits for user input, or waits for permission approval, the script is executed automatically to send notifications (e.g., a Slack message). After the session resumes, another notification is sent when it pauses or ends again.
 
 The following context is injected as environment variables when the notify script runs:
 
-| Variable      | Description                                     |
-| ------------- | ----------------------------------------------- |
-| `DURATION`    | Session duration in seconds (integer)           |
-| `STATUS`      | Session status: `"completed"` or `"failed"`     |
-| `FAIL_REASON` | Failure reason (only set on failure)            |
-| `BODY`        | The text content of the last AI assistant reply |
-| `TITLE`       | Session title (matches the resume list title)   |
+| Variable      | Description                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes                    |
+| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval) |
+| `FAIL_REASON` | Failure reason (only set on failure)                                                                                                             |
+| `BODY`        | The text content of the last AI assistant reply                                                                                                  |
+| `TITLE`       | Session title (matches the resume list title)                                                                                                    |
+| `SESSION_ID`  | ID of the session that triggered the notification                                                                                                |
 
 ```json
 {
@@ -130,11 +177,15 @@ The following context is injected as environment variables when the notify scrip
 
 > For detailed configuration examples (Slack, Feishu, terminal notifications, system notifications, etc.), see [notify_en.md](notify_en.md).
 
+#### `deepseekSearchApiEnabled` — DeepSeek Web Search
+
+Set `deepseekSearchApiEnabled: true` to use [DeepSeek official web search](https://api-docs.deepseek.com/guides/search) when the active connection's `BASE_URL` is exactly `https://api.deepseek.com`. It uses the connection's API key and takes priority over `webSearchTool`. Queries are sent directly without translation and must not exceed 128 Unicode characters. Failed searches return an error without falling back to another search service.
+
+The default is `false`. When disabled or using another API address, the existing search behavior applies.
+
 #### `webSearchTool` — Custom Web Search
 
-When `webSearchTool` is not configured and `BASE_URL` is `https://api.deepseek.com`, Deep Code calls the `web_search` tool through the DeepSeek Responses API with the fixed `deepseek-v4-flash` model, regardless of the `MODEL` setting. Other API endpoints continue to use the Deep Code Web Search API.
-
-For custom search logic, set `webSearchTool` to the full path of an executable script. A custom script always takes precedence over the built-in search:
+Deep Code has a built-in, free-to-use Web Search tool. If you need custom search logic, set `webSearchTool` to the full path of an executable script:
 
 ```json
 {
@@ -257,3 +308,50 @@ Applied in the following priority order (lower-numbered overridden by higher-num
 3. Project-level settings.json: `{"mcpServers":{"github":{"env":{"GITHUB_PERSONAL_ACCESS_TOKEN":"..."}}}}`
 4. Project-level settings.json: `{"env": {"MCP_GITHUB_PERSONAL_ACCESS_TOKEN": "..."}}`
 5. System environment variable: `DEEPCODE_MCP_GITHUB_PERSONAL_ACCESS_TOKEN=... deepcode`
+
+#### Input history and search
+
+Press Ctrl+R to search user input from the current session and saved history. Type to preview matches; Ctrl+R / ↑ finds older matches, and Ctrl+S / ↓ finds newer matches. Enter places the result in the input for editing without sending it. Esc / Ctrl+C cancels and restores the original draft. Use `/raw` to select the raw display mode.
+
+History contains submitted user text only, excluding generated summaries, tool-injected content, and messages from other roles. Cross-session history is stored at `~/.deepcode/history.jsonl`. Configure it in `settings.json`:
+
+```json
+{
+  "history": {
+    "persistence": "saveAll",
+    "maxBytes": 10485760
+  }
+}
+```
+
+- `persistence` defaults to `"saveAll"`. Set it to `"none"` to stop saving without deleting, clearing, or trimming existing history. Existing history remains searchable.
+- `maxBytes` defaults to `10485760` (10 MiB) and must be a non-negative integer. `0` means unlimited size; history is still saved.
+- The size is checked after every append. When it exceeds the limit, the oldest records are removed to retain about 80% of the limit. The newest record is always kept, even if that record alone exceeds the limit.
+- Project settings override user settings per field. Existing sessions are not automatically copied into global history; resuming a session makes its user input searchable.
+
+## DeepCode PLUS subscription and LLM routing
+
+Run `deepcode --plus` and enter your DeepCode Plus API Key. After successful verification, the command saves the key to `~/.deepcode-plus/settings.json` and exits, preserving the existing `subscriptionPlan` and other settings. Invalid, unavailable, or unverifiable keys are not saved. This command requires an interactive terminal and cannot be combined with prompt or session options.
+
+You can also set `env.PLUS_API_KEY` in user or project `settings.json`. Core features select the key in this order: `DEEPCODE_PLUS_API_KEY` environment variable → project settings → user settings → the separate Plus settings file. The first three sources also select the `default` subscription policy, overriding `subscriptionPlan` in the separate file. An invalid key from the highest-priority source causes an error instead of falling back. Bundled image and video generation scripts still read only the separate Plus settings file.
+
+Configure PLUS separately in `~/.deepcode-plus/settings.json`:
+
+```json
+{
+  "subscriptionPlan": "default",
+  "env": { "PLUS_API_KEY": "sk-..." }
+}
+```
+
+PLUS API domains are selected from `env.PLUS_API_KEY` after trimming surrounding whitespace. With `sk-` followed by 24 characters, all services use `https://deepcode.vegamo.cn`. With 26 characters, LLM requests under `/plugin/openai/**` (including `/models` subscription probes and connection warmup) use `https://chat.deepcodeplus.com`; all other services use `https://www.deepcodeplus.com`, including web search, image understanding, image/video generation, telemetry, and cost estimates. Without a key, anonymous plugin requests retain the legacy host. No additional suffix character restriction applies. An explicitly configured invalid value (including an empty string or non-string) produces an error even when `subscriptionPlan=off`. In the URLs below, `{llmHost}` refers to the selected LLM domain.
+
+`subscriptionPlan` accepts `default`, `on`, or `off`; missing or invalid values use `default`. The regular connection retains the user/project/environment precedence described above.
+
+- `default`: Without a PLUS key, use the regular connection. Otherwise, before each session creation or reply, request `GET {llmHost}/plugin/openai/models` with the PLUS key. HTTP 200 means `full ability` and selects PLUS. HTTP 401/403 means `api only` and selects the regular connection, even if its key is missing. Other HTTP statuses, network errors, and a 3-second timeout mean `unknown`: prefer the regular key if configured, otherwise use PLUS.
+- `on`: Use the PLUS key with `{llmHost}/plugin/openai` directly, without a subscription check. A missing PLUS key produces an explicit error without falling back.
+- `off`: Always use the regular connection without checking the subscription.
+
+All LLM calls within a turn share the selected connection. The next turn reloads configuration and checks again. Cancelling the check stops the turn. Existing `/models` connection warmup remains independent of subscription checks and can also run in `on` mode; its result does not change routing.
+
+When the selected connection uses PLUS, the CLI appends `plus` after the model and reasoning effort, for example `deepseek-flash max plus`. These settings control LLM routing and do not change credentials used by PLUS plugin tools.

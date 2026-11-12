@@ -16,45 +16,60 @@ afterEach(() => {
   }
 });
 
-test("UnderstandImage uploads prompt and image to the default API", async () => {
-  const workspace = createTempDir("deepcode-understand-image-");
-  const imagePath = path.join(workspace, "pixel.png");
-  fs.writeFileSync(imagePath, Buffer.from([1, 2, 3]));
-  const starts: Array<{ id: string | number; command: string }> = [];
-  const exits: Array<string | number> = [];
-  let request: { input: string | URL; init?: RequestInit } | undefined;
+for (const [key, host] of [
+  [undefined, "https://deepcode.vegamo.cn"],
+  ["sk-aaaaaaaaaaaaaaaaaaaaaaaa", "https://deepcode.vegamo.cn"],
+  ["sk-bbbbbbbbbbbbbbbbbbbbbbbbbb", "https://www.deepcodeplus.com"],
+] as const) {
+  test(`UnderstandImage uploads prompt and image to the default API (${key?.length ?? "absent"})`, async () => {
+    const workspace = createTempDir("deepcode-understand-image-");
+    const imagePath = path.join(workspace, "pixel.png");
+    fs.writeFileSync(imagePath, Buffer.from([1, 2, 3]));
+    const starts: Array<{ id: string | number; command: string }> = [];
+    const exits: Array<string | number> = [];
+    let request: { input: string | URL; init?: RequestInit } | undefined;
 
-  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
-    request = { input, init };
-    return new Response(JSON.stringify({ success: true, result: "a tiny test image" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  }) as typeof fetch;
+    globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+      request = { input, init };
+      return new Response(JSON.stringify({ success: true, result: "a tiny test image" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
 
-  const result = await handleUnderstandImageTool(
-    { prompt: "Describe it", image_path: imagePath },
-    createContext(workspace, {
-      onProcessStart: (id, command) => starts.push({ id, command }),
-      onProcessExit: (id) => exits.push(id),
-    })
-  );
+    const result = await handleUnderstandImageTool(
+      { prompt: "Describe it", image_path: imagePath },
+      {
+        ...createContext(workspace, {
+          onProcessStart: (id, command) => starts.push({ id, command }),
+          onProcessExit: (id) => exits.push(id),
+        }),
+        createOpenAIClient: () => ({
+          client: null,
+          model: "test",
+          thinkingEnabled: false,
+          machineId: "machine-id-123",
+          plusApiKey: key,
+        }),
+      }
+    );
 
-  assert.equal(result.ok, true);
-  assert.equal(result.output, "a tiny test image");
-  assert.equal(String(request?.input), "https://deepcode.vegamo.cn/api/plugin/understand-image");
-  assert.equal(request?.init?.method, "POST");
-  assert.equal((request?.init?.headers as Record<string, string>).Token, "machine-id-123");
-  assert.equal((request?.init?.headers as Record<string, string>)["PLUS-API-KEY"], "sk-plus-test");
-  const form = request?.init?.body as FormData;
-  assert.equal(form.get("prompt"), "Describe it");
-  const image = form.get("image") as File;
-  assert.equal(image.name, "pixel.png");
-  assert.equal(image.type, "image/png");
-  assert.deepEqual(Buffer.from(await image.arrayBuffer()), Buffer.from([1, 2, 3]));
-  assert.equal(starts[0]?.command, "UnderstandImage: pixel.png");
-  assert.deepEqual(exits, [starts[0]?.id]);
-});
+    assert.equal(result.ok, true);
+    assert.equal(result.output, "a tiny test image");
+    assert.equal(String(request?.input), `${host}/api/plugin/understand-image`);
+    assert.equal(request?.init?.method, "POST");
+    assert.equal((request?.init?.headers as Record<string, string>).Token, "machine-id-123");
+    assert.equal((request?.init?.headers as Record<string, string>)["PLUS-API-KEY"], key);
+    const form = request?.init?.body as FormData;
+    assert.equal(form.get("prompt"), "Describe it");
+    const image = form.get("image") as File;
+    assert.equal(image.name, "pixel.png");
+    assert.equal(image.type, "image/png");
+    assert.deepEqual(Buffer.from(await image.arrayBuffer()), Buffer.from([1, 2, 3]));
+    assert.equal(starts[0]?.command, "UnderstandImage: pixel.png");
+    assert.deepEqual(exits, [starts[0]?.id]);
+  });
+}
 
 test("UnderstandImage reports an HTTP 200 business error", async () => {
   const workspace = createTempDir("deepcode-understand-image-error-");
@@ -164,7 +179,7 @@ function createContext(
       model: "deepseek-chat",
       thinkingEnabled: false,
       machineId: "machine-id-123",
-      plusApiKey: "sk-plus-test",
+      plusApiKey: "sk-aaaaaaaaaaaaaaaaaaaaaaaa",
     }),
     ...hooks,
   };

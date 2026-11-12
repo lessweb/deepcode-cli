@@ -24,7 +24,7 @@ function setup(t: TestContext) {
   return { root, controller, context };
 }
 
-for (const stage of ["diagnosis", "escape", "language", "translation", "search", "image", "responses"] as const) {
+for (const stage of ["diagnosis", "escape", "language", "translation", "search", "image", "search-deepseek"] as const) {
   test(`cancellation reaches pending ${stage} request`, { timeout: 3000 }, async (t) => {
     const { root, controller, context } = setup(t);
     let calls = 0;
@@ -42,21 +42,23 @@ for (const stage of ["diagnosis", "escape", "language", "translation", "search",
         completions: {
           create: (body: unknown, options: { signal?: AbortSignal }) => {
             chatCalls++;
-            if (["search", "image", "responses"].includes(stage) || (stage === "translation" && chatCalls === 1)) {
+            if (
+              ["search", "image", "search-deepseek"].includes(stage) ||
+              (stage === "translation" && chatCalls === 1)
+            ) {
               return Promise.resolve({ choices: [{ message: { content: '{"dominant_language":"en"}' } }] });
             }
             return pending(body, options);
           },
         },
       },
-      responses: { create: pending },
     } as unknown as OpenAI;
     context.createOpenAIClient = () => ({
       client,
       model: "test",
       machineId: "test-machine",
       thinkingEnabled: false,
-      baseURL: stage === "responses" ? "https://api.deepseek.com" : "https://example.com",
+      baseURL: stage === "search-deepseek" ? "https://api.deepseek.com" : "https://example.com",
     });
     const originalFetch = globalThis.fetch;
     t.after(() => {

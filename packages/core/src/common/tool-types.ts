@@ -2,7 +2,12 @@ import type OpenAI from "openai";
 import type sharp from "sharp";
 import type { ReasoningEffort } from "../settings";
 
-export type CreateOpenAIClient = () => {
+export type CreateOpenAIClient = {
+  (): OpenAIClientResult;
+  prepare?: (signal?: AbortSignal) => Promise<void>;
+};
+
+export type OpenAIClientResult = {
   client: OpenAI | null;
   apiKey?: string;
   model: string;
@@ -14,9 +19,12 @@ export type CreateOpenAIClient = () => {
   telemetryEnabled?: boolean;
   notify?: string;
   webSearchTool?: string;
+  deepseekSearchApiEnabled?: boolean;
   env?: Record<string, string>;
   machineId?: string;
   plusApiKey?: string;
+  usingPlus?: boolean;
+  configurationError?: string;
 };
 
 export type ToolCall = {

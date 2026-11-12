@@ -109,7 +109,7 @@ Before editing files, propose a plan for adding pagination to the user list.
 | Send message | `Enter` |
 | Insert a newline | `Shift+Enter` or `Ctrl+J` |
 | Interrupt the current response | `Esc` |
-| Paste an image | `Ctrl+V` |
+| Paste an image | `Ctrl+V` (macOS / Linux) or `Alt+V` (Windows) |
 | Quit | Press `Ctrl+D` twice, or use `/exit` |
 
 ## Slash Commands
@@ -122,7 +122,9 @@ Type `/` in the input box to open the command menu.
 | `/resume` | Choose a previous conversation to continue |
 | `/fork` | Fork the current conversation |
 | `/continue` | Continue the current conversation or resume the latest one |
+| `/copy` | Copy the last assistant response's text to the clipboard |
 | `/model` | Switch model, thinking mode, and reasoning effort |
+| `/permissions` | Configure tool permissions interactively |
 | `/init` | Create an `AGENTS.md` instruction file for the current project |
 | `/skills` | Show available Agent Skills |
 | `/mcp` | Show MCP server status and available tools |

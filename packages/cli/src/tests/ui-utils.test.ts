@@ -1,7 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
-import { buildPromptHistory, buildStatusLine, formatContextUsage, formatTokenCount } from "../ui/utils/index";
+import {
+  extractMessageImageUrls,
+  buildPromptHistory,
+  buildStatusLine,
+  formatContextUsage,
+  formatTokenCount,
+} from "../ui/utils/index";
 
 test("buildPromptHistory includes only visible non-empty user messages", () => {
   const messages = [
@@ -11,9 +17,11 @@ test("buildPromptHistory includes only visible non-empty user messages", () => {
     buildMessage("assistant", "assistant reply", true),
     buildMessage("user", "   ", true),
     buildMessage("user", "second prompt", true),
+    { ...buildMessage("user", "generated summary", true), meta: { isSummary: true } },
+    { ...buildMessage("user", "tool injected", true), meta: { isToolFollowUp: true } },
   ];
 
-  assert.deepEqual(buildPromptHistory(messages), ["first prompt", "second prompt"]);
+  assert.deepEqual(buildPromptHistory(messages), [" first prompt ", "second prompt"]);
 });
 
 test("formatTokenCount uses binary K/M units with at most one decimal", () => {
@@ -114,3 +122,30 @@ function buildMessage(role: SessionMessage["role"], content: string, visible: bo
     updateTime: "2026-01-01T00:00:00.000Z",
   };
 }
+
+test("buildStatusLine appends plus only for the selected PLUS connection", () => {
+  for (const usingPlus of [undefined, false, true]) {
+    for (const thinkingEnabled of [false, true]) {
+      const entry = { status: "completed", activeTokens: 0, failReason: null, usingPlus } as SessionEntry;
+      assert.equal(
+        buildStatusLine(entry, {
+          model: "deepseek-flash",
+          thinkingEnabled,
+          reasoningEffort: "max",
+          contextWindow: 1024 * 1024,
+        }),
+        `status: completed · deepseek-flash${thinkingEnabled ? " max" : ""}${usingPlus ? " plus" : ""}`
+      );
+    }
+  }
+});
+
+test("message attachments use saved prompt metadata with a legacy contentParams fallback", () => {
+  const message = buildMessage("user", "picture", true);
+  message.contentParams = [{ type: "image_url", image_url: { url: "data:image/png;base64,legacy" } }];
+  assert.deepEqual(extractMessageImageUrls(message), ["data:image/png;base64,legacy"]);
+  message.meta = { userPrompt: { imageUrls: ["file:///saved-image.png"] } };
+  assert.deepEqual(extractMessageImageUrls(message), ["file:///saved-image.png"]);
+  message.meta.userPrompt!.imageUrls = [];
+  assert.deepEqual(extractMessageImageUrls(message), []);
+});

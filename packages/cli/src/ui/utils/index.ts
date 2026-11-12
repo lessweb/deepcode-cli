@@ -1,3 +1,4 @@
+import { isUserHistoryMessage } from "@vegamo/deepcode-core";
 import chalk from "chalk";
 import { renderMessageToStdout } from "../components/MessageView/utils";
 import type { RawMode } from "../contexts";
@@ -8,15 +9,18 @@ import type { SessionManager } from "@vegamo/deepcode-core";
 import type { MessageMeta } from "@vegamo/deepcode-core";
 
 /**
- * Render all messages directly to stdout for Raw mode display.
- * Writes each message followed by the "Press ESC to exit raw mode" footer.
+ * Render eligible messages directly to stdout, followed by the Raw mode exit footer.
  */
 export function renderRawModeMessages(allMessages: SessionMessage[], mode: string | RawMode): void {
+  let hasMessages = false;
   for (const msg of allMessages) {
+    const rendered = renderMessageToStdout(msg, mode as RawMode);
+    if (!rendered) continue;
+    hasMessages = true;
     process.stdout.write("\n");
-    process.stdout.write(renderMessageToStdout(msg, mode as RawMode) + "\n\n");
+    process.stdout.write(rendered + "\n\n");
   }
-  if (allMessages.length > 0) {
+  if (hasMessages) {
     process.stdout.write("\n\n");
     process.stdout.write(chalk.dim("Press ESC to exit raw mode"));
   } else {
@@ -52,20 +56,24 @@ export function buildSyntheticUserMessage(content: string, imageCount: number, m
 
 export function buildPromptHistory(messages: SessionMessage[]): string[] {
   return messages
-    .filter((message) => message.role === "user" && message.visible && typeof message.content === "string")
-    .map((message) => (message.content ?? "").trim())
+    .filter(isUserHistoryMessage)
+    .map((message) => message.content ?? "")
     .filter((content) => content.length > 0);
 }
 
 export function buildPromptDraftFromSessionMessage(message: SessionMessage, nonce: number): PromptDraft {
-  const storedImageUrls = message.meta?.userPrompt?.imageUrls;
   return {
     nonce,
     text: typeof message.content === "string" ? message.content : "",
-    imageUrls: Array.isArray(storedImageUrls)
-      ? storedImageUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
-      : extractImageUrlsFromContentParams(message.contentParams),
+    imageUrls: extractMessageImageUrls(message),
   };
+}
+
+export function extractMessageImageUrls(message: SessionMessage): string[] {
+  const storedImageUrls = message.meta?.userPrompt?.imageUrls;
+  return Array.isArray(storedImageUrls)
+    ? storedImageUrls.filter((url): url is string => typeof url === "string" && url.length > 0)
+    : extractImageUrlsFromContentParams(message.contentParams);
 }
 
 export function extractImageUrlsFromContentParams(contentParams: unknown): string[] {
@@ -127,7 +135,8 @@ export function buildStatusLine(
   }
   const model = settings.model.trim();
   if (model) {
-    parts.push(settings.thinkingEnabled ? `${model} ${settings.reasoningEffort}` : model);
+    const modelLabel = settings.thinkingEnabled ? `${model} ${settings.reasoningEffort}` : model;
+    parts.push(`${modelLabel}${entry.usingPlus ? " plus" : ""}`);
   }
   if (entry.failReason) {
     parts.push(`fail: ${entry.failReason}`);

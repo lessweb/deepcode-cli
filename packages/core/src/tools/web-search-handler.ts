@@ -1,4 +1,8 @@
+import { DEFAULT_BASE_URL } from "../settings";
+import { executeDeepSeekWebSearch } from "./deepseek-search";
+import { resolvePlusHost } from "../common/plus-subscription";
 import { bindProcessAbort } from "../common/process-abort";
+import { buildThinkingRequestOptions } from "../common/openai-thinking";
 import { randomUUID } from "crypto";
 import { spawn } from "child_process";
 import type OpenAI from "openai";
@@ -7,10 +11,6 @@ import type { CreateOpenAIClient, ToolExecutionContext, ToolExecutionResult } fr
 const MAX_OUTPUT_CHARS = 30000;
 const MAX_CAPTURE_CHARS = 10 * 1024 * 1024;
 const WEB_SEARCH_TOOL_ACTIVITY_PREFIX = "WebSearch:";
-const DEFAULT_WEB_SEARCH_API_URL = "https://deepcode.vegamo.cn/api/plugin/web-search";
-const DEEPSEEK_BASE_URL = "https://api.deepseek.com";
-const DEEPSEEK_WEB_SEARCH_MODEL = "deepseek-v4-flash";
-const EMPTY_DEEPSEEK_WEB_SEARCH_OUTPUT = "No web search results were returned.";
 
 type SearchLanguage = "en" | "zh";
 
@@ -53,6 +53,9 @@ export async function handleWebSearchTool(
   }
 
   const llmContext = context.createOpenAIClient?.();
+  if (llmContext?.deepseekSearchApiEnabled === true && llmContext.baseURL === DEFAULT_BASE_URL) {
+    return executeDeepSeekWebSearch(query, llmContext, context, formatWebSearchActivityLabel(query));
+  }
   const scriptPath = llmContext?.webSearchTool?.trim();
   if (scriptPath) {
     return executeConfiguredWebSearch(query, scriptPath, context, llmContext?.env ?? {});
@@ -138,15 +141,12 @@ async function executeDefaultWebSearch(
   try {
     const prepared = await prepareSearchQuery(query, llmContext);
     context.signal?.throwIfAborted();
-    const output =
-      llmContext.baseURL === DEEPSEEK_BASE_URL
-        ? await runDeepSeekWebSearchRequest(prepared.resolvedQuery, llmContext.client, context)
-        : await runDefaultWebSearchRequest(
-            prepared.resolvedQuery,
-            llmContext.machineId,
-            llmContext.plusApiKey,
-            context
-          );
+    const output = await runDefaultWebSearchRequest(
+      prepared.resolvedQuery,
+      llmContext.machineId,
+      llmContext.plusApiKey,
+      context
+    );
 
     return {
       ok: true,
@@ -310,6 +310,7 @@ async function chat(llmContext: LLMClientContext, prompt: string): Promise<strin
     {
       model: llmContext.model,
       messages: [{ role: "user", content: prompt }],
+      ...buildThinkingRequestOptions(false, llmContext.baseURL),
     },
     { signal: llmContext.signal }
   );
@@ -361,7 +362,7 @@ async function runDefaultWebSearchRequest(
   const activityId = `web-search-${randomUUID()}`;
   context.onProcessStart?.(activityId, formatWebSearchActivityLabel(query));
   try {
-    const response = await fetch(DEFAULT_WEB_SEARCH_API_URL, {
+    const response = await fetch(`${resolvePlusHost(plusApiKey)}/api/plugin/web-search`, {
       method: "POST",
       signal: context.signal,
       headers: {
@@ -402,36 +403,6 @@ async function runDefaultWebSearchRequest(
   }
 
   throw new Error("The web search response was empty.");
-}
-
-async function runDeepSeekWebSearchRequest(
-  query: string,
-  client: OpenAI,
-  context: ToolExecutionContext
-): Promise<string> {
-  const activityId = `web-search-${randomUUID()}`;
-  context.onProcessStart?.(activityId, formatWebSearchActivityLabel(query));
-  try {
-    const response = await client.responses.create(
-      {
-        model: DEEPSEEK_WEB_SEARCH_MODEL,
-        input: query,
-        tools: [{ type: "web_search" }],
-        tool_choice: "required",
-      },
-      { signal: context.signal }
-    );
-    context.signal?.throwIfAborted();
-
-    if (response.status === "failed") {
-      throw new Error(`DeepSeek Responses API returned status ${response.status}.`);
-    }
-
-    const output = response.output_text.trim();
-    return output || EMPTY_DEEPSEEK_WEB_SEARCH_OUTPUT;
-  } finally {
-    context.onProcessExit?.(activityId);
-  }
 }
 
 function appendChunk(existing: string, chunk: string | Buffer): string {

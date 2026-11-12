@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { Writable } from "node:stream";
 import { test } from "node:test";
 import { setTimeout } from "node:timers/promises";
-import { stripVTControlCharacters } from "node:util";
+import { stripTerminalControls } from "./terminal-output";
 import React from "react";
 import { render } from "ink";
 import stringWidth from "string-width";
@@ -13,7 +13,7 @@ test("model status stays on one physical line while the spinner updates and the 
   const output = Object.assign(
     new Writable({
       write(chunk, _encoding, callback) {
-        const frame = stripVTControlCharacters(chunk.toString()).trimEnd();
+        const frame = stripTerminalControls(chunk.toString()).trimEnd();
         if (frame) frames.push(frame);
         callback();
       },

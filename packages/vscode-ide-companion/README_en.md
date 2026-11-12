@@ -70,23 +70,21 @@ Non-multimodal models such as `deepseek-v4-pro` and `deepseek-v4-flash` continue
 
 By default, images are sent inline as base64. With `filesApiEnabled`, Deep Code uploads images through the DeepSeek Files API and reuses the `file_id` in subsequent requests. See [docs/configuration_en.md](../../docs/configuration_en.md#deepseek-files-api).
 
-### How to automatically send a Slack message after a task completes?
+### How to configure Deep Code to send notifications after a task completes?
 
-Write a shell notification script that calls a Slack webhook, then set the `notify` field in `~/.deepcode/settings.json` to the full path of the script. For detailed steps, refer to: https://binfer.net/share/jby5xnc-so6g
+Set the `notify` field in `~/.deepcode/settings.json` to the full path of an executable notification script. After the AI assistant completes a task, Deep Code runs the script to send a message to a channel such as Slack or display a system notification.
+
+For detailed configuration instructions, see: https://binfer.net/share/jby5xnc-so6g
 
 ### Does it support Coding Plan?
 
-Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint. Take Volcano Ark's Coding Plan as an example, configure `~/.deepcode/settings.json` as follows:
+Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint.
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+If you have a [DeepCode Plus subscription](https://www.deepcodeplus.com/plus/plan), run `deepcode --plus`, paste your API Key and press Enter. The CLI will save the configuration automatically:
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-··· (paste and press Enter)
 ```
 
 ## Getting Help

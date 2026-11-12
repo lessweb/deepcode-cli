@@ -1,20 +1,21 @@
-# Deep Code 任务完成通知
+# Deep Code 任务状态通知
 
-当 AI 助手完成一轮任务后，Deep Code 可以自动执行一个通知脚本，将任务结果发送到你指定的渠道（如 Slack、系统通知等）。
+当会话完成、失败、等待用户输入或等待权限确认时，Deep Code 可以自动执行一个通知脚本，将会话状态发送到你指定的渠道（如 Slack、系统通知等）。
 
 ## 工作原理
 
-在 `settings.json` 中配置 `notify` 字段，指向一个可执行脚本的完整路径。每次 AI 助手完成任务应答后，Deep Code 会执行该脚本，并通过环境变量注入上下文信息。
+在 `settings.json` 中配置 `notify` 字段，指向一个可执行脚本的完整路径。每次会话进入上述状态时，Deep Code 会执行该脚本，并通过环境变量注入上下文信息。恢复执行后再次暂停或结束时，会再次通知。
 
 ## 注入的环境变量
 
-| 环境变量      | 说明                                  |
-| ------------- | ------------------------------------- |
-| `DURATION`    | 会话耗时，单位秒（整数）              |
-| `STATUS`      | 会话状态：`"completed"` 或 `"failed"` |
-| `FAIL_REASON` | 失败原因（仅失败时设置）              |
-| `BODY`        | 最后一条 AI 助手回复的文本内容        |
-| `TITLE`       | 会话标题（对应 resume 列表中的标题）  |
+| 环境变量      | 说明                                                                                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `DURATION`    | 本次执行从开始到暂停或结束的耗时，单位秒（整数）；恢复执行后重新计时                                                       |
+| `STATUS`      | 实际会话状态：`completed`（完成）、`failed`（失败）、`waiting_for_user`（等待用户输入）或 `ask_permission`（等待权限确认） |
+| `FAIL_REASON` | 失败原因（仅失败时设置）                                                                                                   |
+| `BODY`        | 最后一条 AI 助手回复的文本内容                                                                                             |
+| `TITLE`       | 会话标题（对应 resume 列表中的标题）                                                                                       |
+| `SESSION_ID`  | 触发本次通知的会话 ID                                                                                                      |
 
 ## 配置方法
 
@@ -68,7 +69,7 @@ BRANCH=$(git branch --show-current 2>/dev/null)
 curl -X POST "$SLACK_WEBHOOK_URL" \
   -H "Content-type: application/json" \
   --data "{
-      \"text\": \"✅ Deep Code 任务已完成\n · cwd: $CURRENT_DIR\n · Branch: $BRANCH\n · Duration: $DURATION 秒\"
+      \"text\": \"Deep Code 任务状态：${STATUS}\n · cwd: $CURRENT_DIR\n · Branch: $BRANCH\n · Duration: $DURATION 秒\"
   }"
 ```
 
@@ -161,7 +162,7 @@ echo \x1b]9;DeepCode: task %STATUS% (%DURATION%s)\x07
 ```bash
 #!/bin/bash
 # macOS 系统通知
-osascript -e "display notification \"任务已${STATUS:-完成}，耗时 ${DURATION}s\" with title \"DeepCode\""
+osascript -e "display notification \"任务状态：${STATUS:-completed}，耗时 ${DURATION}s\" with title \"DeepCode\""
 ```
 
 ```json
@@ -183,7 +184,7 @@ sudo apt install libnotify-bin   # Debian/Ubuntu
 ```bash
 #!/bin/bash
 # Linux notify-send 通知
-notify-send "DeepCode" "任务已${STATUS:-完成}，耗时 ${DURATION}s"
+notify-send "DeepCode" "任务状态：${STATUS:-completed}，耗时 ${DURATION}s"
 ```
 
 ```json

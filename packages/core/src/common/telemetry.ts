@@ -1,9 +1,10 @@
-const DEFAULT_NEW_PROMPT_API_URL = "https://deepcode.vegamo.cn/api/plugin/new";
+import { resolvePlusHost } from "./plus-subscription";
 const DEFAULT_REPORT_TIMEOUT_MS = 3000;
 
 export type NewPromptReportOptions = {
   enabled: boolean;
   machineId?: string;
+  plusApiKey?: string;
   timeoutMs?: number;
 };
 
@@ -16,11 +17,12 @@ export function reportNewPrompt(options: NewPromptReportOptions): void {
     return;
   }
 
+  const url = `${resolvePlusHost(options.plusApiKey)}/api/plugin/new`;
   const timeoutMs = options.timeoutMs ?? DEFAULT_REPORT_TIMEOUT_MS;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
-  void fetch(DEFAULT_NEW_PROMPT_API_URL, {
+  void fetch(url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-startup="loading">
   <head>
     <meta charset="UTF-8" />
     <meta
@@ -8,10 +8,128 @@
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Deep Code</title>
-    <link rel="stylesheet" href="{{cssUri}}" />
+    <style>
+      html[data-startup] body {
+        margin: 0;
+        overflow: hidden;
+        background: #fff;
+      }
+      html[data-startup] body > :not(#startupScreen) {
+        opacity: 0 !important;
+        pointer-events: none !important;
+      }
+      #startupScreen {
+        position: fixed;
+        inset: 0;
+        z-index: 2147483647;
+        display: grid;
+        place-items: center;
+        background: #fff;
+        color: #555;
+        font: 13px/1.5 system-ui, sans-serif;
+        text-align: center;
+      }
+      .startup-spinner {
+        box-sizing: border-box;
+        width: 24px;
+        height: 24px;
+        border: 2px solid #e5e5e5;
+        border-top-color: #666;
+        border-radius: 50%;
+        animation: startup-spin 0.8s linear infinite;
+      }
+      .startup-error { display: none; padding: 20px; }
+      .startup-error button {
+        padding: 5px 14px;
+        border: 1px solid #ccc;
+        border-radius: 4px;
+        background: #fff;
+        color: #333;
+        font: inherit;
+        cursor: pointer;
+      }
+      html[data-startup="error"] .startup-spinner { display: none; }
+      html[data-startup="error"] .startup-error { display: block; }
+      @keyframes startup-spin { to { transform: rotate(360deg); } }
+      @media (prefers-reduced-motion: reduce) {
+        .startup-spinner { animation: none; }
+      }
+    </style>
+    <script nonce="{{nonce}}">
+      (() => {
+        let stylesReady = false;
+        let sessionReady = false;
+        let finished = false;
+        let failed = false;
+        let resolveStyles;
+        const stylesLoaded = new Promise((resolve) => { resolveStyles = resolve; });
+        const timeout = setTimeout(fail, 15000);
+
+        function cleanup() {
+          clearTimeout(timeout);
+          document.removeEventListener("load", onLoad, true);
+          window.removeEventListener("error", onError, true);
+        }
+        function fail() {
+          if (finished || failed) return;
+          failed = true;
+          cleanup();
+          document.documentElement.dataset.startup = "error";
+        }
+        function reveal() {
+          if (!stylesReady || !sessionReady || finished || failed) return;
+          clearTimeout(timeout);
+          requestAnimationFrame(() => {
+            if (finished || failed) return;
+            finished = true;
+            cleanup();
+            document.documentElement.removeAttribute("data-startup");
+            document.getElementById("startupScreen").remove();
+            const app = document.querySelector(".app");
+            app.removeAttribute("inert");
+            app.removeAttribute("aria-busy");
+          });
+        }
+        function onLoad(event) {
+          if (event.target?.id !== "appStyles") return;
+          event.target.media = "all";
+          stylesReady = true;
+          resolveStyles();
+          reveal();
+        }
+        function onError(event) {
+          if (event.target === window || event.target?.id === "appStyles" || event.target?.tagName === "SCRIPT") fail();
+        }
+        document.addEventListener("load", onLoad, true);
+        window.addEventListener("error", onError, true);
+        document.addEventListener("click", (event) => {
+          if (event.target?.id === "startupRetry") window.location.reload();
+        });
+        window.deepcodeStartup = {
+          stylesLoaded,
+          ready() {
+            sessionReady = true;
+            reveal();
+          }
+        };
+      })();
+    </script>
+    <!-- Keep the startup screen paintable while the app stylesheet loads. -->
+    <link id="appStyles" rel="stylesheet" href="{{cssUri}}" media="print" />
   </head>
   <body>
-    <div class="app">
+    <div id="startupScreen">
+      <div class="startup-spinner" role="status" aria-label="Loading"></div>
+      <div class="startup-error" role="alert">
+        <p>Unable to load Deep Code.</p>
+        <button id="startupRetry" type="button">Retry</button>
+      </div>
+    </div>
+    <dialog id="undoDialog" aria-labelledby="undoTitle">
+      <div class="undo-heading"><strong id="undoTitle">Undo</strong><button id="undoBack" type="button" hidden>Back</button><button id="undoClose" type="button">Close</button></div>
+      <div id="undoBody"></div>
+    </dialog>
+    <div class="app" inert aria-busy="true">
       <div class="header-container">
         <div class="header-left">
           <div class="session-selector" id="sessionSelector">
@@ -26,12 +144,18 @@
             </svg>
           </div>
         </div>
-        <button class="header-new-btn" id="newSessionBtn" title="New chat">
-          <svg class="header-new-icon" viewBox="0 0 1024 1024" width="16" height="16" aria-hidden="true">
-            <path d="M474 152m8 0l60 0q8 0 8 8l0 704q0 8-8 8l-60 0q-8 0-8-8l0-704q0-8 8-8Z"></path>
-            <path d="M168 474m8 0l672 0q8 0 8 8l0 60q0 8-8 8l-672 0q-8 0-8-8l0-60q0-8 8-8Z"></path>
-          </svg>
-        </button>
+        <div class="header-actions">
+          <button class="header-new-btn header-trajectory-btn" id="trajectoryBtn" type="button" title="Trajectory" aria-label="Trajectory">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+              <path d="M6.18,19.83Q5,18.65 5,17V8.82Q4.13,8.5 3.56,7.74Q3,6.97 3,6Q3,4.75 3.88,3.88T6,3T8.13,3.88T9,6Q9,6.97 8.44,7.74T7,8.82V17q0,0.82 0.59,1.41T9,19q0.83,0 1.41-0.59T11,17V7q0-1.65 1.18-2.83T15,3t2.82,1.17T19,7v8.17q0.88,0.33 1.44,1.09T21,18q0,1.25-0.88,2.13T18,21t-2.13-0.88T15,18q0-0.98 0.56-1.75T17,15.18V7q0-0.82-0.59-1.41T15,5T13.59,5.59Q13,6.18 13,7V17q0,1.65-1.17,2.82T9,21T6.18,19.83ZM6,7Q6.43,7 6.71,6.71Q7,6.43 7,6T6.71,5.29T6,5Q5.58,5 5.29,5.29T5,6T5.29,6.71T6,7ZM18,19q0.43,0 0.71-0.29Q19,18.43 19,18t-0.29-0.71T18,17t-0.71,0.29T17,18t0.29,0.71T18,19ZM6,6ZM18,18Z" />
+            </svg>
+          </button>
+          <button class="header-new-btn" id="newSessionBtn" title="New chat">
+            <svg class="header-new-icon" viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+              <path d="M11,21V13H3V11h8V3h2v8h8v2H13v8H11Z" />
+            </svg>
+          </button>
+        </div>
         <div class="session-dropdown" id="sessionDropdown"></div>
       </div>
 
@@ -61,6 +185,17 @@
             <div class="skills-popup-header">Select Skills</div>
             <div class="skills-popup-list" id="skillsPopupList"></div>
           </div>
+          <div class="skills-popup" id="slashPopup">
+            <div class="skills-popup-header">Commands</div>
+            <div class="skills-popup-list" id="slashPopupList" role="listbox" aria-label="Commands"></div>
+          </div>
+          <div id="queueList" class="queue-list" hidden></div>
+          <div id="queueEditBar" class="queue-edit-bar" hidden>Editing pending message <button id="queueEditSave" type="button">Save</button> <button id="queueEditCancel" type="button">Cancel</button></div>
+          <div class="command-notice" id="commandNotice" role="status" hidden></div>
+          <div class="plan-implementation-menu" id="planImplementationMenu" role="menu" aria-labelledby="planImplementationTitle" hidden>
+            <div class="skills-popup-header" id="planImplementationTitle">Plan ready</div>
+            <div class="skills-popup-list" id="planImplementationChoices"></div>
+          </div>
           <div class="permission-prompt-host" id="permissionPromptHost" hidden></div>
           <div class="input-wrap">
             <div class="tools-line"></div>
@@ -78,6 +213,10 @@
                 <div class="context-meter" id="contextMeter" aria-label="Context usage">
                   <div class="context-meter-ring" id="contextMeterRing"></div>
                   <div class="context-meter-tooltip" id="contextMeterTooltip" role="tooltip"></div>
+                </div>
+                <div class="plan-mode-tag" id="planModeTag" hidden>
+                  <button type="button" id="cancelPlanMode" title="Exit Plan mode" aria-label="Exit Plan mode">&times;</button>
+                  <span>Plan mode</span>
                 </div>
                 <div class="skills-tags" id="skillsTags"></div>
               </div>
@@ -99,11 +238,18 @@
       </div>
     </div>
 
+    <script nonce="{{nonce}}" src="{{composerJsUri}}"></script>
     <script nonce="{{nonce}}" src="{{attachmentsJsUri}}"></script>
     <script nonce="{{nonce}}" src="{{thinkingPreviewJsUri}}"></script>
     <script nonce="{{nonce}}">
       const vscode = acquireVsCodeApi();
+      const savedState = vscode.getState() || {};
+      const composerState = new DeepcodeComposer.ComposerState(savedState.drafts);
+      composerState.sessionId = savedState.sessionId || null;
+      const savedDraft = savedState.drafts?.[composerState.sessionId || "new"];
+      composerState.planMode = savedDraft?.planMode === true;
       const workspaceRoot = {{workspaceRoot}};
+      const userHome = {{userHome}};
       const app = document.querySelector(".app");
       const messages = document.getElementById("messages");
       const inputWrap = document.querySelector(".input-wrap");
@@ -117,6 +263,7 @@
       const sessionSelectorTitleText = document.getElementById("sessionSelectorTitleText");
       const sessionDropdown = document.getElementById("sessionDropdown");
       const newSessionBtn = document.getElementById("newSessionBtn");
+      document.getElementById("trajectoryBtn").addEventListener("click", () => vscode.postMessage({ type: "openTrajectory" }));
       const sendIcon = document.getElementById("sendIcon");
       const stopIcon = document.getElementById("stopIcon");
       const skillsButton = document.getElementById("skillsButton");
@@ -132,11 +279,13 @@
       const pluginRateLimitLink = document.getElementById("pluginRateLimitLink");
       const pluginRateLimitClose = document.getElementById("pluginRateLimitClose");
 
+      const imagePreviewUrls = Object.create(null);
       const attachmentManager = typeof window.createPromptAttachmentManager === "function"
         ? window.createPromptAttachmentManager({
           promptInput,
           inputWrap,
           toolsLine,
+          resolveImageUrl: (url) => imagePreviewUrls[url] || url,
           onAttachmentChange: () => {
             updateSendIconState();
           }
@@ -158,6 +307,9 @@
       }
 
       let currentSessionId = null;
+      let commandBusy = false;
+      let planImplementationRunning = false;
+      let hasLoadedSession = false;
       let currentSessionStatus = null;
       let allSessions = [];
       let sessionSearchInput = null;
@@ -173,6 +325,7 @@
       let currentAskPermissions = [];
       let permissionPromptState = null;
       let pendingPermissionReply = null;
+      let reviewingDeniedPermission = false;
       let currentPluginRateLimitedTool = null;
       const dismissedPluginRateLimitSessions = new Set();
 
@@ -181,8 +334,343 @@
       }
 
       function isProcessing() {
-        return isBusyStatus(currentSessionStatus);
+        return commandBusy || planImplementationRunning || undoState.busy || isBusyStatus(currentSessionStatus);
       }
+
+      const planImplementationMenu = document.getElementById("planImplementationMenu");
+      const planImplementationChoices = document.getElementById("planImplementationChoices");
+      DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES.forEach((choice, index) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "skills-popup-item plan-implementation-choice";
+        button.setAttribute("role", "menuitem");
+        button.dataset.choice = choice.value;
+        button.textContent = `${index + 1}. ${choice.label}`;
+        button.addEventListener("click", () => choosePlanImplementation(choice.value));
+        button.addEventListener("keydown", (event) => {
+          if (event.isComposing || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault();
+            const next = (index + (event.key === "ArrowUp" ? -1 : 1) + DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES.length) % DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES.length;
+            planImplementationChoices.children[next].focus();
+          } else if (/^[1-4]$/.test(event.key)) {
+            event.preventDefault();
+            choosePlanImplementation(DeepcodeComposer.PLAN_IMPLEMENTATION_CHOICES[Number(event.key) - 1].value);
+          }
+        });
+        planImplementationChoices.appendChild(button);
+      });
+
+      function renderPlanImplementation() {
+        planImplementationMenu.hidden = !composerState.pendingPlanImplementation || isProcessing();
+      }
+
+      function choosePlanImplementation(choice) {
+        if (isProcessing()) return;
+        const pending = composerState.resolvePlanImplementation(choice);
+        if (!pending) return;
+        renderPlanImplementation();
+        renderPlanMode();
+        saveComposerState();
+        closeSlashMenu();
+        hideSkillsPopup();
+        vscode.postMessage({ type: "planImplementationChoice", ...pending, choice });
+        if (choice === "implement" || choice === "clear-context") {
+          planImplementationRunning = true;
+          setLoading(true, "processing");
+        }
+        promptInput.focus();
+      }
+
+      const planModeTag = document.getElementById("planModeTag");
+      const slashPopup = document.getElementById("slashPopup");
+      const slashPopupList = document.getElementById("slashPopupList");
+      const commandNotice = document.getElementById("commandNotice");
+      let slashMatches = [];
+      let slashIndex = 0;
+      let slashDismissedText = null;
+
+      let undoState = { targets: [], queued: [], busy: false };
+      let undoSelected = null;
+      let editingQueue = null;
+      let savedQueueDraft = null;
+      let undoRequest = null;
+
+      let reloadQueueDraft = savedState.queueDraft;
+      let undoError = "";
+      const undoDialog = document.getElementById("undoDialog");
+      const undoBody = document.getElementById("undoBody");
+      const queueList = document.getElementById("queueList");
+      const queueEditBar = document.getElementById("queueEditBar");
+
+      function composerDraft() {
+        return { text: promptInput.value, imageUrls: getAttachedImageUrls(), skills: selectedSkills.slice(), planMode: composerState.planMode };
+      }
+      function applyComposerDraft(draft) {
+        promptInput.value = draft.text || "";
+        attachmentManager?.setImageUrls(draft.imageUrls || []);
+        selectedSkills = draft.skills || [];
+        if (typeof draft.planMode === "boolean") composerState.planMode = draft.planMode;
+        historyCursor = -1;
+        draftBeforeHistory = null;
+        renderSkillsTags();
+        renderPlanMode();
+        updateComposerInput();
+        promptInput.focus();
+      }
+      function endQueueEdit() {
+        const draft = savedQueueDraft;
+        editingQueue = null;
+        savedQueueDraft = null;
+        queueEditBar.hidden = true;
+        if (draft) applyComposerDraft(draft);
+        saveComposerState();
+      }
+      function requestUndo(action, id, draft, type = "undoAction") {
+        if (undoRequest) return;
+        const requestId = Array.from(crypto.getRandomValues(new Uint32Array(4))).join("-");
+        undoError = "";
+        undoRequest = { requestId, action, id, draft, before: composerDraft(), sessionId: currentSessionId };
+        promptInput.readOnly = true;
+        vscode.postMessage({ type, requestId, sessionId: currentSessionId, action, id, ...draft });
+        renderUndo();
+      }
+      function closeUndo() {
+        undoDialog.close();
+        undoSelected = null;
+        promptInput.focus();
+      }
+      function openUndo() {
+        if (editingQueue || undoRequest) return;
+        undoError = "";
+        undoSelected = null;
+        if (!undoDialog.open) undoDialog.showModal();
+        renderUndo();
+        const buttons = undoBody.querySelectorAll("button:not(:disabled)");
+        buttons[buttons.length - 1]?.focus();
+      }
+      function actionButton(text, action, disabled = false) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = text;
+        button.dataset.undoKey = text;
+        button.disabled = disabled || Boolean(undoRequest);
+        button.addEventListener("click", action);
+        return button;
+      }
+      function targetLabel(target) {
+        const text = (target.text || "").replace(/\s+/g, " ").trim() || "(empty message)";
+        const count = target.imageUrls?.length || 0;
+        return (count ? `${count} image${count === 1 ? "" : "s"} · ` : "") + (text.length > 90 ? text.slice(0, 89) + "…" : text);
+      }
+      function queueTarget(message) {
+        return { id: message.id, text: message.content.text, imageUrls: message.content.imageUrls, createTime: message.submittedAt, queued: true };
+      }
+      function renderUndo() {
+        const pending = undoState.queued.filter((message) => message.id !== undoState.preparing?.id);
+        queueList.replaceChildren();
+        queueList.hidden = !pending.length;
+        if (pending.length) {
+          const title = document.createElement("div");
+          title.textContent = `${pending.length} pending message${pending.length === 1 ? "" : "s"}${undoState.pausedReason ? " · paused" : ""}`;
+          queueList.appendChild(title);
+          for (const queued of pending) {
+            const row = document.createElement("div");
+            row.className = "queue-message";
+            const label = document.createElement("span");
+            label.textContent = targetLabel(queueTarget(queued));
+            row.append(label, actionButton("Edit", () => requestUndo("edit", queued.id), Boolean(editingQueue)), actionButton("Remove", () => requestUndo("remove", queued.id), Boolean(editingQueue)));
+            queueList.appendChild(row);
+          }
+        }
+        if (!undoDialog.open) return;
+        document.getElementById("undoBack").hidden = !undoSelected;
+        const focused = document.activeElement?.dataset.undoKey;
+        undoBody.replaceChildren();
+        const targets = [...undoState.targets, ...undoState.queued.map(queueTarget)];
+        if (!undoSelected) {
+          if (!targets.length) undoBody.textContent = "Nothing to undo yet.";
+          for (const target of targets) {
+            const row = actionButton(targetLabel(target), () => {
+              undoSelected = { id: target.id, queued: Boolean(target.queued) };
+              renderUndo();
+              undoBody.querySelector("button:not(:disabled)")?.focus();
+            }, !target.queued && (undoState.busy || isProcessing()));
+            row.className = "undo-target";
+            row.dataset.undoKey = target.id;
+            const time = document.createElement("small");
+            time.textContent = `${new Date(target.createTime).toLocaleString()}${target.queued ? " · pending" : ""}`;
+            row.appendChild(time);
+            undoBody.appendChild(row);
+          }
+        } else {
+          const target = targets.find((item) => item.id === undoSelected.id && Boolean(item.queued) === undoSelected.queued);
+          const label = document.createElement("p");
+          label.textContent = target ? targetLabel(target) : "This message is no longer available.";
+          undoBody.appendChild(label);
+          if (target?.queued) {
+            undoBody.append(actionButton("Remove", () => requestUndo("remove", target.id)), actionButton("Edit", () => requestUndo("edit", target.id)));
+          } else if (target) {
+            const busy = undoState.busy || isProcessing();
+            undoBody.append(actionButton("Restore files and conversation", () => requestUndo("code-and-conversation", target.id), busy || !target.canRestoreCode));
+            if (!target.canRestoreCode) {
+              const note = document.createElement("p");
+              note.textContent = "No saved file history is available for this message.";
+              undoBody.appendChild(note);
+            }
+            undoBody.append(actionButton("Restore conversation only", () => requestUndo("conversation", target.id), busy));
+            const note = document.createElement("p");
+            note.textContent = busy ? "This prompt cannot be changed while running." : "The selected message and later messages will be removed. The selected message returns to the input box.";
+            undoBody.appendChild(note);
+          }
+        }
+        if (undoError) {
+          const error = document.createElement("p");
+          error.setAttribute("role", "alert");
+          error.textContent = undoError;
+          undoBody.appendChild(error);
+        }
+        if (focused) Array.from(undoBody.querySelectorAll("button")).find((button) => button.dataset.undoKey === focused && !button.disabled)?.focus();
+        if (!undoDialog.contains(document.activeElement)) {
+          (undoBody.querySelector("button:not(:disabled)") || document.getElementById("undoClose")).focus();
+        }
+      }
+      document.getElementById("undoBack").addEventListener("click", () => {
+        undoSelected = null;
+        undoError = "";
+        renderUndo();
+        undoBody.querySelector("button:not(:disabled)")?.focus();
+      });
+      document.getElementById("undoClose").addEventListener("click", closeUndo);
+      undoDialog.addEventListener("cancel", (event) => {
+        event.preventDefault();
+        if (undoSelected) { undoSelected = null; renderUndo(); undoBody.querySelector("button:not(:disabled)")?.focus(); }
+        else closeUndo();
+      });
+      undoDialog.addEventListener("keydown", (event) => {
+        event.stopPropagation();
+        if (event.key !== "ArrowUp" && event.key !== "ArrowDown" && event.key !== "Home" && event.key !== "End") return;
+        event.preventDefault();
+        const buttons = Array.from(undoBody.querySelectorAll("button:not(:disabled)"));
+        const index = buttons.indexOf(document.activeElement);
+        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : Math.max(0, Math.min(buttons.length - 1, index + (event.key === "ArrowUp" ? -1 : 1)));
+        buttons[next]?.focus();
+      });
+      document.getElementById("queueEditSave").addEventListener("click", () => requestUndo("save", editingQueue.id, composerDraft()));
+      document.getElementById("queueEditCancel").addEventListener("click", () => requestUndo("cancel", editingQueue.id));
+
+      function saveComposerState() {
+        vscode.setState({ sessionId: composerState.sessionId, drafts: composerState.save(promptInput.value), queueDraft: savedQueueDraft });
+      }
+
+      function renderPlanMode() {
+        planModeTag.hidden = !composerState.planMode;
+      }
+
+      document.getElementById("cancelPlanMode").addEventListener("click", () => {
+        if (composerState.pendingPlanImplementation) {
+          choosePlanImplementation("default");
+          return;
+        }
+        composerState.planMode = false;
+        renderPlanMode();
+        saveComposerState();
+        promptInput.focus();
+      });
+
+      function closeSlashMenu(dismiss = false) {
+        if (dismiss) slashDismissedText = promptInput.value;
+        slashPopup.classList.remove("show");
+        promptInput.setAttribute("aria-expanded", "false");
+        promptInput.removeAttribute("aria-activedescendant");
+      }
+
+      function refreshSlashMenu() {
+        const token = DeepcodeComposer.getSlashToken(promptInput.value);
+        slashMatches = token && !editingQueue && slashDismissedText !== promptInput.value
+          ? DeepcodeComposer.filterSlashCommands(DeepcodeComposer.buildComposerCommands(availableSkills).filter((item) => !isProcessing() || item.kind === "undo"), token)
+          : [];
+        slashIndex = Math.max(0, Math.min(slashIndex, slashMatches.length - 1));
+        if (!slashMatches.length) { closeSlashMenu(); return; }
+        hideSkillsPopup();
+        slashPopupList.innerHTML = "";
+        slashMatches.forEach((item, index) => {
+          const row = document.createElement("div");
+          row.className = "skills-popup-item" + (index === slashIndex ? " selected" : "");
+          row.id = `slash-command-${index}`;
+          row.setAttribute("role", "option");
+          row.setAttribute("aria-selected", String(index === slashIndex));
+          const label = document.createElement("span");
+          label.className = "skills-popup-item-name";
+          label.textContent = DeepcodeComposer.formatSlashCommandLabel(item);
+          const description = document.createElement("span");
+          description.className = "skills-popup-item-path";
+          description.textContent = DeepcodeComposer.formatSlashCommandDescription(item.description);
+          row.title = description.textContent;
+          row.append(label, description);
+          row.addEventListener("mousedown", (event) => event.preventDefault());
+          row.addEventListener("click", () => selectSlashCommand(item));
+          slashPopupList.appendChild(row);
+        });
+        slashPopup.classList.add("show");
+        promptInput.setAttribute("aria-controls", "slashPopupList");
+        promptInput.setAttribute("aria-expanded", "true");
+        promptInput.setAttribute("aria-activedescendant", `slash-command-${slashIndex}`);
+        slashPopupList.children[slashIndex]?.scrollIntoView({ block: "nearest" });
+      }
+
+      function updateComposerInput() {
+        autoResizePrompt();
+        updateSendIconState();
+        saveComposerState();
+      }
+
+      function selectSlashCommand(item) {
+        if (editingQueue || (isProcessing() && item.kind !== "undo")) return;
+        if (item.kind === "undo") {
+          promptInput.value = "";
+          closeSlashMenu();
+          updateComposerInput();
+          vscode.postMessage({ type: "slashCommand", command: "undo" });
+          return;
+        }
+        promptInput.value = "";
+        closeSlashMenu();
+        commandNotice.hidden = true;
+        if (item.kind === "skill") {
+          if (!selectedSkills.some((skill) => skill.name === item.skill.name)) selectedSkills.push(item.skill);
+          renderSkillsTags();
+        } else if (item.kind === "skills") {
+          showSkillsPopup();
+        } else if (item.kind === "plan") {
+          composerState.planMode = true;
+          renderPlanMode();
+        } else {
+          if (item.kind === "init" || item.kind === "continue") composerState.resolvePlanImplementation("stay");
+          else composerState.pendingPlanImplementation = null;
+          renderPlanImplementation();
+          renderPlanMode();
+          vscode.postMessage({
+            type: "slashCommand", command: item.kind,
+            skills: item.kind === "init" ? selectedSkills : undefined,
+            planMode: composerState.requestMode({ continuation: item.kind === "continue" && Boolean(pendingPermissionReply) }),
+            ...(item.kind === "continue" ? pendingPermissionReply || {} : {})
+          });
+          selectedSkills = [];
+          attachmentManager?.clear();
+          renderSkillsTags();
+          if (item.kind === "init" || item.kind === "continue") {
+            pendingPermissionReply = null;
+          }
+        }
+        updateComposerInput();
+        promptInput.focus();
+      }
+
+      document.addEventListener("click", (event) => {
+        if (!slashPopup.contains(event.target) && event.target !== promptInput) closeSlashMenu(true);
+      });
+      promptInput.addEventListener("focus", refreshSlashMenu);
 
       function normalizePluginRateLimitedTool(value) {
         return value === "UnderstandImage" || value === "WebSearch" ? value : null;
@@ -393,6 +881,7 @@
 
       // Skills functions
       function showSkillsPopup() {
+        closeSlashMenu(true);
         if (skillsPopup) {
           skillsPopup.classList.add("show");
           // 渲染技能列表
@@ -944,6 +1433,7 @@
         requestAnimationFrame(() => {
           updateAllConnectionLines();
         });
+        return bubble;
       }
 
       function updateConnectionLine(currentBubble) {
@@ -1025,7 +1515,7 @@
       }
 
       function isAlwaysAllowedScope(scope) {
-        return [
+        return !composerState.sessionPlanMode && [
           "read-in-cwd",
           "read-in-tmp",
           "read-out-cwd",
@@ -1138,6 +1628,7 @@
       }
 
       function submitPermissionResult(result) {
+        reviewingDeniedPermission = false;
         permissionPromptState = null;
         currentAskPermissions = [];
         if (result.hasDeny) {
@@ -1160,7 +1651,8 @@
         sendUserPromptText("/continue", undefined, [], {
           permissions: result.permissions,
           alwaysAllows: result.alwaysAllows,
-          skipHistory: true
+          skipHistory: true,
+          continuation: true
         });
       }
 
@@ -1207,21 +1699,33 @@
         permissionPromptHost.innerHTML = `
           <div class="permission-card permission-denied-card">
             <div class="permission-title">Permission denied</div>
-            <div class="permission-description">Add a reply, then press Enter to continue with the denial.</div>
+            <div class="permission-description">${pendingPermissionReply
+              ? "Add a reply, then press Enter to continue with the denial."
+              : currentAskPermissions.length
+                ? "Review the permission request before continuing."
+                : "The saved permission request is no longer available."}</div>
+            ${currentAskPermissions.length ? '<div class="permission-actions"><button type="button" class="permission-action permission-review">Review permissions</button></div>' : ""}
           </div>
         `;
         permissionPromptHost.hidden = false;
+        permissionPromptHost.querySelector(".permission-review")?.addEventListener("click", () => {
+          reviewingDeniedPermission = true;
+          pendingPermissionReply = null;
+          permissionPromptState = null;
+          renderPermissionPrompt();
+        });
       }
 
       function renderPermissionPrompt() {
         if (!permissionPromptHost) {
           return;
         }
-        if (pendingPermissionReply && currentSessionStatus === "permission_denied") {
+        if (currentSessionStatus !== "permission_denied") reviewingDeniedPermission = false;
+        if (currentSessionStatus === "permission_denied" && !reviewingDeniedPermission) {
           renderPermissionDeniedNotice();
           return;
         }
-        if (currentSessionStatus !== "ask_permission" || currentAskPermissions.length === 0) {
+        if ((currentSessionStatus !== "ask_permission" && !reviewingDeniedPermission) || currentAskPermissions.length === 0) {
           permissionPromptHost.innerHTML = "";
           permissionPromptHost.hidden = true;
           permissionPromptState = null;
@@ -1337,8 +1841,8 @@
         fileRow.appendChild(fileButton);
         details.appendChild(fileRow);
 
-        if (typeof metadata.diff_preview === "string" && metadata.diff_preview.trim()) {
-          const diffBlock = renderDiffPreview(metadata.diff_preview);
+        if (metadata.diff_details) {
+          const diffBlock = renderDiffPreview(metadata);
           if (diffBlock) {
             details.appendChild(diffBlock);
           }
@@ -1472,6 +1976,10 @@
           }
         }
 
+        if (userHome && isPathInsideWorkspace(filePath, userHome)) {
+          const relative = getRelativePath(filePath, userHome);
+          return relative ? `~/${relative}` : "~";
+        }
         return filePath;
       }
 
@@ -1494,58 +2002,47 @@
         return String(value || "").replace(/\\/g, "/").replace(/\/+$/, "");
       }
 
-      function renderDiffPreview(diffPreview) {
-        const lines = String(diffPreview || "").split("\n");
-        const meaningfulLines = lines.filter((line) => {
-          return !line.startsWith("--- ") &&
-            !line.startsWith("+++ ") &&
-            !line.startsWith("@@ ");
-        });
-
-        if (meaningfulLines.length === 0) {
-          return null;
-        }
+      function renderDiffPreview(metadata) {
+        const diff = metadata.diff_details;
+        if (!diff || !diff.lines.length) return null;
 
         const section = document.createElement("div");
         section.className = "tool-result-diff";
-
         const label = document.createElement("div");
-        label.className = "tool-result-label";
-        label.textContent = "Changes";
+        label.className = "tool-result-label diff-heading";
+        label.appendChild(document.createTextNode(`└ ${formatDisplayPath(metadata.file_path)} · `));
+        const added = document.createElement("span");
+        added.className = "diff-added-count";
+        added.textContent = `+${diff.added}`;
+        const removed = document.createElement("span");
+        removed.className = "diff-removed-count";
+        removed.textContent = `-${diff.removed}`;
+        label.appendChild(added);
+        label.appendChild(document.createTextNode(" "));
+        label.appendChild(removed);
         section.appendChild(label);
 
         const list = document.createElement("div");
         list.className = "diff-preview";
-
-        meaningfulLines.forEach((line) => {
-          if (!line) {
-            return;
-          }
-
+        const numberWidth = Math.max(1, ...diff.lines.map((line) => String(line.lineNumber ?? "").length));
+        list.style.setProperty("--diff-number-width", `${numberWidth}ch`);
+        diff.lines.forEach((line) => {
           const row = document.createElement("div");
-          row.className = "diff-line";
-
+          row.className = `diff-line ${line.kind}`;
+          const number = document.createElement("span");
+          number.className = "diff-line-number";
+          number.textContent = String(line.lineNumber ?? "");
           const marker = document.createElement("span");
           marker.className = "diff-line-marker";
-          marker.textContent = line[0] === "+" || line[0] === "-" ? line[0] : " ";
-
+          marker.textContent = line.kind === "added" ? "+" : line.kind === "removed" ? "-" : " ";
           const content = document.createElement("span");
           content.className = "diff-line-content";
-          content.textContent = line.slice(1);
-
-          if (line.startsWith("+")) {
-            row.classList.add("added");
-          } else if (line.startsWith("-")) {
-            row.classList.add("removed");
-          } else {
-            row.classList.add("context");
-          }
-
+          content.textContent = line.content;
+          row.appendChild(number);
           row.appendChild(marker);
           row.appendChild(content);
           list.appendChild(row);
         });
-
         section.appendChild(list);
         return section;
       }
@@ -1731,6 +2228,7 @@
       }
 
       function setLoading(isLoading, status) {
+        isLoading = isLoading || planImplementationRunning || undoState.busy;
         if (status !== undefined) {
           currentSessionStatus = status;
         }
@@ -1768,6 +2266,8 @@
         updateSendIconState();
         updateAskUserQuestionInteractivity();
         renderPermissionPrompt();
+        renderPlanImplementation();
+        renderUndo();
       }
 
       function updateSendIconState() {
@@ -1783,6 +2283,41 @@
       function clearMessages() {
         messages.innerHTML = "";
         lastMessageRole = null;
+      }
+
+      function renderSessionHistory(history) {
+        clearMessages();
+        currentThinkingBubble = null;
+        history.forEach((msg, index) => {
+          // 判断是否需要连接到上一个消息
+          let shouldConnect = false;
+          if (index > 0) {
+            const prevMsg = history[index - 1];
+            shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
+          }
+          addMessageBubble(msg, shouldConnect);
+        });
+
+        // 更新 lastMessageRole 为最后一条消息的role
+        if (history.length > 0) {
+          lastMessageRole = history[history.length - 1].role;
+        }
+
+        // 批量更新所有连接线的高度
+        requestAnimationFrame(() => {
+          updateAllConnectionLines();
+        });
+
+        // 找最后一条 asThinking 为 true 的消息并展开
+        const thinkingBubbles = messages.querySelectorAll('.bubble.assistant[data-thinking="true"]');
+        if (thinkingBubbles.length > 0) {
+          const lastThinkingBubble = thinkingBubbles[thinkingBubbles.length - 1];
+          if (currentThinkingBubble && currentThinkingBubble !== lastThinkingBubble) {
+            setThinkingBubbleExpanded(currentThinkingBubble, false);
+          }
+          setThinkingBubbleExpanded(lastThinkingBubble, true);
+          currentThinkingBubble = lastThinkingBubble;
+        }
       }
 
       function updateSessionDropdown(sessions) {
@@ -1871,7 +2406,8 @@
         const groups = {
           today: [],
           yesterday: [],
-          pastWeek: []
+          pastWeek: [],
+          earlier: []
         };
 
         // 筛选并分组会话
@@ -1885,12 +2421,13 @@
             groups.yesterday.push(session);
           } else if (sessionDay.getTime() > lastWeek.getTime() && sessionDay.getTime() < yesterday.getTime()) {
             groups.pastWeek.push(session);
+          } else {
+            groups.earlier.push(session);
           }
-          // 超过7天的数据不显示
         });
 
         // 如果没有会话
-        const totalCount = groups.today.length + groups.yesterday.length + groups.pastWeek.length;
+        const totalCount = groups.today.length + groups.yesterday.length + groups.pastWeek.length + groups.earlier.length;
         if (totalCount === 0) {
           const emptyDiv = document.createElement("div");
           emptyDiv.className = "session-dropdown-empty";
@@ -1929,6 +2466,7 @@
               <div class="session-dropdown-time">${formatSessionTime(session.updateTime)}</div>
             `;
             item.addEventListener("click", () => {
+              if (isProcessing()) return;
               sessionDropdown.classList.remove("show");
               sessionSelector.classList.remove("open");
               vscode.postMessage({ type: "selectSession", sessionId: session.id });
@@ -1943,10 +2481,12 @@
         const todayGroup = renderGroup("Today", groups.today);
         const yesterdayGroup = renderGroup("Yesterday", groups.yesterday);
         const pastWeekGroup = renderGroup("Past Week", groups.pastWeek);
+        const earlierGroup = renderGroup("Earlier", groups.earlier);
 
         if (todayGroup) sessionDropdownList.appendChild(todayGroup);
         if (yesterdayGroup) sessionDropdownList.appendChild(yesterdayGroup);
         if (pastWeekGroup) sessionDropdownList.appendChild(pastWeekGroup);
+        if (earlierGroup) sessionDropdownList.appendChild(earlierGroup);
       }
 
       function formatSessionTime(dateString) {
@@ -2002,9 +2542,25 @@
         if (event.key !== "Escape") {
           return;
         }
+        if (undoDialog.open) {
+          event.preventDefault();
+          if (undoSelected) { undoSelected = null; undoError = ""; renderUndo(); }
+          else closeUndo();
+          return;
+        }
         if (sessionDropdown.classList.contains("show")) {
           sessionDropdown.classList.remove("show");
           sessionSelector.classList.remove("open");
+          return;
+        }
+        if (composerState.pendingPlanImplementation && !isProcessing()) {
+          event.preventDefault();
+          choosePlanImplementation("stay");
+          return;
+        }
+        if (editingQueue) {
+          event.preventDefault();
+          requestUndo("cancel", editingQueue.id);
           return;
         }
         if (isProcessing()) {
@@ -2015,31 +2571,19 @@
         }
       });
 
-      // 从状态恢复输入内容
-      const savedState = vscode.getState();
-      if (savedState && savedState.promptText) {
-        promptInput.value = savedState.promptText || "";
-        autoResizePrompt();
-        updateSendIconState();
-      }
-
-      // 监听 visibilitychange 保存状态
+      // Restore the draft belonging to the last selected session.
+      promptInput.value = savedDraft?.text ?? savedState.promptText ?? "";
+      renderPlanMode();
       document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "hidden") {
-          vscode.setState({
-            promptText: promptInput.value
-          });
-        }
+        if (document.visibilityState === "hidden") saveComposerState();
       });
-
       promptInput.addEventListener("input", () => {
-        exitHistoryBrowsing(); // any text modification exits history browsing mode
-        autoResizePrompt();
-        updateSendIconState();
-        // 保存输入内容
-        vscode.setState({
-          promptText: promptInput.value
-        });
+        exitHistoryBrowsing();
+        slashDismissedText = null;
+        slashIndex = 0;
+        commandNotice.hidden = true;
+        updateComposerInput();
+        refreshSlashMenu();
       });
 
       updateSendIconState();
@@ -2058,10 +2602,18 @@
           return false;
         }
 
+        // Submitting a reply is equivalent to choosing to stay in Plan mode.
+        composerState.resolvePlanImplementation("stay");
+        renderPlanImplementation();
+        renderPlanMode();
+        saveComposerState();
         historyCursor = -1;
         draftBeforeHistory = null;
         pendingUserPrompt = options.skipHistory ? null : trimmed || (normalizedImages.length > 0 ? "粘贴的图像" : "");
 
+        commandNotice.hidden = true;
+        closeSlashMenu();
+        setLoading(true, "processing");
         vscode.postMessage({
           type: "userPrompt",
           prompt: trimmed,
@@ -2069,14 +2621,16 @@
           images: normalizedImages.length > 0 ? normalizedImages : undefined,
           permissions,
           alwaysAllows,
-          isAnswers: isAnswers || undefined
+          isAnswers: isAnswers || undefined,
+          planMode: composerState.requestMode(options)
         });
         return true;
       }
 
-      function sendPrompt() {
+      function sendPrompt(fromKeyboard = false) {
+        if (undoRequest) return;
         // 如果正在处理，则中断（不检查输入框内容）
-        if (isProcessing()) {
+        if (isProcessing() && fromKeyboard !== true) {
           vscode.postMessage({ type: "interrupt" });
           // 立即更新本地状态为 interrupted
           currentSessionStatus = "interrupted";
@@ -2091,12 +2645,34 @@
           return;
         }
 
+        if (editingQueue) {
+          requestUndo("save", editingQueue.id, composerDraft());
+          return;
+        }
+        const submission = DeepcodeComposer.resolveSlashSubmission(
+          DeepcodeComposer.buildComposerCommands(availableSkills), text
+        );
+        if (submission?.kind === "command") {
+          selectSlashCommand(submission.item);
+          return;
+        }
+
+        if (isProcessing()) {
+          if (commandBusy || !currentSessionId) return;
+          requestUndo("enqueue", null, { ...composerDraft(), text: submission?.kind === "plan" ? submission.text : text, planMode: submission?.kind === "plan" || composerState.planMode }, "enqueuePrompt");
+          return;
+        }
+
         // 发送消息，不立即显示（等待后端返回渲染后的 HTML）
         promptInput.value = "";
-        vscode.setState({ promptText: "" });
+        saveComposerState();
         autoResizePrompt();
         const permissionReply = pendingPermissionReply;
-        const sent = sendUserPromptText(text, selectedSkills, imageUrls, permissionReply || {});
+        const sent = sendUserPromptText(
+          submission?.kind === "plan" ? submission.text : text,
+          selectedSkills, imageUrls,
+          { ...(permissionReply || {}), continuation: Boolean(permissionReply), ...(submission?.kind === "plan" ? { planMode: true } : {}) }
+        );
         if (!sent) {
           return;
         }
@@ -2115,10 +2691,11 @@
       });
 
       newSessionBtn.addEventListener("click", () => {
+        if (isProcessing()) return;
         sessionDropdown.classList.remove("show");
         sessionSelector.classList.remove("open");
+        saveComposerState();
         vscode.postMessage({ type: "createNewSession" });
-        promptInput.value = "";
         inputHistory = [];
         historyCursor = -1;
         draftBeforeHistory = null;
@@ -2130,6 +2707,26 @@
 
       sendButton.addEventListener("click", sendPrompt);
       promptInput.addEventListener("keydown", (event) => {
+        if (event.isComposing) return;
+        if (slashPopup.classList.contains("show") && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+          if (event.key === "Escape") {
+            event.preventDefault();
+            event.stopPropagation();
+            closeSlashMenu(true);
+            return;
+          }
+          if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+            event.preventDefault();
+            slashIndex = (slashIndex + (event.key === "ArrowUp" ? -1 : 1) + slashMatches.length) % slashMatches.length;
+            refreshSlashMenu();
+            return;
+          }
+          if (event.key === "Enter") {
+            event.preventDefault();
+            selectSlashCommand(slashMatches[slashIndex]);
+            return;
+          }
+        }
         // History navigation: only intercept ArrowUp/Down at the very start/end of the textarea.
         // Otherwise keep native cursor movement (line up/down).
         const noModifier = !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey;
@@ -2146,7 +2743,8 @@
         function applyPromptValue(value, caret = "end") {
           promptInput.value = value;
           autoResizePrompt();
-          vscode.setState({ promptText: promptInput.value });
+          saveComposerState();
+          refreshSlashMenu();
           updateSendIconState();
           promptInput.focus();
           const len = promptInput.value.length;
@@ -2203,7 +2801,7 @@
           } else {
             // 回车：发送消息
             event.preventDefault();
-            sendPrompt();
+            sendPrompt(true);
           }
         } else if (event.key === "ArrowUp" && noModifier) {
           if ((historyCursor !== -1 || isCaretCollapsedAtStart(promptInput)) && inputHistory.length > 0) {
@@ -2220,10 +2818,23 @@
       });
 
       function addMessageBubble(msg, shouldConnect) {
+        const existing = msg.id && Array.from(messages.children).find((bubble) => bubble.dataset.messageId === msg.id);
+        if (existing && (!existing.dataset.preparing || msg.preparing)) return;
         if (msg.role === "system") {
           addBubble(msg.content, "system", msg.meta, shouldConnect);
         } else if (msg.role === "user") {
-          addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false);
+          const bubble = addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false);
+          if (msg.id) bubble.dataset.messageId = msg.id;
+          if (msg.preparing) bubble.dataset.preparing = "true";
+          const images = msg.meta?.userPrompt?.imageUrls || (Array.isArray(msg.contentParams) ? msg.contentParams : [msg.contentParams]).filter((part) => part?.type === "image_url").map((part) => part.image_url?.url).filter(Boolean);
+          for (const url of images) {
+            const image = document.createElement("img");
+            image.src = imagePreviewUrls[url] || url;
+            image.alt = "Attached image";
+            image.className = "message-image";
+            bubble.appendChild(image);
+          }
+          if (existing) existing.replaceWith(bubble);
         } else if (msg.role === "assistant") {
           addBubble(msg.html || msg.content, "assistant", msg.meta, shouldConnect, msg.content || "");
         } else if (msg.role === "tool") {
@@ -2233,6 +2844,127 @@
 
       window.addEventListener("message", (event) => {
         const message = event.data;
+        Object.assign(imagePreviewUrls, message.imagePreviews || {});
+        if (message.type === "userMessageCommitted") {
+          const bubble = Array.from(messages.children).find((item) => item.dataset.messageId === message.optimisticId);
+          if (bubble) bubble.dataset.messageId = message.message.id;
+          renderUndo();
+          return;
+        }
+        if (message.type === "undoState") {
+          if (message.sessionId !== currentSessionId) return;
+          undoState = message;
+          // Render the message being prepared as a normal user bubble. Retain it
+          // until the committed callback replaces it with the same message ID.
+          for (const bubble of messages.querySelectorAll("[data-preparing]")) {
+            if (bubble.dataset.messageId !== message.preparing?.id && !message.targets.some((target) => target.id === bubble.dataset.messageId)) bubble.remove();
+          }
+          if (message.preparing) {
+            const preparing = message.preparing;
+            addMessageBubble({ id: preparing.id, role: "user", content: preparing.content.text || "", meta: { userPrompt: preparing.content }, preparing: true }, false);
+          }
+          if (editingQueue && !undoRequest && !message.queued.some((item) => item.id === editingQueue.id)) endQueueEdit();
+          renderUndo();
+          setLoading(isProcessing(), currentSessionStatus);
+          refreshSlashMenu();
+          return;
+        }
+        if (message.type === "openUndo") {
+          if (message.sessionId === currentSessionId) openUndo();
+          return;
+        }
+        if (message.type === "undoResult") {
+          const request = undoRequest;
+          if (!request || request.requestId !== message.requestId || request.sessionId !== message.sessionId) return;
+          undoRequest = null;
+          promptInput.readOnly = false;
+          if (message.sessionId !== currentSessionId) return;
+          if (message.ok) {
+            if (request.action === "edit") {
+              savedQueueDraft = request.before;
+              editingQueue = { id: message.id, sessionId: message.sessionId };
+              applyComposerDraft(message.draft);
+              queueEditBar.hidden = false;
+            } else if (request.action === "save" || request.action === "cancel") endQueueEdit();
+            else if (request.action === "enqueue") {
+              composerState.pendingPlanImplementation = null;
+              renderPlanImplementation();
+              applyComposerDraft({ text: "", imageUrls: [], skills: [] });
+            }
+            else if (message.draft) applyComposerDraft(message.draft);
+            closeUndo();
+          }
+          if (message.error) {
+            undoError = message.error;
+            commandNotice.textContent = message.error;
+            commandNotice.hidden = false;
+
+          }
+          renderUndo();
+          return;
+        }
+        if (message.type === "planImplementation") {
+          if (composerState.offerPlanImplementation({ id: message.id, sessionId: message.sessionId })) {
+            closeSlashMenu();
+            hideSkillsPopup();
+            renderPlanImplementation();
+          }
+          return;
+        }
+        if (message.type === "commandNotice") {
+          commandNotice.textContent = message.text;
+          commandNotice.hidden = false;
+          return;
+        }
+        if (message.type === "commandBusy") {
+          commandBusy = Boolean(message.value);
+          closeSlashMenu();
+          setLoading(commandBusy || isBusyStatus(currentSessionStatus), currentSessionStatus);
+          return;
+        }
+        if (message.type === "openSessionPicker") {
+          if (!sessionDropdown.classList.contains("show")) toggleSessionDropdown();
+          return;
+        }
+        if (message.type === "refreshSessionHistory") {
+          if (message.sessionId !== currentSessionId) return;
+          const previousTop = messages.scrollTop;
+          const requests = normalizeAskPermissions(message.askPermissions);
+          // Permission choices refer to the history before this edit; rebuild those controls only.
+          permissionPromptState = null;
+          pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
+          currentAskPermissions = requests;
+          currentPluginRateLimitedTool = normalizePluginRateLimitedTool(message.pluginRateLimitedTool);
+          if (sessionSelectorTitleText) sessionSelectorTitleText.textContent = message.summary;
+          renderSessionHistory(message.messages || []);
+          messages.scrollTop = previousTop;
+          setLoading(commandBusy || isBusyStatus(message.status), message.status);
+          renderPluginRateLimitNotice();
+          if (Array.isArray(message.sessions)) updateSessionDropdown(message.sessions);
+          return;
+        }
+        if (message.type === "initializeEmpty" || message.type === "loadSession") {
+          // Carry forward drafts saved before per-session draft storage was introduced.
+          if (!hasLoadedSession && !savedState.drafts && savedState.promptText) {
+            composerState.sessionId = message.sessionId || null;
+          }
+          if (editingQueue) endQueueEdit();
+          undoState = { targets: [], queued: [], busy: false };
+          closeUndo();
+          hasLoadedSession = true;
+          promptInput.value = composerState.load(
+            message.type === "loadSession" ? message.sessionId : null,
+            message.planMode === true, promptInput.value, message.fresh === true
+          );
+          selectedSkills = [];
+          renderSkillsTags();
+          renderPlanMode();
+          renderPlanImplementation();
+          updateComposerInput();
+          closeSlashMenu();
+          hideSkillsPopup();
+        }
         if (message.type === "initializeEmpty") {
           // 初始化空聊天
           clearMessages();
@@ -2245,6 +2977,7 @@
           currentPluginRateLimitedTool = null;
           permissionPromptState = null;
           pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
           updateContextMeter(message.tokenTelemetry);
           attachmentManager?.clear();
           setLoading(false, currentSessionStatus);
@@ -2269,6 +3002,7 @@
           currentAskPermissions = normalizeAskPermissions(message.askPermissions);
           permissionPromptState = null;
           pendingPermissionReply = null;
+          reviewingDeniedPermission = false;
           updateContextMeter(message.tokenTelemetry);
           if ('processes' in message) {
             currentRunningProcesses = message.processes;
@@ -2292,38 +3026,14 @@
             draftBeforeHistory = null;
             pendingUserPrompt = null;
 
-            message.messages.forEach((msg, index) => {
-              // 判断是否需要连接到上一个消息
-              let shouldConnect = false;
-              if (index > 0) {
-                const prevMsg = message.messages[index - 1];
-                shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
-              }
-              addMessageBubble(msg, shouldConnect);
-            });
-
-            // 更新 lastMessageRole 为最后一条消息的role
-            if (message.messages.length > 0) {
-              lastMessageRole = message.messages[message.messages.length - 1].role;
-            }
-
-            // 批量更新所有连接线的高度
-            requestAnimationFrame(() => {
-              updateAllConnectionLines();
-            });
-
-            // 找最后一条 asThinking 为 true 的消息并展开
-            const thinkingBubbles = messages.querySelectorAll('.bubble.assistant[data-thinking="true"]');
-            if (thinkingBubbles.length > 0) {
-              const lastThinkingBubble = thinkingBubbles[thinkingBubbles.length - 1];
-              if (currentThinkingBubble && currentThinkingBubble !== lastThinkingBubble) {
-                setThinkingBubbleExpanded(currentThinkingBubble, false);
-              }
-              setThinkingBubbleExpanded(lastThinkingBubble, true);
-              currentThinkingBubble = lastThinkingBubble;
-            }
+            renderSessionHistory(message.messages);
           }
 
+          if (reloadQueueDraft && message.sessionId === savedState.sessionId) {
+            const draft = reloadQueueDraft;
+            reloadQueueDraft = null;
+            applyComposerDraft(draft);
+          }
           // 设置会话状态
           const isCurrentlyProcessing = isBusyStatus(currentSessionStatus);
           setLoading(isCurrentlyProcessing, currentSessionStatus);
@@ -2342,6 +3052,10 @@
         } else if (message.type === "sessionStatus") {
           if (message.sessionId && currentSessionId && message.sessionId !== currentSessionId) {
             return;
+          }
+          if (message.sessionId) {
+            composerState.updateSession(message.sessionId, message.planMode === true);
+            saveComposerState();
           }
           const nextStatus = message.status || null;
           if (!currentSessionId && message.sessionId) {
@@ -2362,7 +3076,7 @@
           if ('tokenTelemetry' in message) {
             updateContextMeter(message.tokenTelemetry);
           }
-          setLoading(isBusyStatus(nextStatus), nextStatus);
+          setLoading(commandBusy || isBusyStatus(nextStatus), nextStatus);
           renderPermissionPrompt();
           renderPluginRateLimitNotice();
         } else if (message.type === "llmStreamProgress") {
@@ -2393,12 +3107,7 @@
           currentLlmRetry = event;
           updateThinkingBubbleContent();
         } else if (message.type === "userMessage") {
-          addBubble(
-            message.meta?.isAnswers ? message.html || message.content || "" : message.content || "",
-            "user",
-            message.meta,
-            false
-          );
+          addMessageBubble({ ...message, role: "user" }, false);
 
           // Record user message into history
           if (typeof message.content === "string") {
@@ -2422,9 +3131,10 @@
           const shouldConnect = lastMessageRole !== null && lastMessageRole !== "user";
           addBubble(message.html || message.content || "", "assistant", message.meta, shouldConnect, message.content || "");
         } else if (message.type === "loading") {
+          if (!message.value) planImplementationRunning = false;
           // 加载状态
-          const newStatus = message.value ? "processing" : currentSessionStatus;
-          setLoading(Boolean(message.value), newStatus);
+          const newStatus = message.value ? "processing" : ("status" in message ? message.status : currentSessionStatus);
+          setLoading(commandBusy || Boolean(message.value), newStatus);
         } else if(message.type === "appendMessage") {
           // 新增消息
           addMessageBubble(message.message, message.shouldConnect);
@@ -2449,7 +3159,7 @@
           // 如果是普通 assistant 消息（不是思考），说明本轮回复已完成，标记为 completed
           if (message.message.role === "assistant" && message.message.meta?.asThinking !== true) {
             currentSessionStatus = "completed";
-            setLoading(false, currentSessionStatus);
+            setLoading(commandBusy, currentSessionStatus);
           }
 
           // 如果是新的 asThinking 为 true 的消息，展开最新的思考气泡
@@ -2469,6 +3179,10 @@
           // 接收可用技能列表
           availableSkills = message.skills || [];
           updateSkillsButtonTooltip();
+          refreshSlashMenu();
+        }
+        if (message.type === "initializeEmpty" || message.type === "loadSession") {
+          window.deepcodeStartup.ready();
         }
       });
 
@@ -2481,11 +3195,11 @@
         }, 100);
       });
 
-      // webview 准备就绪，请求初始数据
-      vscode.postMessage({ type: "ready" });
-
-      // 请求可用技能列表
-      vscode.postMessage({ type: "requestSkills" });
+      window.deepcodeStartup.stylesLoaded.then(() => {
+        // Wait for styles before rendering the initial session and measuring its layout.
+        vscode.postMessage({ type: "ready", ...(Object.hasOwn(savedState, "sessionId") ? { sessionId: savedState.sessionId } : {}) });
+        vscode.postMessage({ type: "requestSkills" });
+      });
     </script>
   </body>
 </html>

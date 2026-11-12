@@ -4,7 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import OpenAI from "openai";
 import MarkdownIt from "markdown-it";
-import type { SessionMessage } from "@vegamo/deepcode-core";
+import type { SessionMessage, SessionMessageTab } from "@vegamo/deepcode-core";
 import {
   SessionManager,
   type LlmRetryEvent,
@@ -14,17 +14,19 @@ import {
   type SkillInfo,
   type UserPromptContent,
   type UserToolPermission,
-  readDeepcodePlusApiKey,
-  resolveOpenAIConnection,
+  withPlusSubscription,
+  type OpenAIConnectionContext,
   resolveSettingsSources,
   type DeepcodingSettings,
   type ReasoningEffort,
   type ResolvedDeepcodingSettings,
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
-import { getNonce, isAllowedExternalUrl } from "./utils.js";
-import { handleWebviewMessage } from "./provider.js";
+import { collectPromptImageUrls, getNonce, isAllowedExternalUrl } from "./utils.js";
+import { handleWebviewMessage, postUndoState, releaseQueueEdit, refreshSessionHistory } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
+import { prepareToolDiffContent } from "./tool-diff.js";
+import { buildTrajectory, TrajectoryController, type TrajectoryPanel, type TrajectorySnapshot } from "./trajectory.js";
 
 const DEFAULT_MODEL = "deepseek-v4-pro";
 const DEFAULT_BASE_URL = "https://api.deepseek.com";
@@ -40,6 +42,9 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   private webviewView: vscode.WebviewView | undefined;
   private readonly md: MarkdownIt;
   private readonly sessionManager: SessionManager;
+  private unsubscribeRuntime?: () => void;
+  private readonly trajectory: TrajectoryController;
+  private readonly trajectorySnapshots = new WeakMap<TrajectoryPanel, TrajectorySnapshot>();
 
   constructor(context: vscode.ExtensionContext) {
     this.context = context;
@@ -73,10 +78,19 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
             }
           ),
       }),
-      createOpenAIClient: () => this.createOpenAIClient(),
+      createOpenAIClient: withPlusSubscription(
+        () => this.resolveCurrentSettings(),
+        (connection) => this.createOpenAIClient(connection)
+      ),
       getResolvedSettings: () => this.resolveCurrentSettings(),
       renderMarkdown: (text) => this.md.render(text),
+      onUserMessage: (message) => {
+        this.trajectory?.invalidate();
+        this.sendMessage({ type: "appendMessage", message, shouldConnect: false });
+        postUndoState(this.sessionManager, (message) => this.sendMessage(message));
+      },
       onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => {
+        this.trajectory?.invalidate();
         if (!this.webviewView) {
           return;
         }
@@ -87,16 +101,22 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           const reasoningContent = (message.messageParams as ReasoningMessageParams | null)?.reasoning_content;
           message.html = this.md.render(message.content || reasoningContent || "");
         }
-        this.webviewView.webview.postMessage({ type: "appendMessage", message, shouldConnect });
+        this.sendMessage({
+          type: "appendMessage",
+          message: { ...message, content: prepareToolDiffContent(message.role, message.content) },
+          shouldConnect,
+        });
       },
       onSessionEntryUpdated: (entry) => {
+        this.trajectory?.invalidate();
         if (!this.webviewView) {
           return;
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "sessionStatus",
           sessionId: entry.id,
           status: entry.status,
+          planMode: entry.planMode === true,
           pluginRateLimitedTool: entry.pluginRateLimitedTool ?? null,
           askPermissions: entry.askPermissions,
           processes: this.serializeProcesses(entry.processes),
@@ -104,10 +124,11 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         });
       },
       onLlmStreamProgress: (progress: LlmStreamProgress) => {
+        this.trajectory?.stream(progress);
         if (!this.webviewView) {
           return;
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "llmStreamProgress",
           progress,
         });
@@ -116,21 +137,66 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         if (!this.webviewView) {
           return;
         }
-        this.webviewView.webview.postMessage({
+        this.sendMessage({
           type: "llmRetry",
           event,
         });
       },
     });
+    this.trajectory = new TrajectoryController({
+      activeSessionId: () => this.sessionManager.getActiveSessionId(),
+      readSnapshot: () => {
+        const id = this.sessionManager.getActiveSessionId();
+        return buildTrajectory(
+          id ? this.sessionManager.getSession(id) : null,
+          id ? this.sessionManager.listSessionMessages(id) : []
+        );
+      },
+      createPanel: () => this.createTrajectoryPanel(),
+      send: (panel, snapshot, progress) => {
+        const webview = (panel as vscode.WebviewPanel).webview;
+        if (this.trajectorySnapshots.get(panel) === snapshot) {
+          void webview.postMessage({ type: "trajectoryProgress", sessionId: snapshot.sessionId, progress });
+          return;
+        }
+        this.trajectorySnapshots.set(panel, snapshot);
+        const records = snapshot.records.map((record) => ({
+          ...record,
+          html: this.md.render(record.content),
+          imageUrls: record.images,
+        }));
+        this.postToWebview(webview, {
+          type: "trajectorySnapshot",
+          ...snapshot,
+          records,
+          progress,
+          running: Boolean(snapshot.sessionId && this.sessionManager.isSessionRunning(snapshot.sessionId)),
+        });
+      },
+    });
+    this.unsubscribeRuntime = this.sessionManager.subscribeRuntime(() => {
+      this.trajectory.invalidate();
+      if (this.webviewView) postUndoState(this.sessionManager, (message) => this.sendMessage(message));
+    });
     void this.initializeMcpServers();
   }
 
   dispose(): void {
+    this.unsubscribeRuntime?.();
+    this.trajectory.dispose();
+    releaseQueueEdit(this.sessionManager);
     this.sessionManager.dispose();
   }
 
   resolveWebviewView(webviewView: vscode.WebviewView): void {
     this.webviewView = webviewView;
+    webviewView.onDidChangeVisibility(() => {
+      if (!webviewView.visible) releaseQueueEdit(this.sessionManager);
+    });
+    webviewView.onDidDispose(() => {
+      if (this.webviewView === webviewView) this.webviewView = undefined;
+      releaseQueueEdit(this.sessionManager);
+    });
 
     webviewView.webview.options = {
       enableScripts: true,
@@ -141,6 +207,11 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.onDidReceiveMessage(async (message) => {
       const msg = message as Record<string, unknown> | undefined;
+
+      if (msg?.type === "openTrajectory") {
+        this.trajectory.open();
+        return;
+      }
 
       // openFile requires vscode API, handle here directly
       if (msg?.type === "openFile") {
@@ -161,7 +232,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
       const handled = await handleWebviewMessage(message, {
         sessionManager: this.sessionManager,
-        postMessage: (m) => this.webviewView?.webview.postMessage(m),
+        postMessage: (m) => this.sendMessage(m),
         renderMarkdown: (text) => this.md.render(text),
         copyToClipboard: (text) => void vscode.env.clipboard.writeText(text),
       });
@@ -233,8 +304,11 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       messages: messages
         .filter((m) => m.visible)
         .map((m) => ({
+          id: m.id,
+          createTime: m.createTime,
+          contentParams: m.contentParams,
           role: m.role,
-          content: m.content,
+          content: prepareToolDiffContent(m.role, m.content),
           html:
             m.role !== "tool"
               ? this.md.render(m.content || (m.messageParams as ReasoningMessageParams | null)?.reasoning_content || "")
@@ -282,10 +356,129 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   }
 
   private sendMessage(message: unknown): void {
+    const type = (message as { type?: string } | null)?.type;
+    if (type === "loadSession" || type === "initializeEmpty") this.trajectory.invalidate();
     if (!this.webviewView) {
       return;
     }
-    this.webviewView.webview.postMessage(message);
+    this.postToWebview(this.webviewView.webview, message);
+  }
+
+  private postToWebview(webview: vscode.Webview, message: unknown): void {
+    const imagePreviews: Record<string, string> = {};
+    const roots = [...(webview.options.localResourceRoots ?? [])];
+    for (const url of collectPromptImageUrls(message)) {
+      try {
+        const uri = vscode.Uri.parse(url);
+        if (uri.scheme !== "file") continue;
+        const parent = vscode.Uri.file(path.dirname(uri.fsPath));
+        if (!roots.some((root) => root.toString() === parent.toString())) roots.push(parent);
+        imagePreviews[url] = webview.asWebviewUri(uri).toString();
+      } catch {
+        /* Ignore malformed legacy attachment URLs. */
+      }
+    }
+    if (roots.length !== webview.options.localResourceRoots?.length) {
+      webview.options = { ...webview.options, localResourceRoots: roots };
+    }
+    webview.postMessage(message && typeof message === "object" ? { ...message, imagePreviews } : message);
+  }
+
+  private createTrajectoryPanel(): vscode.WebviewPanel {
+    const panel = vscode.window.createWebviewPanel(
+      "deepcode.trajectory",
+      "Deep Code Trajectory",
+      vscode.ViewColumn.Active,
+      {
+        enableScripts: true,
+        localResourceRoots: [this.context.extensionUri],
+        retainContextWhenHidden: true,
+      }
+    );
+    const uri = (name: string) =>
+      panel.webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "resources", name)).toString();
+    const substitutions: Record<string, string> = {
+      nonce: getNonce(),
+      cspSource: panel.webview.cspSource,
+      cssUri: uri("trajectory.css"),
+      jsUri: uri("trajectory.js"),
+    };
+    panel.webview.html = fs
+      .readFileSync(vscode.Uri.joinPath(this.context.extensionUri, "resources", "trajectory.html").fsPath, "utf8")
+      .replace(/\{\{(\w+)\}\}/g, (_, key: string) => substitutions[key] ?? "");
+    panel.webview.onDidReceiveMessage((message: unknown) => {
+      if (!message || typeof message !== "object") return;
+      const msg = message as Record<string, unknown>;
+      if (msg.type === "trajectoryEdit" || msg.type === "trajectoryDelete") {
+        try {
+          const sessionId = this.sessionManager.getActiveSessionId();
+          if (!sessionId || msg.sessionId !== sessionId) throw new Error("This session is no longer active.");
+          const snapshot = buildTrajectory(
+            this.sessionManager.getSession(sessionId),
+            this.sessionManager.listSessionMessages(sessionId)
+          );
+          const record = snapshot.records.find((item) => item.id === msg.recordId);
+          if (!record) throw new Error("Message was not found.");
+          if (msg.type === "trajectoryDelete") this.sessionManager.deleteSessionMessage(sessionId, record.source);
+          else {
+            if (
+              typeof msg.text !== "string" ||
+              !["Content", "Thinking", "Parameters", "Result", "Raw"].includes(String(msg.tab))
+            )
+              throw new Error("Invalid message edit.");
+            this.sessionManager.editSessionMessage(sessionId, record.source, msg.tab as SessionMessageTab, msg.text);
+          }
+          refreshSessionHistory(
+            sessionId,
+            this.sessionManager,
+            (message) => this.sendMessage(message),
+            (text) => this.md.render(text)
+          );
+          const updatedRecord =
+            msg.type === "trajectoryEdit"
+              ? buildTrajectory(
+                  this.sessionManager.getSession(sessionId),
+                  this.sessionManager.listSessionMessages(sessionId)
+                ).records.find(
+                  (item) =>
+                    item.source.messageId === record.source.messageId &&
+                    item.source.toolCallIndex === record.source.toolCallIndex
+                )
+              : undefined;
+          postUndoState(this.sessionManager, (message) => this.sendMessage(message));
+          this.trajectory.invalidate();
+          void panel.webview.postMessage({
+            type: "trajectoryMutationResult",
+            requestId: msg.requestId,
+            sessionId,
+            recordId: msg.recordId,
+            nextRecordId: updatedRecord?.id,
+            tab: msg.tab,
+          });
+        } catch (error) {
+          void panel.webview.postMessage({
+            type: "trajectoryMutationResult",
+            requestId: msg.requestId,
+            sessionId: msg.sessionId,
+            recordId: msg.recordId,
+            tab: msg.tab,
+            error: error instanceof Error ? error.message : "Could not update message.",
+          });
+        }
+      }
+      if (msg.type === "trajectoryCopy" && typeof msg.text === "string") {
+        const respond = (success: boolean) => {
+          void panel.webview.postMessage({ type: "trajectoryCopyResult", context: msg.context, success });
+        };
+        void vscode.env.clipboard.writeText(msg.text).then(
+          () => respond(true),
+          () => respond(false)
+        );
+      }
+      if (msg.type === "openExternal" && isAllowedExternalUrl(msg.url))
+        void vscode.env.openExternal(vscode.Uri.parse(msg.url));
+    });
+    return panel;
   }
 
   private async sendSkillsList(sessionId?: string): Promise<void> {
@@ -389,7 +582,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     this.showSessionsList();
   }
 
-  private createOpenAIClient(): {
+  private createOpenAIClient(context: OpenAIConnectionContext): {
     client: OpenAI | null;
     apiKey?: string;
     model: string;
@@ -399,15 +592,26 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     debugLogEnabled: boolean;
     notify?: string;
     webSearchTool?: string;
+    deepseekSearchApiEnabled?: boolean;
     env?: Record<string, string>;
     machineId?: string;
     plusApiKey?: string;
+    usingPlus: boolean;
+    configurationError?: string;
   } {
     const settings = this.resolveCurrentSettings();
-    const plusApiKey = readDeepcodePlusApiKey();
-    const connection = resolveOpenAIConnection(settings, plusApiKey);
+    const { plusApiKey, connection } = context;
 
-    const { model, thinkingEnabled, reasoningEffort, debugLogEnabled, notify, webSearchTool, env } = settings;
+    const {
+      model,
+      thinkingEnabled,
+      reasoningEffort,
+      debugLogEnabled,
+      notify,
+      webSearchTool,
+      deepseekSearchApiEnabled,
+      env,
+    } = settings;
     const { apiKey, baseURL } = connection;
     const machineId = vscode.env.machineId;
 
@@ -422,9 +626,12 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
         debugLogEnabled,
         notify,
         webSearchTool,
+        deepseekSearchApiEnabled,
         env,
         machineId,
         plusApiKey,
+        usingPlus: connection.usingPlus,
+        configurationError: connection.configurationError,
       };
     }
 
@@ -443,9 +650,12 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       debugLogEnabled,
       notify,
       webSearchTool,
+      deepseekSearchApiEnabled,
       env,
       machineId,
       plusApiKey,
+      usingPlus: connection.usingPlus,
+      configurationError: connection.configurationError,
     };
   }
 
@@ -565,6 +775,8 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       vscode.Uri.joinPath(this.context.extensionUri, "resources", "thinking-preview.js")
     );
 
+    const composerJsUri = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, "out", "composer.js"));
+
     // 获取 Logo 文件 URI
     const iconPath = vscode.Uri.joinPath(this.context.extensionUri, "resources", "deepcoding_icon.png");
     const iconUri = webview.asWebviewUri(iconPath);
@@ -575,8 +787,12 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     html = html.replace(/\{\{cssUri\}\}/g, cssUri.toString());
     html = html.replace(/\{\{attachmentsJsUri\}\}/g, attachmentsJsUri.toString());
     html = html.replace(/\{\{thinkingPreviewJsUri\}\}/g, thinkingPreviewJsUri.toString());
+    html = html.replace(/\{\{composerJsUri\}\}/g, composerJsUri.toString());
     html = html.replace(/\{\{iconUri\}\}/g, iconUri.toString());
-    html = html.replace(/\{\{workspaceRoot\}\}/g, JSON.stringify(this.getWorkspaceRoot()));
+    html = html.replace(/\{\{workspaceRoot\}\}/g, () =>
+      JSON.stringify(this.getWorkspaceRoot()).replace(/</g, "\\u003c")
+    );
+    html = html.replace(/\{\{userHome\}\}/g, () => JSON.stringify(os.homedir()).replace(/</g, "\\u003c"));
 
     return html;
   }

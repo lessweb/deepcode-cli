@@ -3,12 +3,20 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { createRequire } from "node:module";
 import sharp from "sharp";
 import { TENCENT_MIRROR_REGISTRY } from "@vegamo/deepcode-core";
-import { buildSharpInstallArgs, createSharpLoader, type SharpInstallProgress } from "../sharp-loader.js";
+import {
+  buildNpmInvocation,
+  buildSharpInstallArgs,
+  createSharpLoader,
+  type SharpInstallProgress,
+} from "../sharp-loader.js";
 
 const tempDirs: string[] = [];
-const SHARP_VERSION = "0.35.3";
+const require = createRequire(import.meta.url);
+const sharpPackagePath = path.join(path.dirname(require.resolve("sharp")), "..", "package.json");
+const SHARP_VERSION: string = JSON.parse(fs.readFileSync(sharpPackagePath, "utf8")).version;
 
 afterEach(() => {
   for (const dir of tempDirs.splice(0)) {
@@ -125,6 +133,29 @@ test("Sharp install uses the npm mirror", () => {
     "/tmp/sharp",
     `sharp@${SHARP_VERSION}`,
   ]);
+});
+
+test("Windows npm invocation runs npm.cmd through the shell", () => {
+  const invocation = buildNpmInvocation(["root", "-g"], "win32");
+
+  assert.equal(invocation.shell, true);
+  assert.deepEqual(invocation.args, []);
+  assert.equal(invocation.command, 'npm.cmd "root" "-g"');
+});
+
+test("Windows npm invocation quotes arguments so paths with spaces survive the shell", () => {
+  const invocation = buildNpmInvocation(
+    buildSharpInstallArgs("C:\\Users\\Some User\\AppData\\Roaming\\Code\\User\\globalStorage\\sharp", SHARP_VERSION),
+    "win32"
+  );
+
+  assert.match(invocation.command, /--prefix" "C:\\Users\\Some User\\/);
+});
+
+test("Posix npm invocation keeps an argv list without a shell", () => {
+  const invocation = buildNpmInvocation(["root", "-g"], "darwin");
+
+  assert.deepEqual(invocation, { command: "npm", args: ["root", "-g"], shell: false });
 });
 
 test("Sharp tests run against the declared dependency version", () => {

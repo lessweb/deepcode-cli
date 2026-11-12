@@ -3,6 +3,8 @@ import * as path from "path";
 import type { DeepcodingSettings, PermissionScope, PermissionSettings } from "../settings";
 import type { ToolExecutionFollowUpMessage } from "./tool-types";
 import { isAbsoluteFilePath, normalizeFilePath } from "./state";
+import { buildFileDiff, readTextFileWithMetadata } from "./file-utils";
+import { getDiffDetails, type DiffDetails } from "./diff-preview";
 
 export type BashPermissionScope = Exclude<PermissionScope, "mcp"> | "unknown";
 type PermissionPolicySettings = Required<Omit<PermissionSettings, "addWorkingDirs">> &
@@ -13,6 +15,12 @@ export type PermissionDecision = "allow" | "deny" | "ask";
 export type UserToolPermission = {
   toolCallId: string;
   permission: "allow" | "deny";
+};
+
+export type PermissionReply = {
+  permissions?: UserToolPermission[];
+  alwaysAllows?: PermissionScope[];
+  sessionAllows?: PermissionScope[];
 };
 
 export type MessageToolPermission = {
@@ -28,6 +36,7 @@ export type AskPermissionRequest = {
   name: string;
   command: string;
   description?: string;
+  diff?: { filePath: string; details: DiffDetails };
 };
 
 export type PermissionToolCall = {
@@ -64,6 +73,7 @@ export type ComputeToolCallPermissionsOptions = {
   toolCalls: unknown[];
   settings?: PermissionPolicySettings;
   forceAskScopes?: readonly PermissionScope[];
+  sessionAllows?: ReadonlySet<PermissionScope>;
   readPermissionExemptPaths?: string[];
   resolveSnippetPath?: (sessionId: string, snippetId: string) => string | null | undefined;
 };
@@ -168,29 +178,76 @@ export function computeToolCallPermissions(options: ComputeToolCallPermissionsOp
       readPermissionExemptPaths: options.readPermissionExemptPaths,
       resolveSnippetPath: options.resolveSnippetPath,
     });
-    const evaluatedPermission = evaluatePermissionScopes(request.scopes, options.settings);
+    // Granted scopes need no further approval; explicit denies and unknown effects still apply.
+    const scopes = request.scopes.filter(
+      (scope) => scope === "unknown" || !options.sessionAllows?.has(scope) || options.settings?.deny.includes(scope)
+    );
+    const evaluatedPermission = evaluatePermissionScopes(scopes, options.settings);
     const forcedAskScopes =
-      evaluatedPermission === "deny"
-        ? []
-        : getAllowedForcedAskScopes(request.scopes, options.settings, options.forceAskScopes);
+      evaluatedPermission === "deny" ? [] : getAllowedForcedAskScopes(scopes, options.settings, options.forceAskScopes);
     const permission = forcedAskScopes.length > 0 ? "ask" : evaluatedPermission;
     permissions.push({ toolCallId: toolCall.id, permission });
     if (permission === "ask") {
-      const askScopes = mergeAskScopes(
-        getPermissionScopesRequiringAsk(request.scopes, options.settings),
-        forcedAskScopes
-      );
+      const askScopes = mergeAskScopes(getPermissionScopesRequiringAsk(scopes, options.settings), forcedAskScopes);
       askPermissions.push({
         toolCallId: toolCall.id,
         scopes: askScopes.length > 0 ? askScopes : request.scopes,
         name: request.name,
         command: request.command,
         description: request.description,
+        diff: buildPermissionDiff(toolCall, options),
       });
     }
   }
 
   return { permissions, askPermissions };
+}
+
+function buildPermissionDiff(
+  toolCall: PermissionToolCall,
+  options: ComputeToolCallPermissionsOptions
+): AskPermissionRequest["diff"] {
+  const name = toolCall.function.name.toLowerCase();
+  if (name !== "write" && name !== "edit") return undefined;
+  const args = parseToolArgumentsForPermissions(toolCall.function.arguments);
+  const filePath = normalizeFilePath(
+    name === "edit"
+      ? resolveEditPermissionPath(options.sessionId, args, options.resolveSnippetPath)
+      : typeof args.file_path === "string"
+        ? args.file_path
+        : ""
+  );
+  if (!isAbsoluteFilePath(filePath)) return undefined;
+
+  try {
+    let original: string | null;
+    let updated: string;
+    if (name === "edit") {
+      if (typeof args.old_string !== "string" || typeof args.new_string !== "string") return undefined;
+      original = args.old_string;
+      updated = args.new_string;
+    } else {
+      const content = args.content;
+      if (typeof content === "string") {
+        updated = content;
+      } else if (filePath.toLowerCase().endsWith(".json") && content !== null && typeof content === "object") {
+        updated = JSON.stringify(content, null, 2);
+      } else {
+        return undefined;
+      }
+      try {
+        original = readTextFileWithMetadata(filePath).content;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        original = null;
+      }
+    }
+    const { details } = buildFileDiff(filePath, original, updated);
+    return details ? { filePath, details } : undefined;
+  } catch {
+    // A missing preview must not prevent the user from answering the permission request.
+    return undefined;
+  }
 }
 
 function getAllowedForcedAskScopes(
@@ -489,10 +546,15 @@ export function isPathInAnyDirectory(
   return false;
 }
 
-export function hasUserPermissionReplies(value: { permissions?: unknown; alwaysAllows?: unknown }): boolean {
+export function hasUserPermissionReplies(value: {
+  permissions?: unknown;
+  alwaysAllows?: unknown;
+  sessionAllows?: unknown;
+}): boolean {
   return Boolean(
     (Array.isArray(value.permissions) && value.permissions.length > 0) ||
-    (Array.isArray(value.alwaysAllows) && value.alwaysAllows.length > 0)
+    (Array.isArray(value.alwaysAllows) && value.alwaysAllows.length > 0) ||
+    (Array.isArray(value.sessionAllows) && value.sessionAllows.length > 0)
   );
 }
 
@@ -604,12 +666,15 @@ export function normalizeAskPermissions(value: unknown): AskPermissionRequest[] 
     const scopes = Array.isArray(record.scopes)
       ? record.scopes.filter((scope): scope is AskPermissionScope => isAskPermissionScope(scope))
       : [];
+    const diff = record.diff as AskPermissionRequest["diff"];
+    const details = getDiffDetails({ diff_details: diff?.details });
     result.push({
       toolCallId: record.toolCallId,
       scopes,
       name: record.name,
       command: typeof record.command === "string" ? record.command : record.name,
       description: typeof record.description === "string" ? record.description : undefined,
+      ...(typeof diff?.filePath === "string" && details ? { diff: { filePath: diff.filePath, details } } : {}),
     });
   }
   return result.length > 0 ? result : undefined;

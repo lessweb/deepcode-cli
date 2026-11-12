@@ -112,6 +112,9 @@ body {
 }
 
 /* Header New Button */
+.header-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.header-trajectory-btn { color: var(--vscode-descriptionForeground); }
+.header-new-btn:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: 1px; }
 .header-new-btn {
   border: none;
   border-radius: 4px;
@@ -610,7 +613,7 @@ body {
 
 .diff-line {
   display: grid;
-  grid-template-columns: 20px 1fr;
+  grid-template-columns: calc(var(--diff-number-width, 1ch) + 12px) 20px minmax(0, 1fr);
   gap: 0;
   font-family: var(--vscode-editor-font-family);
   font-size: 12px;
@@ -911,6 +914,27 @@ body {
 
 .permission-prompt-host {
   margin-bottom: 10px;
+}
+
+.plan-implementation-menu {
+  margin-bottom: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: var(--vscode-input-background);
+}
+
+.plan-implementation-choice {
+  width: 100%;
+  border: none;
+  background: transparent;
+  color: var(--vscode-foreground);
+  font-family: inherit;
+  text-align: left;
+}
+
+.plan-implementation-choice:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+  background: var(--vscode-list-hoverBackground);
 }
 
 .permission-card {
@@ -1589,6 +1613,52 @@ textarea::placeholder {
   width: calc(100% - 60px);
 }
 
+.plan-mode-tag {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 3px 8px 3px 5px;
+  border-radius: 14px;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.plan-mode-tag[hidden] {
+  display: none;
+}
+
+.plan-mode-tag button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.plan-mode-tag button:hover {
+  background: var(--vscode-toolbar-hoverBackground);
+}
+
+.plan-mode-tag button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.command-notice {
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--vscode-descriptionForeground);
+}
+
 /* Skills Tags */
 .skills-tags {
   display: flex;
@@ -1675,3 +1745,59 @@ textarea::placeholder {
   overflow-wrap: break-word;
   word-break: break-all;
 }
+
+.diff-heading {
+  overflow-wrap: anywhere;
+}
+
+.diff-line-number {
+  color: var(--vscode-descriptionForeground, #808080);
+  text-align: right;
+  padding: 1px 6px;
+  user-select: none;
+}
+
+.diff-added-count,
+.diff-line.added .diff-line-marker,
+.diff-line.added .diff-line-content {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #2ea043);
+}
+
+.diff-removed-count,
+.diff-line.removed .diff-line-marker,
+.diff-line.removed .diff-line-content {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f85149);
+}
+
+#undoDialog {
+  color: var(--vscode-foreground);
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-widget-border, #666);
+  border-radius: 6px;
+  width: min(500px, calc(100% - 40px));
+  max-height: 75vh;
+  padding: 14px;
+}
+#undoDialog::backdrop { background: #0006; }
+.undo-heading, .queue-message, .queue-edit-bar { display: flex; align-items: center; gap: 8px; }
+.undo-heading { justify-content: space-between; margin-bottom: 12px; }
+#undoBody { overflow-y: auto; max-height: 60vh; }
+#undoBody button { display: block; width: 100%; text-align: left; margin: 6px 0; padding: 8px; }
+#undoBody small { display: block; opacity: .7; margin-top: 4px; }
+#undoDialog button, .queue-list button, .queue-edit-bar button {
+  color: var(--vscode-foreground);
+  background: var(--vscode-button-secondaryBackground);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+}
+#undoDialog button:focus-visible, .queue-list button:focus-visible, .queue-edit-bar button:focus-visible {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+#undoDialog button:disabled, .queue-list button:disabled { opacity: .5; cursor: default; }
+.queue-list { max-height: 140px; overflow-y: auto; padding: 8px 0; }
+.queue-message { margin-top: 6px; }
+.queue-message span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-edit-bar { padding: 6px 0; }
+.queue-edit-bar[hidden] { display: none; }
+.message-image { display: block; max-width: 100%; max-height: 160px; margin-top: 6px; }

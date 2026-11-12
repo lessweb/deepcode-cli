@@ -1,6 +1,6 @@
 {
   "name": "@vegamo/deepcode-monorepo",
-  "version": "0.4.0",
+  "version": "0.6.0",
   "private": true,
   "description": "Deep Code — CLI, core library, and VSCode companion",
   "license": "MIT",
@@ -37,6 +37,7 @@
     "@eslint/js": "^9.39.4",
     "@types/ejs": "^3.1.5",
     "@types/node": "^25.6.0",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.2.14",
     "esbuild": "^0.28.0",
     "eslint": "^10.7.0",

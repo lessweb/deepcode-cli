@@ -5,91 +5,59 @@ import * as path from "path";
 import ejs from "ejs";
 import matter from "gray-matter";
 import { fileURLToPath } from "url";
-import type { SessionMessage } from "./session";
 import { findGitBashPath, resolveShellPath } from "./common/shell-utils";
 import { supportsMultimodal, type MultimodalMode } from "./common/model-capabilities";
 
-const COMPACT_PROMPT_BASE = `Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and your previous actions.
-This summary should be thorough in capturing technical details, code patterns, and architectural decisions that would be essential for continuing development work without losing context.
+const SUMMARY_OPEN_TAG = "<compacted-summary>";
+const SUMMARY_CLOSE_TAG = "</compacted-summary>";
 
-Before providing your final summary, wrap your analysis in <analysis> tags to organize your thoughts and ensure you've covered all necessary points. In your analysis process:
+/**
+ * The summarization directive, delivered as the FINAL user message after the
+ * replayed conversation rather than as a distinct summarizer system prompt.
+ * Keeping the conversation's own system prompt, tools, and message prefix in
+ * front of it makes the auxiliary call a genuine prefix of the last routed
+ * request, so the provider's KV cache is reused instead of invalidated.
+ */
+export const COMPACTION_INSTRUCTION = [
+  "You are now acting as a compaction engine for this AI coding assistant. Condense the conversation ABOVE into a structured checkpoint that lets another model resume the work with no loss of essential context.",
+  "",
+  'Output EXACTLY the Markdown structure below: keep every section, in order. Use terse bullets, not prose paragraphs. Write "(none)" for an empty section — never drop a section.',
+  "",
+  "## Primary Request and Intent",
+  "- [the user's original and evolving goals; quote verbatim where the exact wording matters]",
+  "",
+  "## Key Technical Concepts",
+  "- [technologies, frameworks, patterns, and conventions in play]",
+  "",
+  "## Files and Code",
+  "- [exact path: why it matters, key changes or snippets]",
+  "",
+  "## Errors and Fixes",
+  "- [error: how it was resolved, plus any related user feedback]",
+  "",
+  "## Pending Jobs",
+  "- [explicitly requested work not yet completed]",
+  "",
+  "## Current Work",
+  "- [precisely what was in progress at this checkpoint]",
+  "",
+  "## Next Step",
+  '- [the single next action, directly in line with the most recent request, or "(none)"]',
+  "",
+  "## Critical Context",
+  "- [decisions and their rationale, constraints, user preferences, open questions, data needed to continue]",
+  "",
+  "Rules:",
+  "- Write concise English engineering prose. Preserve exact file paths, commands, error strings, identifiers, numeric values, function signatures, and syntax fragments.",
+  "- Capture user feedback and explicit instructions faithfully, especially corrections.",
+  "- Do NOT mention this summarization request or that the context was compacted.",
+  "- Output only the checkpoint text: do not call any tool or take any other action.",
+  `- If the conversation already contains a ${SUMMARY_OPEN_TAG} block, it is a PRIOR checkpoint. Do not copy it forward verbatim: preserve still-true facts, drop stale ones, and merge newer information into a single consolidated summary under the same structure.`,
+].join("\n");
 
-1. Chronologically analyze each message and section of the conversation. For each section thoroughly identify:
-   - The user's explicit requests and intents
-   - Your approach to addressing the user's requests
-   - Key decisions, technical concepts and code patterns
-   - Specific details like:
-     - file names
-     - full code snippets
-     - function signatures
-     - file edits
-  - Errors that you ran into and how you fixed them
-  - Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
-2. Double-check for technical accuracy and completeness, addressing each required element thoroughly.
-
-Your summary should include the following sections:
-
-1. Primary Request and Intent: Capture all of the user's explicit requests and intents in detail
-2. Key Technical Concepts: List all important technical concepts, technologies, and frameworks discussed.
-3. Files and Code Sections: Enumerate specific files and code sections examined, modified, or created. Pay special attention to the most recent messages and include full code snippets where applicable and include a summary of why this file read or edit is important.
-4. Errors and fixes: List all errors that you ran into, and how you fixed them. Pay special attention to specific user feedback that you received, especially if the user told you to do something differently.
-5. Problem Solving: Document problems solved and any ongoing troubleshooting efforts.
-6. All user messages: List ALL user messages that are not tool results. These are critical for understanding the users' feedback and changing intent.
-6. Pending Tasks: Outline any pending tasks that you have explicitly been asked to work on.
-7. Current Work: Describe in detail precisely what was being worked on immediately before this summary request, paying special attention to the most recent messages from both user and assistant. Include file names and code snippets where applicable.
-8. Optional Next Step: List the next step that you will take that is related to the most recent work you were doing. IMPORTANT: ensure that this step is DIRECTLY in line with the user's most recent explicit requests, and the task you were working on immediately before this summary request. If your last task was concluded, then only list next steps if they are explicitly in line with the users request. Do not start on tangential requests or really old requests that were already completed without confirming with the user first.
-                       If there is a next step, include direct quotes from the most recent conversation showing exactly what task you were working on and where you left off. This should be verbatim to ensure there's no drift in task interpretation.
-
-Here's an example of how your output should be structured:
-
-<example>
-<analysis>
-[Your thought process, ensuring all points are covered thoroughly and accurately]
-</analysis>
-
-<summary>
-1. Primary Request and Intent:
-   [Detailed description]
-
-2. Key Technical Concepts:
-   - [Concept 1]
-   - [Concept 2]
-   - [...]
-
-3. Files and Code Sections:
-   - [File Name 1]
-      - [Summary of why this file is important]
-      - [Summary of the changes made to this file, if any]
-      - [Important Code Snippet]
-   - [File Name 2]
-      - [Important Code Snippet]
-   - [...]
-
-4. Errors and fixes:
-    - [Detailed description of error 1]:
-      - [How you fixed the error]
-      - [User feedback on the error if any]
-    - [...]
-
-5. Problem Solving:
-   [Description of solved problems and ongoing troubleshooting]
-
-6. All user messages: 
-    - [Detailed non tool use user message]
-    - [...]
-
-7. Pending Tasks:
-   - [Task 1]
-   - [Task 2]
-   - [...]
-
-8. Current Work:
-   [Precise description of current work]
-
-9. Optional Next Step:
-   [Optional Next step to take]
-
-</summary>`;
+/** Framing that makes the replacement user message established context. */
+export const CHECKPOINT_PREAMBLE =
+  "This is an automatically generated checkpoint condensing an earlier span of the conversation to free up context. Treat the captured context as established background and build on it without restating it. Continue the task directly from the messages that follow, without acknowledging this checkpoint.";
 
 const SYSTEM_PROMPT_BASE = `You are a helpful software engineer assistant.`;
 
@@ -293,20 +261,12 @@ export function getSystemPrompt(_projectRoot: string, options: PromptToolOptions
   return toolDocs ? `${SYSTEM_PROMPT_BASE}\n\n# Available Tools\n\n${toolDocs}` : SYSTEM_PROMPT_BASE;
 }
 
-export function getCompactPrompt(sessionMessages: SessionMessage[]): string {
-  const jsonl = sessionMessages
-    .map((message) =>
-      JSON.stringify({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        contentParams: message.contentParams,
-        messageParams: message.messageParams,
-        createTime: message.createTime,
-      })
-    )
-    .join("\n");
-  return `${COMPACT_PROMPT_BASE}\n\nconversation below:\n\n\`\`\`jsonl\n${jsonl}\n\`\`\``;
+export function getCompactPrompt(): string {
+  return COMPACTION_INSTRUCTION;
+}
+
+export function frameCompactSummary(summary: string): string {
+  return `${CHECKPOINT_PREAMBLE}\n\n${SUMMARY_OPEN_TAG}\n${summary}\n${SUMMARY_CLOSE_TAG}`;
 }
 
 export function getRuntimeContext(projectRoot: string, model?: string, addWorkingDirs: string[] = []): string {
@@ -433,7 +393,9 @@ export type ToolDefinition = {
       type: "object";
       properties: Record<string, unknown>;
       required?: string[];
-      additionalProperties?: boolean;
+      additionalProperties?: boolean | Record<string, unknown>;
+      $defs?: Record<string, unknown>;
+      definitions?: Record<string, unknown>;
     };
   };
 };
@@ -643,7 +605,7 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
           properties: {
             snippet_id: {
               type: "string",
-              description: "Required Read/Edit snippet_id.",
+              description: "Required Read/Write/Edit snippet_id.",
             },
             file_path: {
               type: "string",

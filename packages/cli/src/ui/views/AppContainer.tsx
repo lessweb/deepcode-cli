@@ -5,12 +5,13 @@ import { RawModeProvider } from "../contexts";
 
 const AppContainer: React.FC<{
   projectRoot: string;
+  settingsFile?: string;
   version: string;
   initialPrompt: string | undefined;
   resumeSessionId: string | true | undefined;
   forkSessionId: string | undefined;
   onRestart: () => void;
-}> = ({ version, projectRoot, initialPrompt, resumeSessionId, forkSessionId, onRestart }) => {
+}> = ({ version, projectRoot, settingsFile, initialPrompt, resumeSessionId, forkSessionId, onRestart }) => {
   return (
     <AppContext.Provider value={{ version: version }}>
       <RawModeProvider>
@@ -19,6 +20,7 @@ const AppContainer: React.FC<{
           resumeSessionId={resumeSessionId}
           forkSessionId={forkSessionId}
           projectRoot={projectRoot}
+          settingsFile={settingsFile}
           onRestart={onRestart}
         />
       </RawModeProvider>

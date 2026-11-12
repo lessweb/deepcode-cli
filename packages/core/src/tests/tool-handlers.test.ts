@@ -1,9 +1,14 @@
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
+import { killProcessTree } from "../common/process-tree";
 import { afterEach, test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { setTimeout as delay } from "node:timers/promises";
+import { setTimeout as delay, setImmediate as nextTurn } from "node:timers/promises";
 import type { BackgroundProcessCompletion, ProcessTimeoutControl, ToolExecutionContext } from "../tools/executor";
 import { handleBashTool } from "../tools/bash-handler";
 import { handleEditTool } from "../tools/edit-handler";
@@ -11,6 +16,13 @@ import { handleReadTool } from "../tools/read-handler";
 import { handleSkillTool } from "../tools/skill-handler";
 import { handleUpdatePlanTool } from "../tools/update-plan-handler";
 import { handleWriteTool } from "../tools/write-handler";
+import {
+  clearSessionState,
+  getFileState,
+  getFileVersion,
+  getSnippet,
+  rebuildSessionStateFromHistory,
+} from "../common/state";
 
 const tempDirs: string[] = [];
 
@@ -103,6 +115,186 @@ test("Bash timeout control can extend the active command deadline", async () => 
   assert.match(result.output ?? "", /done/);
   assert.equal(result.metadata?.timedOut, false);
   assert.equal(result.metadata?.timeoutMs, 1000);
+});
+
+for (const stream of ["stdout", "stderr"]) {
+  test(`Bash bounds draining when a descendant holds ${stream}`, { timeout: 8_000 }, async () => {
+    const workspace = createTempWorkspace();
+    const exits: Array<string | number> = [];
+    const chunks: string[] = [];
+    let pid: number | undefined;
+    let control: ProcessTimeoutControl | undefined;
+    let revoked = 0;
+    const startedAt = Date.now();
+    try {
+      const result = await handleBashTool(
+        { command: `sleep 30 ${stream === "stdout" ? "2>/dev/null" : ">/dev/null"} & printf 'hi\\n'` },
+        createContext(`bash-held-${stream}`, workspace, {
+          bashTimeoutMs: 1_000,
+          bashMinTimeoutMs: 1,
+          onProcessStart: (value) => {
+            pid = value as number;
+          },
+          onProcessStdout: (_pid, chunk) => chunks.push(chunk),
+          onProcessExit: (value) => exits.push(value),
+          onProcessTimeoutControl: (_pid, value) => {
+            if (value) control = value;
+            else revoked++;
+          },
+        })
+      );
+      assert.ok(Date.now() - startedAt < 6_000);
+      assert.equal(result.ok, true);
+      assert.equal(result.metadata?.timedOut, false);
+      assert.equal(result.metadata?.exitCode, 0);
+      assert.match(result.output ?? "", /hi/);
+      assert.match(result.output ?? "", /Output streams did not close/);
+      assert.equal(exits.length, 1);
+      assert.equal(revoked, 1);
+      const info = control!.getInfo();
+      assert.deepEqual(control!.setTimeoutMs(1), info);
+      const count = chunks.length;
+      await delay(50);
+      assert.equal(chunks.length, count);
+      assert.equal(exits.length, 1);
+    } finally {
+      if (pid) killProcessTree(pid, "SIGKILL");
+    }
+  });
+}
+
+test("Bash drains delayed output and preserves a failing shell exit", { timeout: 5_000 }, async () => {
+  const result = await handleBashTool(
+    { command: "(sleep 0.2; printf 'late-out'; printf 'late-err' >&2) & exit 7" },
+    createContext("bash-drain-failure", createTempWorkspace())
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.metadata?.exitCode, 7);
+  assert.match(result.output ?? "", /late-out/);
+  assert.match(result.output ?? "", /late-err/);
+  assert.doesNotMatch(result.output ?? "", /Output streams did not close/);
+});
+
+for (const lateEvent of ["close", "exit", "none"]) {
+  test(`Bash timeout stays failed with late event: ${lateEvent}`, async (t) => {
+    const child = Object.assign(new EventEmitter(), {
+      pid: 12345,
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+    });
+    const spawnMock = t.mock.method(childProcess, "spawn", () => child);
+    // Simulate an unsuccessful kill without touching any real process.
+    const killMock = t.mock.method(process, "kill", () => {
+      throw new Error("ESRCH");
+    });
+    const taskkillMock = t.mock.method(childProcess, "spawnSync", () => ({ status: 128 }));
+    syncBuiltinESMExports();
+    t.mock.timers.enable({ apis: ["setTimeout", "Date"] });
+    let exits = 0;
+    let revocations = 0;
+    const chunks: string[] = [];
+    try {
+      let completed = false;
+      const promise = handleBashTool(
+        { command: "ignored" },
+        createContext("bash-timeout-race", createTempWorkspace(), {
+          bashTimeoutMs: 100,
+          bashMinTimeoutMs: 1,
+          onProcessExit: () => {
+            exits++;
+          },
+          onProcessTimeoutControl: (_pid, control) => {
+            if (!control) revocations++;
+          },
+          onProcessStdout: (_pid, chunk) => {
+            chunks.push(chunk);
+          },
+        })
+      ).then((value) => {
+        completed = true;
+        return value;
+      });
+      const captured = "before" + "x".repeat(35_000);
+      child.stdout.write(captured);
+      t.mock.timers.tick(100);
+      assert.ok(killMock.mock.callCount() > 0);
+      t.mock.timers.tick(1_500);
+      if (lateEvent !== "none") child.emit("exit", 0, null);
+      if (lateEvent === "close") child.emit("close", 0, null);
+      t.mock.timers.tick(500);
+      await nextTurn();
+      assert.equal(completed, true, "late exit must not extend timeout grace");
+      const result = await promise;
+      assert.equal(result.ok, false);
+      assert.equal(result.error, "Command timed out.");
+      assert.equal(result.metadata?.timedOut, true);
+      assert.equal(result.metadata?.exitCode, null);
+      assert.equal(result.metadata?.signal, null);
+      assert.match(result.output ?? "", /before/);
+      assert.equal(result.metadata?.truncated, true);
+      if (lateEvent !== "close") assert.match(result.output ?? "", /Output streams did not close/);
+      child.emit("exit", 0, null);
+      child.emit("close", 0, null);
+      child.stdout.emit("data", "after");
+      t.mock.timers.tick(10_000);
+      assert.equal(exits, 1);
+      assert.equal(revocations, 1);
+      assert.deepEqual(chunks, [captured]);
+    } finally {
+      spawnMock.mock.restore();
+      killMock.mock.restore();
+      taskkillMock.mock.restore();
+      t.mock.timers.reset();
+      syncBuiltinESMExports();
+    }
+  });
+}
+
+for (const replacement of ["deleted", "file"]) {
+  test(`Bash falls back when cached cwd is ${replacement}`, async () => {
+    const workspace = createTempWorkspace();
+    const subdir = path.join(workspace, "child");
+    fs.mkdirSync(subdir);
+    const context = createContext(`bash-cwd-${replacement}`, workspace);
+    // Native realpath also expands Windows 8.3 aliases (RUNNER~1 vs runneradmin).
+    const changed = await handleBashTool({ command: "cd child" }, context);
+    assert.equal(changed.ok, true);
+    assert.equal(fs.realpathSync.native(String(changed.metadata?.cwd)), fs.realpathSync.native(subdir));
+    const retained = await handleBashTool({ command: "pwd" }, context);
+    assert.equal(fs.realpathSync.native(String(retained.metadata?.startCwd)), fs.realpathSync.native(subdir));
+    fs.rmdirSync(subdir);
+    if (replacement === "file") fs.writeFileSync(subdir, "not a directory");
+    const result = await handleBashTool({ command: "pwd" }, context);
+    assert.equal(result.ok, true);
+    assert.equal(fs.realpathSync.native(String(result.metadata?.startCwd)), fs.realpathSync.native(workspace));
+  });
+}
+
+test(
+  "Bash preserves Git Bash virtual mount cwd as a native Windows directory",
+  { skip: process.platform !== "win32" },
+  async () => {
+    const context = createContext("bash-virtual-cwd", createTempWorkspace());
+    const changed = await handleBashTool({ command: "cd /tmp && pwd -W" }, context);
+    assert.equal(changed.ok, true);
+    const nativeCwd = String(changed.metadata?.cwd);
+    assert.equal(path.isAbsolute(nativeCwd), true);
+    assert.equal(fs.statSync(nativeCwd).isDirectory(), true);
+    assert.equal(fs.realpathSync.native(nativeCwd), fs.realpathSync.native((changed.output ?? "").trim()));
+
+    const retained = await handleBashTool({ command: "pwd -W" }, context);
+    assert.equal(retained.ok, true);
+    assert.equal(fs.realpathSync.native(String(retained.metadata?.startCwd)), fs.realpathSync.native(nativeCwd));
+    assert.equal(fs.realpathSync.native((retained.output ?? "").trim()), fs.realpathSync.native(nativeCwd));
+  }
+);
+
+test("Bash reports an invalid project root as a spawn failure", { timeout: 3_000 }, async () => {
+  const root = path.join(createTempWorkspace(), "missing");
+  const result = await handleBashTool({ command: "pwd" }, createContext("bash-invalid-root", root));
+  assert.equal(result.ok, false);
+  assert.match(result.error ?? "", /ENOENT/);
+  assert.equal(result.metadata?.timedOut, false);
 });
 
 test("Bash can run commands in the background and report completion output", async () => {
@@ -305,6 +497,16 @@ test("Read returns snippet metadata and Edit can scope replacements by snippet_i
   assert.equal(editResult.metadata?.cache_refreshed, true);
   assert.equal(editResult.metadata?.line_endings, "LF");
   assert.match(String(editResult.metadata?.diff_preview ?? ""), /\+target = 2/);
+  assert.deepEqual(editResult.metadata?.diff_details, {
+    added: 1,
+    removed: 1,
+    lines: [
+      { kind: "context", content: "beta", lineNumber: 4 },
+      { kind: "removed", content: "target = 1", lineNumber: 5 },
+      { kind: "added", content: "target = 2", lineNumber: 5 },
+      { kind: "context", content: "done", lineNumber: 6 },
+    ],
+  });
   assert.equal(
     fs.readFileSync(filePath, "utf8"),
     ["alpha", "target = 1", "omega", "beta", "target = 2", "done"].join("\n")
@@ -446,6 +648,7 @@ test("Edit appends an LLM diagnosis when old_string is not found", async () => {
   assert.ok(snippet);
 
   let llmCalls = 0;
+  let llmRequest: Record<string, unknown> | undefined;
   let prompt = "";
   const editResult = await handleEditTool(
     {
@@ -460,6 +663,7 @@ test("Edit appends an LLM diagnosis when old_string is not found", async () => {
             completions: {
               create: async (request: { messages?: Array<{ content?: string }> }) => {
                 llmCalls += 1;
+                llmRequest = request;
                 prompt = String(request.messages?.[1]?.content ?? "");
                 return {
                   choices: [
@@ -476,13 +680,17 @@ test("Edit appends an LLM diagnosis when old_string is not found", async () => {
           },
         } as any,
         model: "test-model",
-        thinkingEnabled: false,
+        thinkingEnabled: true,
+        reasoningEffort: "max",
       }),
     })
   );
 
   assert.equal(editResult.ok, false);
   assert.equal(llmCalls, 1);
+  assert.deepEqual(llmRequest?.thinking, { type: "enabled" });
+  assert.equal(llmRequest?.reasoning_effort, "max");
+  assert.equal("extra_body" in llmRequest!, false);
   assert.equal(
     editResult.error,
     "old_string not found in file. The requested function name is computeTotal, but the snippet contains computeSubtotal."
@@ -787,6 +995,7 @@ test("Edit uses LLM correction when straight and curly quotation marks differ", 
   const sessionId = "quotation-mark-correction";
   const snippet = await readSnippet(filePath, sessionId, workspace);
   let llmCalls = 0;
+  let llmRequest: Record<string, unknown> | undefined;
   const editResult = await handleEditTool(
     {
       snippet_id: snippet.id,
@@ -804,6 +1013,7 @@ test("Edit uses LLM correction when straight and curly quotation marks differ", 
             completions: {
               create: async (request: { messages?: Array<{ content?: string }> }) => {
                 llmCalls += 1;
+                llmRequest = request;
                 assert.match(String(request.messages?.[0]?.content ?? ""), /the only problem is quotation mark/);
                 return {
                   choices: [
@@ -828,13 +1038,17 @@ test("Edit uses LLM correction when straight and curly quotation marks differ", 
           },
         } as any,
         model: "test-model",
-        thinkingEnabled: false,
+        thinkingEnabled: true,
+        reasoningEffort: "max",
       }),
     })
   );
 
   assert.equal(editResult.ok, true);
   assert.equal(llmCalls, 1);
+  assert.deepEqual(llmRequest?.thinking, { type: "enabled" });
+  assert.equal(llmRequest?.reasoning_effort, "max");
+  assert.equal("extra_body" in llmRequest!, false);
   assert.equal(editResult.metadata?.matched_via, "llm_escape_correction");
   assert.equal(
     fs.readFileSync(filePath, "utf8"),
@@ -1011,10 +1225,126 @@ test("Write repairs JSON object content for .json files", async () => {
   assert.equal(writeResult.metadata?.type, "create");
   assert.equal(writeResult.metadata?.file_path, filePath);
   assert.equal(writeResult.metadata?.cache_refreshed, true);
-  assert.equal(writeResult.metadata?.line_endings, "LF");
+  assert.equal(writeResult.metadata?.line_endings, os.EOL === "\r\n" ? "CRLF" : "LF");
   assert.equal(writeResult.metadata?.input_repaired, true);
   assert.match(String(writeResult.metadata?.diff_preview ?? ""), /\+\s*"name": "demo"|^\+\{/m);
-  assert.equal(fs.readFileSync(filePath, "utf8"), '{\n  "name": "demo",\n  "private": true\n}');
+  assert.equal(fs.readFileSync(filePath, "utf8"), ["{", '  "name": "demo",', '  "private": true', "}"].join(os.EOL));
+});
+
+for (const content of ["alpha\nbeta", "alpha\nbeta\n", ""]) {
+  test(`Write returns a full-file snippet usable by Edit for ${JSON.stringify(content)}`, async () => {
+    const workspace = createTempWorkspace();
+    const filePath = path.join(workspace, "note.txt");
+    const sessionId = `write-snippet-${JSON.stringify(content)}`;
+    const context = createContext(sessionId, workspace);
+    const writeResult = await handleWriteTool({ file_path: filePath, content }, context);
+
+    assert.equal(writeResult.ok, true);
+    const snippet = writeResult.metadata?.snippet as { id: string };
+    assert.ok(snippet?.id);
+    assert.deepEqual(snippet, {
+      id: snippet.id,
+      filePath,
+      startLine: 1,
+      endLine: content.split("\n").length,
+    });
+    assert.equal(getSnippet(sessionId, snippet.id)?.scopeType, "full");
+    assert.equal(getSnippet(sessionId, snippet.id)?.fileVersion, getFileVersion(sessionId, filePath));
+
+    const editResult = await handleEditTool(
+      { snippet_id: snippet.id, old_string: content ? "beta" : "", new_string: "gamma" },
+      context
+    );
+    assert.equal(editResult.ok, true, editResult.error);
+    assert.equal(
+      fs.readFileSync(filePath, "utf8"),
+      (content ? content.replace("beta", "gamma") : "gamma").replace(/\n/g, os.EOL)
+    );
+  });
+}
+
+test("Write returns a current full-file snippet after overwriting a CRLF file", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "note.txt");
+  const sessionId = "write-overwrite-snippet";
+  const context = createContext(sessionId, workspace);
+  fs.writeFileSync(filePath, "before\r\n");
+  const read = await handleReadTool({ file_path: filePath }, context);
+  assert.equal(read.ok, true);
+  const oldSnippet = read.metadata?.snippet as { id: string };
+  const oldVersion = getFileVersion(sessionId, filePath);
+
+  const write = await handleWriteTool({ file_path: filePath, content: "alpha\r\nbeta\r\nlast\r\n" }, context);
+  assert.equal(write.ok, true);
+  const snippet = write.metadata?.snippet as { id: string; endLine: number };
+  assert.ok(snippet?.id);
+  assert.notEqual(snippet.id, oldSnippet.id);
+  assert.equal(snippet.endLine, 4);
+  assert.equal(getSnippet(sessionId, snippet.id)?.fileVersion, oldVersion + 1);
+  const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "last", new_string: "updated" }, context);
+  assert.equal(edit.ok, true, edit.error);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\r\nbeta\r\nupdated\r\n");
+});
+
+for (const legacy of [false, true]) {
+  test(`Write history restores file state${legacy ? " without legacy snippet metadata" : " and usable snippet IDs"}`, async () => {
+    const workspace = createTempWorkspace();
+    const filePath = path.join(workspace, "note.txt");
+    const sessionId = `write-history-${legacy}`;
+    const context = createContext(sessionId, workspace);
+    const firstWrite = await handleWriteTool({ file_path: filePath, content: "before" }, context);
+    const write = await handleWriteTool({ file_path: filePath, content: "alpha\nbeta\n" }, context);
+    assert.equal(firstWrite.ok, true);
+    assert.equal(write.ok, true);
+    const snippet = write.metadata?.snippet as { id: string };
+    assert.ok(snippet?.id);
+    const version = getFileVersion(sessionId, filePath);
+    const history = [firstWrite, write].map((result) => {
+      const metadata = { ...result.metadata };
+      if (legacy) delete metadata.snippet;
+      return { role: "tool", content: JSON.stringify({ ...result, metadata }) };
+    });
+
+    clearSessionState(sessionId);
+    rebuildSessionStateFromHistory(sessionId, history);
+    assert.equal(getFileState(sessionId, filePath)?.content, "alpha\nbeta\n");
+    assert.equal(getFileVersion(sessionId, filePath), version);
+    if (legacy) {
+      assert.equal(getSnippet(sessionId, snippet.id), null);
+    } else {
+      assert.equal(getSnippet(sessionId, snippet.id)?.fileVersion, version);
+      assert.equal(getSnippet(sessionId, snippet.id)?.scopeType, "full");
+      const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "beta", new_string: "gamma" }, context);
+      assert.equal(edit.ok, true, edit.error);
+      // The first write has no newline, so subsequent writes preserve its detected LF ending.
+      assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\ngamma\n");
+    }
+
+    const nextWrite = await handleWriteTool({ file_path: filePath, content: "next" }, context);
+    assert.equal(nextWrite.ok, true);
+    if (!legacy) {
+      const nextSnippet = nextWrite.metadata?.snippet as { id: string };
+      assert.notEqual(nextSnippet.id, snippet.id);
+      assert.notEqual(nextSnippet.id, (firstWrite.metadata?.snippet as { id: string }).id);
+      assert.ok(getSnippet(sessionId, snippet.id));
+    }
+  });
+}
+
+test("Edit rejects external file changes after Write returns a snippet", async () => {
+  const workspace = createTempWorkspace();
+  const filePath = path.join(workspace, "note.txt");
+  const context = createContext("write-snippet-external-change", workspace);
+  const write = await handleWriteTool({ file_path: filePath, content: "alpha\nbeta\n" }, context);
+  assert.equal(write.ok, true);
+  const snippet = write.metadata?.snippet as { id: string };
+  fs.writeFileSync(filePath, "external change\n");
+  const futureTime = new Date(Date.now() + 2000);
+  fs.utimesSync(filePath, futureTime, futureTime);
+  const edit = await handleEditTool({ snippet_id: snippet.id, old_string: "beta", new_string: "gamma" }, context);
+  assert.equal(edit.ok, false);
+  assert.match(edit.error ?? "", /File has been modified/);
+  assert.equal(fs.readFileSync(filePath, "utf8"), "external change\n");
 });
 
 test("Edit requires snippet_id even after Write refreshes file state", async () => {
@@ -1044,7 +1374,7 @@ test("Edit requires snippet_id even after Write refreshes file state", async () 
 
   assert.equal(editResult.ok, false);
   assert.match(editResult.error ?? "", /snippet_id/);
-  assert.equal(fs.readFileSync(filePath, "utf8"), "alpha\nbeta\n");
+  assert.equal(fs.readFileSync(filePath, "utf8"), `alpha${os.EOL}beta${os.EOL}`);
 });
 
 test("Edit allows empty old_string when the file is empty", async () => {

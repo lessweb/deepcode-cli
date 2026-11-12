@@ -109,7 +109,7 @@ deepcode -p "总结这个项目"
 | 发送消息 | `Enter` |
 | 输入多行 | `Shift+Enter` 或 `Ctrl+J` |
 | 中断当前回复 | `Esc` |
-| 粘贴图片 | `Ctrl+V` |
+| 粘贴图片 | `Ctrl+V` (macOS / Linux) 或 `Alt+V` (Windows) |
 | 退出 | 连续按两次 `Ctrl+D`，或使用 `/exit` |
 
 ## 斜杠命令
@@ -122,7 +122,9 @@ deepcode -p "总结这个项目"
 | `/resume` | 选择历史对话继续 |
 | `/fork` | 从当前对话创建独立的新会话 |
 | `/continue` | 继续当前对话，或恢复最近的对话 |
+| `/copy` | 将最近一条助手回复的文本复制到剪贴板 |
 | `/model` | 切换模型、思考模式和推理强度 |
+| `/permissions` | 交互式配置工具权限 |
 | `/init` | 为当前项目生成 `AGENTS.md` 指令文件 |
 | `/skills` | 查看可用 Agent Skills |
 | `/mcp` | 查看 MCP 服务状态和可用工具 |

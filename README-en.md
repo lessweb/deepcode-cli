@@ -36,7 +36,7 @@ Create `~/.deepcode/settings.json`:
 ```json
 {
   "env": {
-    "MODEL": "deepseek-v4-pro",
+    "MODEL": "deepseek-flash",
     "BASE_URL": "https://api.deepseek.com",
     "API_KEY": "sk-..."
   },
@@ -77,7 +77,11 @@ Skills are discovered from these locations, in priority order:
 | `/resume`        | Choose a previous conversation to continue              |
 | `/fork`          | Fork the current conversation     |
 | `/continue`      | Continue the active conversation or pick one to resume  |
+| `/compact`       | Manually compact the current conversation context      |
+| `/copy`          | Copy the last assistant response's text to the clipboard |
 | `/model`         | Switch model, thinking mode, and reasoning effort       |
+| `/experimental`  | Configure experimental features, such as reasoning summaries |
+| `/permissions`   | Configure tool permissions                             |
 | `/raw`           | Toggle display mode (Normal / Lite / Raw scrollback)    |
 | `/init`          | Initialize an AGENTS.md file (LLM project instructions) |
 | `/skills`        | List available skills                                   |
@@ -89,13 +93,15 @@ Skills are discovered from these locations, in priority order:
 |------------------|----------------------------------------------------------|
 | `Enter`          | Send the prompt                                          |
 | `Shift+Enter`    | Insert a newline (also `Ctrl+J`)                         |
-| `Ctrl+V`         | Paste an image from the clipboard                        |
+| `Ctrl+V`         | Paste an image from the clipboard (`Alt+V` on Windows)    |
+| `Ctrl+Y`         | Copy input text to clipboard       |
+| `Ctrl+R`         | Search user input in the current and previous sessions   |
 | `Esc`            | Interrupt the current model turn                         |
 | `Ctrl+D` twice   | Quit Deep Code                                           |
 
 ## Supported Models
 
-- `deepseek-flash` (Recommended)
+- `deepseek-flash` (V4.1 Flash, recommended)
 - `deepseek-v4-pro`
 - `deepseek-v4-flash`
 - `deepseek-v4-flash-vision-exp`
@@ -117,33 +123,25 @@ Yes. Deep Code offers a full-featured VSCode extension, available on the [VSCode
 
 ### Does Deep Code support understanding images?
 
-Yes. The `deepseek-flash` model can read local images directly, or you can paste images from the clipboard with `Ctrl+V`, so the model can see the image content directly.
+Yes. The `deepseek-flash` model can read local images directly, or you can paste images from the clipboard with `Ctrl+V` (`Alt+V` on Windows), so the model can see the image content directly.
 
 Non-multimodal models such as `deepseek-v4-pro` and `deepseek-v4-flash` continue to use the `UnderstandImage` image-understanding tool. Deep Code detects model capabilities automatically; you can also override the detection with the `multimodal` setting.
 
 By default, images are sent inline as base64. With `filesApiEnabled`, Deep Code uploads images through the DeepSeek Files API and reuses the `file_id` in subsequent requests. See [docs/configuration_en.md](docs/configuration_en.md#deepseek-files-api).
 
-### How to automatically send a Slack message after a task completes?
-
-Write a shell notification script that calls a Slack webhook, then set the `notify` field in `~/.deepcode/settings.json` to the full path of the script. For detailed steps, see [docs/notify_en.md](docs/notify_en.md).
-
 ### How do I enable web search?
 
-Deep Code now supports native web search through the [DeepSeek Responses API](https://api-docs.deepseek.com/guides/responses_api/#tools). If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
+Deep Code supports the [official DeepSeek web search](https://api-docs.deepseek.com/guides/search) — set `deepseekSearchApiEnabled` to `true` in `~/.deepcode/settings.json` to enable it. If you prefer to use a custom script for web search, set the `webSearchTool` field in `~/.deepcode/settings.json` to the full path of your script. For detailed steps, refer to: https://github.com/qorzj/web_search_cli
 
 ### Does it support Coding Plan?
 
-Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint. Take Volcano Ark's Coding Plan as an example:
+Yes. Just set `env.BASE_URL` in `~/.deepcode/settings.json` to an OpenAI-compatible API endpoint.
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+If you have a [DeepCode Plus subscription](https://www.deepcodeplus.com/plus/plan), run `deepcode --plus`, paste your API Key and press Enter. The CLI will save the configuration automatically:
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-··· (paste and press Enter)
 ```
 
 ### How do I configure MCP?
@@ -154,13 +152,19 @@ For detailed setup instructions, see: [docs/mcp.md](docs/mcp.md)
 
 ### How to configure Deep Code to send notifications after a task completes?
 
-When the AI assistant completes a task, Deep Code can automatically execute a notification script to send the task results to the specified channel (e.g., Slack, system notifications, etc.).
+Set the `notify` field in `~/.deepcode/settings.json` to the full path of an executable notification script. After the AI assistant completes a task, Deep Code runs the script to send a message to a channel such as Slack or display a system notification.
 
 For detailed configuration instructions, see: [docs/notify_en.md](docs/notify_en.md)
 
 ### Does Deep Code only support YOLO mode?
 
 No. Deep Code has a built-in fine-grained permission control mechanism that lets you confirm operations before the AI assistant executes shell commands, reads/writes files, accesses the network, and more. You can configure each permission scope's policy — always allow, always ask, or deny — via the `permissions` field in `settings.json`. See [docs/permission.md](docs/permission.md) for details.
+
+## DeepCode Plus
+
+DeepCode Plus aims to provide an all-in-one experience for AI coding and creative work. It offers DeepSeek model subscription plans and additional capabilities such as image understanding, web search, image generation, and video generation. It is entirely optional: you do not need a Plus subscription to use Deep Code.
+
+Homepage: https://www.deepcodeplus.com · https://deepcode.vegamo.cn (Chinese)
 
 ## Contributing
 
@@ -174,14 +178,18 @@ cd deepcode-cli
 # Install dependencies
 npm install
 
-# Local development (typecheck + lint + format check + bundle)
-npm run build
-
 # Run tests
 npm test
 
-# Link globally (local global install)
+# Local CLI development (typecheck + lint + format check + bundle)
+npm run build
+
+# Link the CLI globally (local global install)
 npm link
+
+# Local VSCode extension development
+npm run build:vscode
+
 ```
 
 - Make sure `npm run check` passes before submitting a PR (typecheck + lint + format check)

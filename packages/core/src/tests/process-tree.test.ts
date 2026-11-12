@@ -15,7 +15,7 @@ test("runWindowsTaskkill invokes taskkill for the full process tree", () => {
     {
       command: "taskkill",
       args: ["/PID", "1234", "/T", "/F"],
-      options: { stdio: "ignore", windowsHide: true },
+      options: { stdio: "ignore", windowsHide: true, timeout: 1_000, killSignal: "SIGKILL" },
     },
   ]);
 });

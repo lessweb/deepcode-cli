@@ -1,8 +1,10 @@
 import { useCursor, useBoxMetrics } from "ink";
+import stringWidth from "string-width";
 import { useLayoutEffect, useState } from "react";
 import type { RefObject } from "react";
 import type { DOMElement } from "ink";
 import type { PromptBufferState } from "../core/prompt-buffer";
+import { wrapPromptText } from "../core/prompt-wrap";
 
 export type CursorPlacement = {
   row: number;
@@ -52,88 +54,64 @@ export function getPromptCursorPlacement(
   screenWidth: number,
   initialColumn = 0
 ): CursorPlacement {
-  const width = Math.max(1, screenWidth);
-  const cursor = Math.max(0, Math.min(state.cursor, state.text.length));
-  const beforeCursor = state.text.slice(0, cursor);
-  const cursorPosition = measureTextPosition(beforeCursor, width, initialColumn);
-  return { row: cursorPosition.row, column: cursorPosition.column };
-}
-
-export function isPromptCursorAtWrapBoundary(state: PromptBufferState, screenWidth: number): boolean {
-  const width = Math.max(1, screenWidth);
-  const cursor = Math.max(0, Math.min(state.cursor, state.text.length));
-  const currentLineStart = state.text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
-  const currentLineBeforeCursor = state.text.slice(currentLineStart, cursor);
-  return measureTextPosition(currentLineBeforeCursor, width, 0).row > 0;
-}
-
-function measureTextPosition(text: string, width: number, initialColumn: number): { row: number; column: number } {
-  let row = 0;
-  let column = Math.min(initialColumn, width - 1);
-  let pendingWrap = false;
-
-  for (const char of Array.from(text)) {
-    if (char === "\n") {
-      row++;
-      column = Math.min(initialColumn, width - 1);
-      pendingWrap = false;
-      continue;
-    }
-
-    if (pendingWrap) {
-      row++;
-      column = Math.min(initialColumn, width - 1);
-      pendingWrap = false;
-    }
-
-    const charColumns = textWidth(char);
-    if (column + charColumns > width) {
-      row++;
-      column = Math.min(initialColumn, width - 1);
-    }
-    column += charColumns;
-    if (column >= width) {
-      column = width;
-      pendingWrap = true;
-    }
-  }
-
-  if (pendingWrap) {
-    return { row: row + 1, column: Math.min(initialColumn, width - 1) };
-  }
-
+  const { row, column } = measurePromptCursor(state, screenWidth, initialColumn);
   return { row, column };
 }
 
-function textWidth(value: string): number {
-  let width = 0;
-  for (const char of Array.from(value.normalize())) {
-    width += characterWidth(char);
-  }
-  return width;
+export function isPromptCursorAtWrapBoundary(state: PromptBufferState, screenWidth: number): boolean {
+  return measurePromptCursor(state, screenWidth).softWrapped;
 }
 
-function characterWidth(char: string): number {
-  const codePoint = char.codePointAt(0) ?? 0;
-  if (codePoint === 0 || codePoint < 32 || (codePoint >= 0x7f && codePoint < 0xa0)) {
-    return 0;
+const graphemes = new Intl.Segmenter();
+
+function measurePromptCursor(state: PromptBufferState, screenWidth: number, initialColumn = 0) {
+  const width = Math.max(1, screenWidth);
+  const indent = Math.max(0, Math.min(initialColumn, width - 1));
+  const contentWidth = width - indent;
+  const cursor = Math.max(0, Math.min(state.cursor, state.text.length));
+  let sourceStart = 0;
+  let row = 0;
+
+  for (const line of state.text.split("\n")) {
+    // wrap-ansi normalizes Unicode and expands tabs. Keep the cursor's source
+    // offset while applying those transformations, snapping inside a grapheme
+    // to its first cell rather than measuring partial emoji or accents.
+    let normalized = "";
+    let offset = 0;
+    for (const { segment, index } of graphemes.segment(line)) {
+      const value = segment === "\t" ? " ".repeat(8 - (stringWidth(normalized) % 8)) : segment.normalize();
+      normalized += value;
+      if (sourceStart + index + segment.length <= cursor) {
+        offset = normalized.length;
+      }
+    }
+
+    // Use the same CJK-aware wrapping as PromptText. The suffix matters even before the cursor:
+    // it can move the entire word containing that cursor onto the next row.
+    const rows = wrapPromptText(normalized, contentWidth).split("\n");
+    if (cursor > sourceStart + line.length) {
+      row += rows.length;
+      sourceStart += line.length + 1;
+      continue;
+    }
+
+    let wrappedRow = 0;
+    for (; wrappedRow < rows.length - 1; wrappedRow++) {
+      const length = rows[wrappedRow]!.length;
+      if (offset < length) break;
+      offset -= length;
+    }
+    const column = stringWidth(rows[wrappedRow]!.slice(0, offset));
+    // An inline cursor reserves the next row at an exact-width line end.
+    const pendingWrap = column >= contentWidth;
+    return {
+      row: row + wrappedRow + (pendingWrap ? 1 : 0),
+      column: indent + (pendingWrap ? 0 : column),
+      softWrapped: wrappedRow > 0 || pendingWrap,
+    };
   }
-  if (codePoint >= 0x300 && codePoint <= 0x36f) {
-    return 0;
-  }
-  if (
-    (codePoint >= 0x1100 && codePoint <= 0x115f) ||
-    (codePoint >= 0x2e80 && codePoint <= 0xa4cf) ||
-    (codePoint >= 0xac00 && codePoint <= 0xd7a3) ||
-    (codePoint >= 0xf900 && codePoint <= 0xfaff) ||
-    (codePoint >= 0xfe10 && codePoint <= 0xfe19) ||
-    (codePoint >= 0xfe30 && codePoint <= 0xfe6f) ||
-    (codePoint >= 0xff00 && codePoint <= 0xff60) ||
-    (codePoint >= 0xffe0 && codePoint <= 0xffe6)
-  ) {
-    return 2;
-  }
-  return 1;
+
+  return { row, column: indent, softWrapped: false };
 }
 
 export function usePromptTerminalCursor(

@@ -1,3 +1,5 @@
+import { SessionRuntime, type PromptContent, type QueuedMessage, type QueuePausedReason } from "./prompt-queue";
+import { appendHistoryEntry, type ResolvedHistorySettings } from "./common/message-history";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
@@ -9,11 +11,15 @@ import ejs from "ejs";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
 import { launchNotifyScript } from "./common/notify";
 import { buildThinkingRequestOptions } from "./common/openai-thinking";
+import { summarizeReasoning } from "./common/reasoning-summary";
+import { firstMessageTitlePrompt, recentConversationTitlePrompt, generateSessionTitle } from "./common/session-title";
+import { assertSessionIdAvailable, isValidSessionId } from "./common/session-id";
 import { readTextFileWithMetadata } from "./common/file-utils";
 import {
   buildSkillCatalogPrompt,
   buildSkillDocumentsPrompt,
   getCompactPrompt,
+  frameCompactSummary,
   getExtensionRoot,
   getPlanModePrompt,
   getRuntimeContext,
@@ -28,7 +34,6 @@ import {
   type ProcessTimeoutInfo,
   type PluginRateLimitedTool,
   type SharpLoader,
-  type ToolCallExecution,
   type ToolExecutionHooks,
   type ToolExecutionFollowUpMessage,
   type ToolExecutionResult,
@@ -40,8 +45,11 @@ import {
   DEFAULT_FILE_REFRESH_MARGIN_SECONDS,
   DEFAULT_FILES_API_TIMEOUT_MS,
   DEFAULT_MAX_REQUEST_FILES_BYTES,
+  PERMISSION_SCOPES,
   getDefaultAutoCompactWindow,
+  getDefaultContextWindow,
   type McpServerConfig,
+  type ResolvedExperimentalSettings,
   type PermissionScope,
   type PermissionSettings,
 } from "./settings";
@@ -60,6 +68,8 @@ import {
   parseToolCallForPermissions,
   type AskPermissionRequest,
   type MessageToolPermission,
+  type PermissionReply,
+  type PermissionPlan,
   type PermissionToolCall,
   type UserToolPermission,
 } from "./common/permissions";
@@ -73,6 +83,15 @@ import {
   type DeepSeekFileReference,
   type DeepSeekFilesPolicy,
 } from "./common/deepseek-files";
+import {
+  compactBudget,
+  compactPrefixes,
+  estimateRequestBytes,
+  estimateRequestTokens,
+  imageOffloadCount,
+  isContextOverflow,
+  isFixedContext,
+} from "./common/compaction";
 import { loadImageFile } from "./tools/image-file";
 import {
   getLlmRetryDelayMs,
@@ -84,6 +103,20 @@ import {
   MAX_LLM_RETRIES,
   waitForLlmRetry,
 } from "./common/llm-retry";
+import { generateToolCallId, getCurrentToolCallBatch } from "./common/tool-call-batch";
+import {
+  assertCurrentPermissionReplies,
+  getSessionWaitReason,
+  reconcileSessionWaitState,
+  type SessionWaitState,
+} from "./session-wait-state";
+import {
+  editSessionMessageHistory,
+  deleteSessionMessageHistory,
+  refreshEditedToolPermissions,
+  type SessionMessageTarget,
+  type SessionMessageTab,
+} from "./session-message-edit";
 
 export type { PermissionScope } from "./settings";
 export type {
@@ -256,6 +289,8 @@ export type ModelUsage = {
 };
 
 export type SessionProcessEntry = {
+  toolCallId?: string;
+  runInBackground?: boolean;
   startTime: string;
   command: string;
   timeoutMs?: number;
@@ -288,6 +323,8 @@ export type SessionEntry = {
   askPermissions?: AskPermissionRequest[];
   planMode?: boolean;
   pluginRateLimitedTool?: PluginRateLimitedTool;
+  autoTitlePending?: boolean;
+  usingPlus?: boolean;
   forkedFrom?: {
     sessionId: string;
     messageId: string;
@@ -309,11 +346,15 @@ export type MessageMeta = {
   asThinking?: boolean;
   isAnswers?: boolean;
   isSummary?: boolean;
+  isToolFollowUp?: boolean;
+  omittedImages?: string[];
   isModelChange?: boolean;
   skill?: SkillInfo;
   skillCatalog?: Array<{ name: string; description: string }>;
   permissions?: MessageToolPermission[];
   userPrompt?: UserPromptContent;
+  /** Display-only reasoning summary; never sent back as assistant content. */
+  reasoningSummary?: string;
 };
 
 export type SessionMessage = {
@@ -338,12 +379,10 @@ export type UndoTarget = {
   canRestoreCode: boolean;
 };
 
-export type UserPromptContent = {
+export type UserPromptContent = PermissionReply & {
   text?: string;
   imageUrls?: string[];
   skills?: SkillInfo[];
-  permissions?: UserToolPermission[];
-  alwaysAllows?: PermissionScope[];
   planMode?: boolean;
   isAnswers?: boolean;
 };
@@ -375,13 +414,18 @@ export type SessionManagerOptions = {
     maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
+    retainRatio?: number;
+    retainTokens?: number;
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
+    history?: ResolvedHistorySettings;
+    experimental?: ResolvedExperimentalSettings;
   };
   renderMarkdown: (text: string) => string;
   onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
+  onUserMessage?: (message: SessionMessage) => void;
   onSessionEntryUpdated?: (entry: SessionEntry) => void;
   onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   onLlmRetry?: (event: LlmRetryEvent) => void;
@@ -424,12 +468,17 @@ export class SessionManager {
     maxRequestFilesBytes?: number;
     contextWindow?: number;
     autoCompactWindow?: number;
+    retainRatio?: number;
+    retainTokens?: number;
     webSearchTool?: string;
     mcpServers?: Record<string, McpServerConfig>;
     permissions?: Required<PermissionSettings>;
     enabledSkills?: Record<string, boolean>;
+    history?: ResolvedHistorySettings;
+    experimental?: ResolvedExperimentalSettings;
   };
   private readonly onAssistantMessage: (message: SessionMessage, shouldConnect: boolean) => void;
+  private readonly onUserMessage?: (message: SessionMessage) => void;
   private readonly onSessionEntryUpdated?: (entry: SessionEntry) => void;
   private readonly onLlmStreamProgress?: (progress: LlmStreamProgress) => void;
   private readonly onLlmRetry?: (event: LlmRetryEvent) => void;
@@ -437,8 +486,10 @@ export class SessionManager {
   private readonly onProcessStdout?: (pid: number, chunk: string) => void;
   private readonly nonInteractive: boolean;
   private activeSessionId: string | null = null;
-  private activePromptController: AbortController | null = null;
-  private readonly sessionControllers = new Map<string, AbortController>();
+  private readonly runtimes = new Map<string, SessionRuntime>();
+  private readonly runtimeListeners = new Set<() => void>();
+  private disposed = false;
+  private readonly sessionPermissionAllows = new Map<string, Set<PermissionScope>>();
   private readonly processTimeoutControls = new Map<string, ProcessTimeoutControl>();
   private readonly liveProcessKeys = new Set<string>();
   private readonly toolExecutor: ToolExecutor;
@@ -453,6 +504,7 @@ export class SessionManager {
     this.createOpenAIClient = options.createOpenAIClient;
     this.getResolvedSettings = options.getResolvedSettings;
     this.onAssistantMessage = options.onAssistantMessage;
+    this.onUserMessage = options.onUserMessage;
     this.onSessionEntryUpdated = options.onSessionEntryUpdated;
     this.onLlmStreamProgress = options.onLlmStreamProgress;
     this.onLlmRetry = options.onLlmRetry;
@@ -502,21 +554,30 @@ export class SessionManager {
   }
 
   dispose(): void {
-    const controller = this.activePromptController;
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
-    }
-    this.activePromptController = null;
-    for (const sessionController of this.sessionControllers.values()) {
-      if (!sessionController.signal.aborted) {
-        sessionController.abort();
-      }
-    }
+    this.disposed = true;
+    for (const runtime of this.runtimes.values()) runtime.dispose();
+    this.runtimes.clear();
+    this.runtimeListeners.clear();
+    for (const controller of this.titleControllers.values()) controller.abort();
+    this.titleControllers.clear();
     this.killLiveProcesses();
-    this.sessionControllers.clear();
+    this.sessionPermissionAllows.clear();
     this.processTimeoutControls.clear();
     this.mcpManager.disconnect();
+    this.requestUsageAnchors.clear();
   }
+
+  private readonly compactingSessions = new Set<string>();
+  private readonly titleControllers = new Map<string, AbortController>();
+  private readonly requestUsageAnchors = new Map<
+    string,
+    {
+      route: string;
+      hashes: string[];
+      estimate: number;
+      tokens: number;
+    }
+  >();
 
   private estimateStreamTokens(text: string): number {
     let tokens = 0;
@@ -690,7 +751,7 @@ export class SessionManager {
     sessionId?: string,
     debug?: ChatCompletionDebugOptions
   ): Promise<{
-    choices?: Array<{ message?: Record<string, unknown> }>;
+    choices?: Array<{ message?: Record<string, unknown>; finish_reason?: string | null }>;
     usage?: ModelUsage | null;
   }> {
     const requestId = crypto.randomUUID();
@@ -732,7 +793,7 @@ export class SessionManager {
     debug: ChatCompletionDebugOptions | undefined,
     requestId: string
   ): Promise<{
-    choices?: Array<{ message?: Record<string, unknown> }>;
+    choices?: Array<{ message?: Record<string, unknown>; finish_reason?: string | null }>;
     usage?: ModelUsage | null;
   }> {
     const startedAt = new Date().toISOString();
@@ -837,7 +898,10 @@ export class SessionManager {
         request: streamRequest,
         response,
       });
-      return response as { choices?: Array<{ message?: Record<string, unknown> }>; usage?: ModelUsage | null };
+      return response as {
+        choices?: Array<{ message?: Record<string, unknown>; finish_reason?: string | null }>;
+        usage?: ModelUsage | null;
+      };
     }
 
     let content = "";
@@ -845,6 +909,7 @@ export class SessionManager {
     let refusal: string | null = null;
     let usage: ModelUsage | null = null;
     let streamCompleted = false;
+    let finishReason: string | null = null;
     const responseChunks: unknown[] = [];
     const toolCallsByIndex = new Map<
       number,
@@ -888,6 +953,7 @@ export class SessionManager {
         for (const choice of choices) {
           if (isUsageRecord(choice) && choice.finish_reason != null) {
             streamCompleted = true;
+            if (typeof choice.finish_reason === "string") finishReason = choice.finish_reason;
           }
           const delta = isUsageRecord(choice) && isUsageRecord(choice.delta) ? choice.delta : null;
           if (!delta) {
@@ -991,7 +1057,7 @@ export class SessionManager {
     }
 
     const finalResponse = {
-      choices: [{ message }],
+      choices: [{ message, finish_reason: finishReason }],
       usage,
     };
     this.logChatCompletionDebug(debug, {
@@ -1444,48 +1510,250 @@ ${agentInstructions}
 
   setActiveSessionId(sessionId: string | null): void {
     this.activeSessionId = sessionId;
+    if (sessionId) this.ensureSessionRunning(sessionId);
+    this.notifyRuntimeChanged();
+  }
+
+  subscribeRuntime(listener: () => void): () => void {
+    this.runtimeListeners.add(listener);
+    return () => this.runtimeListeners.delete(listener);
+  }
+
+  private notifyRuntimeChanged(): void {
+    for (const listener of this.runtimeListeners) listener();
+  }
+
+  private getRuntime(sessionId: string): SessionRuntime {
+    let runtime = this.runtimes.get(sessionId);
+    if (!runtime) {
+      runtime = new SessionRuntime(sessionId, () => {
+        this.ensureSessionRunning(sessionId);
+        this.notifyRuntimeChanged();
+      });
+      this.runtimes.set(sessionId, runtime);
+    }
+    return runtime;
+  }
+
+  isSessionRunning(sessionId: string): boolean {
+    return Boolean(this.runtimes.get(sessionId)?.task);
+  }
+
+  getQueuePausedReason(sessionId: string): QueuePausedReason | undefined {
+    if (sessionId !== this.activeSessionId) return "session_inactive";
+    const pause = this.runtimes.get(sessionId)?.pausedReason;
+    if (pause) return pause;
+    const status = this.getSession(sessionId)?.status;
+    if (status === "interrupted" || status === "failed") return status;
+    if (status === "ask_permission" || status === "waiting_for_user" || status === "permission_denied")
+      return "awaiting_user";
+    return undefined;
+  }
+
+  listQueuedMessages(sessionId: string): QueuedMessage[] {
+    return this.runtimes.get(sessionId)?.queue.list() ?? [];
+  }
+
+  getPreparingPromptId(sessionId: string): string | undefined {
+    const runtime = this.runtimes.get(sessionId);
+    const prompt = runtime?.preparingPrompt;
+    return prompt &&
+      !runtime.controller?.signal.aborted &&
+      runtime.queue.canCommit(prompt) &&
+      !this.getQueuePausedReason(sessionId)
+      ? prompt.id
+      : undefined;
+  }
+
+  enqueuePrompt(sessionId: string, content: PromptContent): QueuedMessage {
+    if (this.disposed || (!this.getSession(sessionId) && !this.runtimes.get(sessionId)?.initialize))
+      throw new Error("Session is not available.");
+    const reason = this.getQueuePausedReason(sessionId);
+    if (reason === "interrupted" || reason === "failed") this.resumeSession(sessionId);
+    return this.getRuntime(sessionId).queue.enqueue(content);
+  }
+
+  removeQueuedMessage(sessionId: string, id: string): boolean {
+    return this.getRuntime(sessionId).queue.remove(id);
+  }
+
+  beginQueuedMessageEdit(sessionId: string, id: string): QueuedMessage | undefined {
+    return this.getRuntime(sessionId).queue.beginEdit(id);
+  }
+
+  finishQueuedMessageEdit(sessionId: string, id: string, content?: PromptContent): boolean {
+    return this.getRuntime(sessionId).queue.finishEdit(id, content);
+  }
+
+  async waitForSessionIdle(sessionId: string): Promise<void> {
+    await this.runtimes.get(sessionId)?.wait();
+  }
+
+  private resumeSession(sessionId: string): void {
+    this.getRuntime(sessionId).pausedReason = undefined;
+    this.updateSessionEntry(sessionId, (entry) => ({ ...entry, status: "pending", failReason: null }));
+  }
+
+  private ensureSessionRunning(sessionId: string): void {
+    if (
+      this.disposed ||
+      this.isSessionRunning(sessionId) ||
+      this.getQueuePausedReason(sessionId) ||
+      !this.runtimes.get(sessionId)?.queue.executable().length
+    )
+      return;
+    void this.activateSession(sessionId).catch((error: unknown) => {
+      if (!this.isAbortLikeError(error))
+        this.onAssistantMessage(
+          this.buildAssistantMessage(sessionId, `Request failed: ${describeLlmError(error)}`, null),
+          false
+        );
+    });
+  }
+
+  private async consumeQueuedMessages(sessionId: string, signal: AbortSignal): Promise<number> {
+    const runtime = this.getRuntime(sessionId);
+    let consumed = 0;
+    for (const queued of runtime.queue.executable()) {
+      if (runtime.preparingPrompt !== queued) {
+        runtime.preparingPrompt = queued;
+        this.notifyRuntimeChanged();
+      }
+      if (!(await this.appendUserPrompt(sessionId, queued.content, signal, queued))) break;
+      consumed++;
+    }
+    runtime.preparingPrompt = undefined;
+    return consumed;
+  }
+
+  private async appendUserPrompt(
+    sessionId: string,
+    content: UserPromptContent,
+    signal: AbortSignal,
+    queued?: QueuedMessage
+  ): Promise<boolean> {
+    let prompt = structuredClone(content);
+    const queue = this.getRuntime(sessionId).queue;
+    const canCommit = () => !queued || (queue.canCommit(queued) && !this.getQueuePausedReason(sessionId));
+    signal.throwIfAborted();
+    if (!canCommit()) return false;
+    const skills = prompt.text ? await this.listSkills(sessionId) : [];
+    const names = prompt.text ? await this.identifyMatchingSkillNames(skills, prompt.text, { signal, sessionId }) : [];
+    prompt.skills = await this.normalizeSkills(prompt.skills, sessionId);
+    signal.throwIfAborted();
+    if (!canCommit()) return false;
+    prompt = this.preparePromptImages(sessionId, prompt);
+    this.ensureFileHistorySession(sessionId);
+    const checkpoint = this.recordUserPromptCheckpoint(sessionId);
+    if (checkpoint.changedFilePaths.length)
+      this.appendSessionMessage(
+        sessionId,
+        this.buildSystemMessage(
+          sessionId,
+          `Note that the user manually modified these files:\n${checkpoint.changedFilePaths.join("\n")}`
+        )
+      );
+    this.setPromptPlanMode(sessionId, prompt);
+    const message = this.buildUserMessage(sessionId, prompt);
+    if (queued)
+      Object.assign(message, { id: queued.id, createTime: queued.submittedAt, updateTime: queued.submittedAt });
+    this.appendSessionMessage(sessionId, message);
+    if (queued) {
+      queue.remove(queued.id);
+      this.onUserMessage?.(message);
+    }
+    this.appendSkillMessages(sessionId, prompt.skills);
+    this.appendSkillCatalogMessage(
+      sessionId,
+      this.mergeSkillCatalog(
+        this.listPreloadedSkillCatalog(sessionId),
+        skills.filter((skill) => names.includes(skill.name)).map(({ name, description }) => ({ name, description }))
+      )
+    );
+    this.reportNewPrompt();
+    this.maybeGenerateSessionTitle(sessionId, prompt);
+    await this.persistUserHistory(message);
+    return true;
+  }
+
+  private setPromptPlanMode(sessionId: string, prompt: UserPromptContent): void {
+    this.appendPlanModeTransitionMessages(
+      sessionId,
+      Boolean(this.getSession(sessionId)?.planMode),
+      Boolean(prompt.planMode)
+    );
+    this.updateSessionEntry(sessionId, (entry) => ({ ...entry, planMode: Boolean(prompt.planMode) }));
   }
 
   addSessionSystemMessage(sessionId: string, content: string, visible?: boolean, meta?: MessageMeta): void {
     const message = this.buildSystemMessage(sessionId, content, null, visible, meta);
-    if (sessionId) this.appendSessionMessage(sessionId, message);
+    if (sessionId) {
+      if (this.isSessionRunning(sessionId) || this.hasTrailingPendingToolCalls(sessionId)) {
+        this.getRuntime(sessionId).deferredMessages.push(message);
+      } else this.appendSessionMessage(sessionId, message);
+    }
     this.onAssistantMessage(message, false);
   }
 
-  async handleUserPrompt(userPrompt: UserPromptContent): Promise<void> {
-    const controller = new AbortController();
-    this.activePromptController = controller;
+  private flushDeferredSystemMessages(sessionId: string): void {
+    const pending = this.runtimes.get(sessionId)?.deferredMessages;
+    if (!pending?.length || !this.getSession(sessionId) || this.hasTrailingPendingToolCalls(sessionId)) return;
+    for (const message of pending.splice(0)) this.appendSessionMessage(sessionId, message);
+  }
 
+  async handleUserPrompt(userPrompt: UserPromptContent, options: { sessionId?: string } = {}): Promise<void> {
+    const sessionId = this.activeSessionId;
     try {
-      if (!this.activeSessionId || !this.getSession(this.activeSessionId)) {
-        await this.createSession(userPrompt, controller);
-      } else {
-        await this.replySession(this.activeSessionId, userPrompt, controller);
-      }
+      if (
+        options.sessionId !== undefined ||
+        !sessionId ||
+        (!this.getSession(sessionId) && !this.runtimes.get(sessionId)?.initialize)
+      ) {
+        await this.createSession(userPrompt, undefined, options.sessionId);
+      } else await this.replySession(sessionId, userPrompt);
     } catch (error) {
-      if (!this.isAbortLikeError(error) && !controller.signal.aborted) {
-        throw error;
-      }
-    } finally {
-      if (this.activePromptController === controller) {
-        this.activePromptController = null;
-      }
+      if (!this.isAbortLikeError(error)) throw error;
     }
   }
 
-  async createSession(userPrompt: UserPromptContent, controller?: AbortController): Promise<string> {
-    this.reportNewPrompt();
-    const signal = controller?.signal;
-    this.throwIfAborted(signal);
+  async createSession(
+    userPrompt: UserPromptContent,
+    controller?: AbortController,
+    requestedSessionId?: string
+  ): Promise<string> {
+    controller?.signal.throwIfAborted();
+    for (const [index, url] of (userPrompt.imageUrls ?? []).entries()) {
+      if (url.startsWith("data:")) this.decodePersistedPromptImage(url, index);
+    }
+    const sessionId = requestedSessionId?.toLowerCase() ?? crypto.randomUUID();
+    if (!isValidSessionId(sessionId)) throw new Error(`Invalid session ID: "${sessionId}". Must be a valid UUID.`);
+    if (requestedSessionId !== undefined) assertSessionIdAvailable(sessionId);
+    this.activeSessionId = sessionId;
+    const runtime = this.getRuntime(sessionId);
+    runtime.initialize = (signal) => {
+      if (requestedSessionId !== undefined) assertSessionIdAvailable(sessionId);
+      return this.initializeSession(sessionId, userPrompt, signal);
+    };
+    const special = userPrompt.isAnswers || hasUserPermissionReplies(userPrompt);
+    const running = this.activateSession(sessionId, controller, special ? userPrompt : undefined);
+    if (!special) runtime.queue.enqueue(userPrompt);
+    await running;
+    return sessionId;
+  }
 
-    const sessionId = crypto.randomUUID();
+  private async initializeSession(
+    sessionId: string,
+    userPrompt: UserPromptContent,
+    signal: AbortSignal
+  ): Promise<void> {
+    signal.throwIfAborted();
     const originalSummary = userPrompt.text ? userPrompt.text.slice(0, 100) : "[Image Prompt]";
-    userPrompt = this.preparePromptImages(sessionId, userPrompt);
     this.ensureFileHistorySession(sessionId);
     const now = new Date().toISOString();
     const index = this.loadSessionsIndex();
     const entry: SessionEntry = {
       id: sessionId,
+      usingPlus: this.createOpenAIClient().usingPlus === true,
       summary: originalSummary,
       assistantReply: null,
       assistantThinking: null,
@@ -1499,7 +1767,8 @@ ${agentInstructions}
       createTime: now,
       updateTime: now,
       processes: null,
-      planMode: Boolean(userPrompt.planMode),
+      planMode: false,
+      autoTitlePending: true,
     };
     index.entries.push(entry);
     const sortedEntries = index.entries.slice().sort((a, b) => {
@@ -1542,109 +1811,73 @@ ${agentInstructions}
       const instructionsMessage = this.buildSystemMessage(sessionId, agentInstructions);
       this.appendSessionMessage(sessionId, instructionsMessage);
     }
-
-    this.appendPlanModeTransitionMessages(sessionId, false, Boolean(userPrompt.planMode));
-
-    this.recordUserPromptCheckpoint(sessionId);
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
-
-    let matchedSkills: SkillInfo[] = [];
-    if (userPrompt.text) {
-      const skills = await this.listSkills();
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills);
-    this.throwIfAborted(signal);
-
-    this.appendSkillMessages(sessionId, userPrompt.skills);
-    this.appendSkillCatalogMessage(
-      sessionId,
-      this.mergeSkillCatalog(
-        this.listPreloadedSkillCatalog(sessionId),
-        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
-      )
-    );
-
-    this.activeSessionId = sessionId;
-    await this.activateSession(sessionId, controller);
-    return sessionId;
   }
 
   async replySession(sessionId: string, userPrompt: UserPromptContent, controller?: AbortController): Promise<void> {
-    const signal = controller?.signal;
-    this.throwIfAborted(signal);
-    if (!this.getSession(sessionId)) {
+    if (!this.getSession(sessionId) && !this.runtimes.get(sessionId)?.initialize) {
       await this.createSession(userPrompt, controller);
       return;
     }
-    userPrompt = this.preparePromptImages(sessionId, userPrompt);
-    appendProjectPermissionAllows(this.projectRoot, userPrompt.alwaysAllows, {
+    controller?.signal.throwIfAborted();
+    if (userPrompt.permissions?.length)
+      assertCurrentPermissionReplies(this.listSessionMessages(sessionId), userPrompt.permissions);
+    this.activeSessionId = sessionId;
+    if (!hasUserPermissionReplies(userPrompt) && !userPrompt.isAnswers && !this.isContinuePrompt(userPrompt)) {
+      const abort = () => this.interruptSession(sessionId);
+      controller?.signal.addEventListener("abort", abort, { once: true });
+      try {
+        if (this.getSession(sessionId)?.status === "waiting_for_user") this.resumeSession(sessionId);
+        this.enqueuePrompt(sessionId, userPrompt);
+        await this.waitForSessionIdle(sessionId);
+      } finally {
+        controller?.signal.removeEventListener("abort", abort);
+      }
+    } else {
+      if (
+        this.isContinuePrompt(userPrompt) &&
+        !hasUserPermissionReplies(userPrompt) &&
+        this.getQueuePausedReason(sessionId) === "awaiting_user"
+      ) {
+        throw new Error(`Cannot continue: ${getSessionWaitReason(this.getSession(sessionId)?.status)}`);
+      }
+      await this.waitForSessionIdle(sessionId);
+      this.resumeSession(sessionId);
+      await this.activateSession(sessionId, controller, userPrompt);
+    }
+  }
+
+  private applyPermissionGrants(sessionId: string, reply: PermissionReply): void {
+    appendProjectPermissionAllows(this.projectRoot, reply.alwaysAllows, {
       inheritedPermissions: this.getResolvedSettings().permissions,
     });
-    const now = new Date().toISOString();
-    const previousPlanMode = Boolean(this.getSession(sessionId)?.planMode);
-    const nextPlanMode = Boolean(userPrompt.planMode);
-    const updated = this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      status: "pending",
-      failReason: null,
-      askPermissions: undefined,
-      planMode: nextPlanMode,
-      updateTime: now,
-    }));
-
-    if (!updated) return;
-
-    this.appendPlanModeTransitionMessages(sessionId, previousPlanMode, nextPlanMode);
-
-    if (hasUserPermissionReplies(userPrompt) && this.hasTrailingPendingToolCalls(sessionId)) {
-      this.activeSessionId = sessionId;
-      await this.activateSession(sessionId, controller, userPrompt);
-      return;
+    if (!reply.sessionAllows?.length) return;
+    const grants = this.sessionPermissionAllows.get(sessionId) ?? new Set<PermissionScope>();
+    for (const scope of reply.sessionAllows) {
+      if (PERMISSION_SCOPES.includes(scope)) grants.add(scope);
     }
+    if (grants.size) this.sessionPermissionAllows.set(sessionId, grants);
+  }
 
-    if (this.isContinuePrompt(userPrompt)) {
-      this.activeSessionId = sessionId;
-      await this.activateSession(sessionId, controller, userPrompt);
-      return;
-    }
-
-    this.reportNewPrompt();
-
-    this.ensureFileHistorySession(sessionId);
-    const checkpoint = this.recordUserPromptCheckpoint(sessionId);
-    if (checkpoint.changedFilePaths.length) {
-      const content = `Note that the user manually modified these files:\n${checkpoint.changedFilePaths.join("\n")}`;
-      this.appendSessionMessage(sessionId, this.buildSystemMessage(sessionId, content));
-    }
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
-
-    let matchedSkills: SkillInfo[] = [];
-    if (userPrompt.text) {
-      const skills = await this.listSkills(sessionId);
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
-    this.throwIfAborted(signal);
-
-    this.appendSkillMessages(sessionId, userPrompt.skills);
-    this.appendSkillCatalogMessage(
+  private computeToolPermissions(
+    sessionId: string,
+    toolCalls: unknown[],
+    replies: UserToolPermission[] = []
+  ): PermissionPlan {
+    const plan = computeToolCallPermissions({
       sessionId,
-      this.mergeSkillCatalog(
-        this.listPreloadedSkillCatalog(sessionId),
-        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
-      )
-    );
-    this.activeSessionId = sessionId;
-    await this.activateSession(sessionId, controller);
+      projectRoot: this.projectRoot,
+      toolCalls,
+      settings: this.getResolvedSettings().permissions,
+      forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
+      sessionAllows: this.sessionPermissionAllows.get(sessionId),
+      readPermissionExemptPaths: this.getReadPermissionExemptPaths(sessionId),
+      resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
+    });
+    const answeredIds = new Set(replies.map((reply) => reply.toolCallId));
+    return {
+      ...plan,
+      askPermissions: plan.askPermissions.filter((request) => !answeredIds.has(request.toolCallId)),
+    };
   }
 
   private isContinuePrompt(userPrompt: UserPromptContent): boolean {
@@ -1661,42 +1894,94 @@ ${agentInstructions}
     controller?: AbortController,
     permissionPrompt?: UserPromptContent
   ): Promise<void> {
+    const runtime = this.getRuntime(sessionId);
+    const needsInput = !permissionPrompt && Boolean(runtime.initialize || runtime.queue.executable().length);
+    return runtime.run(async (controller) => {
+      try {
+        if (needsInput) {
+          runtime.preparingPrompt = runtime.queue.executable()[0];
+          this.notifyRuntimeChanged();
+        }
+        await this.createOpenAIClient.prepare?.(controller.signal);
+        controller.signal.throwIfAborted();
+        await runtime.initialize?.(controller.signal);
+        runtime.initialize = undefined;
+        this.updateSessionEntry(sessionId, (entry) => ({
+          ...entry,
+          status: "pending",
+          failReason: null,
+          askPermissions: undefined,
+        }));
+        if (permissionPrompt) {
+          this.applyPermissionGrants(sessionId, permissionPrompt);
+          this.setPromptPlanMode(sessionId, permissionPrompt);
+        }
+        // New instructions supersede unfinished tool calls. Only explicit continuation or
+        // permission replies may resume those calls before accepting more input.
+        if (!permissionPrompt || !this.hasTrailingPendingToolCalls(sessionId)) {
+          if (permissionPrompt && !this.isContinuePrompt(permissionPrompt))
+            await this.appendUserPrompt(sessionId, permissionPrompt, controller.signal);
+          const consumed = await this.consumeQueuedMessages(sessionId, controller.signal);
+          if (needsInput && !consumed) return;
+        }
+        if (this.getQueuePausedReason(sessionId)) return;
+        await this.runSessionIterations(sessionId, controller, permissionPrompt);
+      } catch (error) {
+        this.recordSessionFailure(sessionId, error, controller.signal);
+        throw error;
+      } finally {
+        this.flushDeferredSystemMessages(sessionId);
+      }
+    }, controller);
+  }
+
+  private recordSessionFailure(sessionId: string, error: unknown, signal: AbortSignal): void {
+    const runtime = this.runtimes.get(sessionId);
+    if (!runtime) return;
+    const aborted = this.isAbortLikeError(error) || signal.aborted;
+    // An input submitted after abort already resumed the queue; the old run must not pause it again.
+    if (signal.aborted && !runtime.pausedReason) return;
+    runtime.pausedReason = aborted ? "interrupted" : "failed";
+    const reason = aborted ? "interrupted" : describeLlmError(error);
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      status: aborted ? "interrupted" : "failed",
+      failReason: reason,
+      updateTime: new Date().toISOString(),
+    }));
+  }
+
+  private async runSessionIterations(
+    sessionId: string,
+    sessionController: AbortController,
+    permissionPrompt?: UserPromptContent
+  ): Promise<void> {
     const startedAt = Date.now();
-    const {
-      client,
-      apiKey,
-      model,
-      baseURL,
-      temperature,
-      thinkingEnabled,
-      reasoningEffort,
-      debugLogEnabled,
-      notify,
-      env,
-    } = this.createOpenAIClient();
+    const { client, usingPlus, configurationError, notify, env } = this.createOpenAIClient();
     const now = new Date().toISOString();
     rebuildSessionStateFromHistory(sessionId, this.listSessionMessages(sessionId));
 
+    this.updateSessionEntry(sessionId, (entry) => ({ ...entry, usingPlus: usingPlus === true }));
     if (!client) {
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
         status: "failed",
-        failReason: "API key not found",
+        failReason: configurationError ?? "API key not found",
         updateTime: now,
       }));
       this.onAssistantMessage(
         this.buildAssistantMessage(
           sessionId,
-          "API key not found. Please configure ~/.deepcode/settings.json or ./.deepcode/settings.json.",
+          configurationError ??
+            "API key not found. Please configure ~/.deepcode/settings.json or ./.deepcode/settings.json.",
           null
         ),
         false
       );
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
       return;
     }
 
-    const sessionController = controller ?? new AbortController();
     if (sessionController.signal.aborted) {
       this.updateSessionEntry(sessionId, (entry) => ({
         ...entry,
@@ -1704,7 +1989,7 @@ ${agentInstructions}
         failReason: "interrupted",
         updateTime: now,
       }));
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
       return;
     }
 
@@ -1713,8 +1998,6 @@ ${agentInstructions}
       status: "processing",
       updateTime: now,
     }));
-
-    this.sessionControllers.set(sessionId, sessionController);
 
     try {
       const maxIterations = 80000; // about 1K RMB cost
@@ -1734,9 +2017,25 @@ ${agentInstructions}
           this.listSessionMessages(sessionId)
         );
         if (pendingToolCallMessage.toolCalls.length > 0) {
+          const plan = this.computeToolPermissions(
+            sessionId,
+            pendingToolCallMessage.toolCalls,
+            permissionPrompt?.permissions
+          );
+          if (plan.askPermissions.length) {
+            this.updateSessionEntry(sessionId, (entry) => ({
+              ...entry,
+              status: "ask_permission",
+              failReason: null,
+              askPermissions: plan.askPermissions,
+              toolCalls: pendingToolCallMessage.toolCalls,
+              updateTime: new Date().toISOString(),
+            }));
+            return;
+          }
           const toolAppendResult = await this.appendToolMessages(sessionId, pendingToolCallMessage.toolCalls, {
             permissionOverrides: permissionPrompt?.permissions,
-            messagePermissions: pendingToolCallMessage.message?.meta?.permissions,
+            messagePermissions: plan.permissions,
           });
           await this.appendDeferredPermissionPrompt(sessionId, permissionPrompt, sessionController);
           // Permission replies are one-shot: do not reuse decisions or append the deferred user prompt again on later tool-call batches.
@@ -1744,7 +2043,10 @@ ${agentInstructions}
           if (this.isInterrupted(sessionId)) {
             return;
           }
-          if (toolAppendResult.waitingForUser) {
+          if (
+            toolAppendResult.waitingForUser ||
+            getCurrentToolCallBatch(this.listSessionMessages(sessionId)).questions.length
+          ) {
             this.updateSessionEntry(sessionId, (entry) => ({
               ...entry,
               toolCalls: pendingToolCallMessage.toolCalls,
@@ -1755,87 +2057,16 @@ ${agentInstructions}
           }
         }
 
-        const compactPromptTokenThreshold =
-          this.getResolvedSettings().autoCompactWindow ?? getCompactPromptTokenThreshold(model);
-        if (session.activeTokens > compactPromptTokenThreshold) {
-          const message = this.buildAssistantMessage(
-            sessionId,
-            "The conversation is getting long, compacting...",
-            null
-          );
-          message.meta = { asThinking: true };
-          this.onAssistantMessage(message, false);
-          await this.compactSession(sessionId, sessionController.signal);
-        }
-
-        const sessionMessages = await this.attachPromptImagesForRequest(
-          this.prepareSessionMessagesForRequest(this.listSessionMessages(sessionId)),
-          model,
-          this.getResolvedSettings().multimodal
-        );
-        if (this.isInterrupted(sessionId)) {
-          return;
-        }
-        const filesSettings = this.getDeepSeekFilesSettings();
-        if (filesSettings.enabled && !apiKey) {
-          throw new Error("Files API is enabled, but no API key is available for uploads.");
-        }
-        let prepared = filesSettings.enabled
-          ? await this.buildMessagesWithDeepSeekFiles(
-              sessionMessages,
-              thinkingEnabled,
-              model,
-              apiKey!,
-              sessionController.signal
-            )
-          : {
-              messages: this.messageConverter.buildMessages(
-                sessionMessages,
-                thinkingEnabled,
-                model,
-                this.getResolvedSettings().multimodal
-              ),
-              references: [] as DeepSeekFileReference[],
-            };
-        const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
-        const request = () =>
-          this.createChatCompletionStream(
-            client,
-            {
-              model,
-              ...(temperature !== undefined ? { temperature } : {}),
-              messages: prepared.messages,
-              tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
-              ...thinkingOptions,
-            },
-            { signal: sessionController.signal },
-            sessionId,
-            {
-              enabled: debugLogEnabled,
-              location: "SessionManager.activateSession",
-              baseURL,
-              params: { iteration, temperature, thinkingEnabled, reasoningEffort },
-            }
-          );
-        let response: Awaited<ReturnType<typeof request>>;
-        try {
-          response = await request();
-        } catch (error) {
-          if (!filesSettings.enabled || prepared.references.length === 0 || !this.isRejectedDeepSeekFile(error)) {
-            throw error;
-          }
-          for (const reference of prepared.references) {
-            this.deepSeekFiles.invalidate(reference, apiKey!);
-          }
-          prepared = await this.buildMessagesWithDeepSeekFiles(
-            sessionMessages,
-            thinkingEnabled,
-            model,
-            apiKey!,
-            sessionController.signal
-          );
-          response = await request();
-        }
+        if (this.getQueuePausedReason(sessionId)) return;
+        this.flushDeferredSystemMessages(sessionId);
+        const consumed = await this.consumeQueuedMessages(sessionId, sessionController.signal);
+        // A queued prompt can be edited or removed while preparation is awaiting I/O.
+        // A finished reply needs actual new input before requesting another completion.
+        if (iteration > 0 && !toolCalls && consumed === 0) return;
+        this.throwIfAborted(sessionController.signal);
+        if (this.getQueuePausedReason(sessionId)) return;
+        const model = this.createOpenAIClient().model;
+        const response = await this.requestSessionCompletion(sessionId, sessionController.signal, iteration);
 
         const message = response.choices?.[0]?.message;
         const rawContent = message?.content;
@@ -1850,18 +2081,20 @@ ${agentInstructions}
         if (this.isInterrupted(sessionId)) {
           return;
         }
+        const reasoningSummary = await summarizeReasoning(
+          this.createOpenAIClient,
+          this.getResolvedSettings().experimental,
+          content,
+          thinking,
+          this.getSession(sessionId)?.summary,
+          sessionController.signal
+        );
+        if (this.isInterrupted(sessionId)) return;
         const assistantMessage = this.buildAssistantMessage(sessionId, content, toolCalls, thinking);
-        const permissionPlan = toolCalls
-          ? computeToolCallPermissions({
-              sessionId,
-              projectRoot: this.projectRoot,
-              toolCalls,
-              settings: this.getResolvedSettings().permissions,
-              forceAskScopes: this.getSession(sessionId)?.planMode ? PLAN_MODE_FORCE_ASK_SCOPES : undefined,
-              readPermissionExemptPaths: this.getReadPermissionExemptPaths(sessionId),
-              resolveSnippetPath: (id, snippetId) => getSnippet(id, snippetId)?.filePath,
-            })
-          : null;
+        if (reasoningSummary !== undefined) {
+          assistantMessage.meta = { ...assistantMessage.meta, reasoningSummary };
+        }
+        const permissionPlan = toolCalls ? this.computeToolPermissions(sessionId, toolCalls) : null;
         if (permissionPlan) {
           assistantMessage.meta = {
             ...(assistantMessage.meta ?? {}),
@@ -1924,7 +2157,7 @@ ${agentInstructions}
           return;
         }
 
-        if (!toolCalls) {
+        if (!toolCalls && !this.getRuntime(sessionId).queue.executable().length) {
           return;
         }
       }
@@ -1943,113 +2176,439 @@ ${agentInstructions}
         false
       );
     } catch (error) {
-      const errMessage = describeLlmError(error);
-      const aborted = this.isAbortLikeError(error) || sessionController.signal.aborted;
-      this.updateSessionEntry(sessionId, (entry) => ({
-        ...entry,
-        status: aborted ? "interrupted" : "failed",
-        failReason: aborted ? "interrupted" : errMessage,
-        updateTime: new Date().toISOString(),
-      }));
-
-      if (!aborted) {
-        this.onAssistantMessage(this.buildAssistantMessage(sessionId, `Request failed: ${errMessage}`, null), false);
-      }
+      this.recordSessionFailure(sessionId, error, sessionController.signal);
+      if (!this.isAbortLikeError(error) && !sessionController.signal.aborted)
+        this.onAssistantMessage(
+          this.buildAssistantMessage(sessionId, `Request failed: ${describeLlmError(error)}`, null),
+          false
+        );
     } finally {
-      if (this.sessionControllers.get(sessionId) === sessionController) {
-        this.sessionControllers.delete(sessionId);
-      }
-      this.maybeNotifyTaskCompletion(sessionId, notify, startedAt, env);
+      if (sessionController.signal.aborted)
+        this.recordSessionFailure(sessionId, sessionController.signal.reason, sessionController.signal);
+      this.maybeNotifySessionStatus(sessionId, notify, startedAt, env);
     }
   }
 
-  async compactSession(sessionId: string, signal?: AbortSignal): Promise<void> {
-    this.throwIfAborted(signal);
-    const { client, model, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled } =
-      this.createOpenAIClient();
-    if (!client) {
-      return;
-    }
-    const sessionMessages = this.listSessionMessages(sessionId).filter((message) => !message.compacted);
-    if (sessionMessages.length === 0) {
-      return;
-    }
-
-    const startIndex = sessionMessages.findIndex((message) => message.role !== "system");
-    if (startIndex === -1) {
-      return;
-    }
-
-    const searchStart = Math.floor(startIndex + ((sessionMessages.length - startIndex) * 2) / 3);
-    let endIndex = -1;
-    for (let i = Math.max(searchStart, startIndex); i < sessionMessages.length; i += 1) {
-      if (sessionMessages[i].role !== "tool") {
-        endIndex = i;
-        break;
-      }
-    }
-    if (endIndex === -1 || endIndex <= startIndex) {
-      return;
-    }
-
-    const compactPrompt = getCompactPrompt(sessionMessages.slice(startIndex, endIndex));
-    const thinkingOptions = buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort);
-    const response = await this.createChatCompletionStream(
-      client,
-      {
-        model,
-        ...(temperature !== undefined ? { temperature } : {}),
-        messages: [{ role: "user", content: compactPrompt }],
-        ...thinkingOptions,
-      },
-      signal ? { signal } : undefined,
-      sessionId,
-      {
-        enabled: debugLogEnabled,
-        location: "SessionManager.compactSession",
-        baseURL,
-        params: { temperature, thinkingEnabled, reasoningEffort },
-      }
+  private getCompactionBudget(model: string) {
+    const settings = this.getResolvedSettings();
+    return compactBudget(
+      settings.contextWindow ?? getDefaultContextWindow(model),
+      settings.autoCompactWindow,
+      settings
     );
-    this.throwIfAborted(signal);
-    const rawLlmResponse = response.choices?.[0]?.message?.content;
-    const llmResponse = typeof rawLlmResponse === "string" ? rawLlmResponse : "";
-    const compactedSummary = llmResponse.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim();
+  }
 
-    const now = new Date().toISOString();
-    const responseUsage = response.usage ?? null;
-    this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      usage: accumulateUsage(entry.usage, responseUsage),
-      usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, responseUsage),
-      activeTokens: getTotalTokens(responseUsage),
-      updateTime: now,
-    }));
+  /** Derive exactly the content used by both normal and summary requests, before uploads. */
+  private async prepareContext(messages: SessionMessage[], model: string, thinkingEnabled: boolean) {
+    const sources = await this.attachPromptImagesForRequest(
+      this.prepareSessionMessagesForRequest(
+        messages
+          .filter((message) => !message.compacted)
+          .map((message) =>
+            message.meta?.isSummary && message.role === "system"
+              ? {
+                  ...message,
+                  role: "user" as const,
+                  content: frameCompactSummary(message.content ?? ""),
+                }
+              : message
+          )
+      ),
+      model,
+      this.getResolvedSettings().multimodal
+    );
+    const converted = this.messageConverter.buildMessages(
+      sources,
+      thinkingEnabled,
+      model,
+      this.getDeepSeekFilesSettings().enabled ? "on" : this.getResolvedSettings().multimodal
+    );
+    return { sources, messages: converted };
+  }
 
-    for (let i = startIndex; i < endIndex; i += 1) {
-      if (sessionMessages[i].meta?.skillCatalog) {
-        continue;
-      }
-      sessionMessages[i] = { ...sessionMessages[i], compacted: true, updateTime: now };
+  private measureRequest(sessionId: string, messages: ChatCompletionMessageParam[], model: string) {
+    const tools = getTools(this.getPromptToolOptions(), this.mcpToolDefinitions);
+    const client = this.createOpenAIClient();
+    const route = JSON.stringify([model, client.baseURL, client.thinkingEnabled, client.reasoningEffort, tools]);
+    const hashes = messages.map((message) => crypto.createHash("sha256").update(JSON.stringify(message)).digest("hex"));
+    const estimate = estimateRequestTokens(messages, tools);
+    const anchor = this.requestUsageAnchors.get(sessionId);
+    const anchored =
+      anchor?.route === route &&
+      anchor.hashes.length <= hashes.length &&
+      anchor.hashes.every((hash, index) => hash === hashes[index]);
+    const tokens = anchored ? anchor.tokens + estimate - anchor.estimate : estimate;
+    return { route, hashes, estimate, tokens, bytes: estimateRequestBytes(messages) };
+  }
+
+  /** Shared file-reference recovery; it never repeats tool execution. */
+  private async sendPreparedCompletion(
+    sources: SessionMessage[],
+    messages: ChatCompletionMessageParam[],
+    extra: Record<string, unknown>,
+    sessionId: string,
+    signal: AbortSignal,
+    location: string
+  ) {
+    const { client, model, apiKey, baseURL, temperature, thinkingEnabled, reasoningEffort, debugLogEnabled } =
+      this.createOpenAIClient();
+    if (!client) throw new Error("No model client is configured.");
+    const files = this.getDeepSeekFilesSettings();
+    if (files.enabled && !apiKey) throw new Error("Files API is enabled, but no API key is available for uploads.");
+    // The final summary instruction is not a durable session source.
+    const suffix = extra.compaction === true ? [{ role: "user" as const, content: getCompactPrompt() }] : [];
+    const requestExtra = { ...extra };
+    delete requestExtra.compaction;
+    const prepare = async () =>
+      files.enabled
+        ? await this.buildMessagesWithDeepSeekFiles(sources, thinkingEnabled, model, apiKey!, signal)
+        : { messages, references: [] as DeepSeekFileReference[] };
+    let prepared = await prepare();
+    const request = () =>
+      this.createChatCompletionStream(
+        client,
+        {
+          model,
+          ...(temperature !== undefined ? { temperature } : {}),
+          messages: [...prepared.messages, ...suffix],
+          tools: getTools(this.getPromptToolOptions(), this.mcpToolDefinitions),
+          ...buildThinkingRequestOptions(thinkingEnabled, baseURL, reasoningEffort),
+          ...requestExtra,
+        },
+        { signal },
+        sessionId,
+        {
+          enabled: debugLogEnabled,
+          location,
+          baseURL,
+          params: { temperature, thinkingEnabled, reasoningEffort },
+        }
+      );
+    try {
+      return await request();
+    } catch (error) {
+      signal.throwIfAborted();
+      if (!files.enabled || !prepared.references.length || !this.isRejectedDeepSeekFile(error)) throw error;
+      for (const reference of prepared.references) this.deepSeekFiles.invalidate(reference, apiKey!);
+      prepared = await prepare();
+      return await request();
     }
+  }
 
-    const summaryMessage: SessionMessage = {
-      id: crypto.randomUUID(),
-      sessionId,
-      role: "system",
-      content: `There are earlier parts of the conversation. Here is a summary: \n\n${compactedSummary}`,
-      contentParams: null,
-      messageParams: null,
-      compacted: false,
-      visible: false,
-      createTime: now,
-      updateTime: now,
-      meta: {
-        isSummary: true,
-      },
-    };
-    sessionMessages.splice(endIndex, 0, summaryMessage);
-    this.saveSessionMessages(sessionId, sessionMessages);
+  private async requestSessionCompletion(sessionId: string, signal: AbortSignal, iteration: number) {
+    const { model, thinkingEnabled } = this.createOpenAIClient();
+    const budget = this.getCompactionBudget(model);
+    let context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+    let measurement = this.measureRequest(sessionId, context.messages, model);
+    let compactAttempts = 0;
+    let recovering = false;
+    let overflowRecovered = false;
+    for (;;) {
+      signal.throwIfAborted();
+      const needsCompaction = () =>
+        measurement.bytes > budget.byteThreshold || (!recovering && measurement.tokens >= budget.threshold);
+      while (needsCompaction() && compactAttempts < 2) {
+        const attempt = compactAttempts++;
+        if (attempt === 0) {
+          const notice = this.buildAssistantMessage(sessionId, "The conversation is getting long, compacting...", null);
+          notice.meta = { asThinking: true };
+          this.onAssistantMessage(notice, false);
+        }
+        const oversized = measurement.bytes > budget.byteThreshold;
+        const retain = attempt > 0 && oversized ? 0 : budget.retain;
+        const changed = await this.compactSessionOnce(sessionId, signal, retain);
+        if (!changed) {
+          // A token-based retention budget can leave all image-heavy history untouched.
+          if (attempt === 0 && oversized && retain > 0) continue;
+          break;
+        }
+        context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+        measurement = this.measureRequest(sessionId, context.messages, model);
+      }
+      if (needsCompaction()) {
+        throw new Error("The conversation is too large to compact safely. Shorten the input or start a new session.");
+      }
+      try {
+        const response = await this.sendPreparedCompletion(
+          context.sources,
+          context.messages,
+          {},
+          sessionId,
+          signal,
+          `SessionManager.activateSession:${iteration}`
+        );
+        const promptTokens = response.usage?.prompt_tokens;
+        this.requestUsageAnchors.set(sessionId, {
+          ...measurement,
+          tokens:
+            typeof promptTokens === "number" && Number.isFinite(promptTokens) && promptTokens >= 0
+              ? promptTokens
+              : measurement.estimate,
+        });
+        return response;
+      } catch (error) {
+        signal.throwIfAborted();
+        const count = imageOffloadCount(error);
+        if (
+          count > 0 &&
+          this.offloadSessionImages(
+            sessionId,
+            context.sources.map((message) => message.id),
+            count
+          )
+        ) {
+          this.requestUsageAnchors.delete(sessionId);
+        } else if (!overflowRecovered && isContextOverflow(error)) {
+          overflowRecovered = true;
+          if (!(await this.compactSessionOnce(sessionId, signal, 0))) throw error;
+        } else throw error;
+        context = await this.prepareContext(this.listSessionMessages(sessionId), model, thinkingEnabled);
+        measurement = this.measureRequest(sessionId, context.messages, model);
+        if (measurement.tokens > budget.input)
+          throw new Error("The conversation still exceeds the model context window.");
+        recovering = true;
+      }
+    }
+  }
+
+  async compactSession(sessionId: string, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    if (this.compactingSessions.has(sessionId)) throw new Error("This session is already being compacted.");
+    if (this.isSessionRunning(sessionId)) throw new Error("This session is already running.");
+    const controller = new AbortController();
+    const abort = () => controller.abort(signal?.reason);
+    signal?.addEventListener("abort", abort, { once: true });
+    const compactionSignal = controller.signal;
+    let changed = false;
+    await this.getRuntime(sessionId)
+      .run(async () => {
+        try {
+          this.onAssistantMessage(this.buildAssistantMessage(sessionId, "Compacting conversation...", null), false);
+          changed = await this.compactSessionOnce(sessionId, compactionSignal, 0);
+          if (changed)
+            this.onAssistantMessage(this.buildUserMessage(sessionId, { text: "Conversation compacted." }), false);
+        } catch (error) {
+          this.recordSessionFailure(sessionId, error, compactionSignal);
+          throw error;
+        } finally {
+          this.flushDeferredSystemMessages(sessionId);
+        }
+      }, controller)
+      .finally(() => signal?.removeEventListener("abort", abort));
+    return changed;
+  }
+
+  /** Commit only a complete, smaller checkpoint against an unchanged selected history. */
+  private async compactSessionOnce(sessionId: string, signal: AbortSignal, retain: number): Promise<boolean> {
+    signal.throwIfAborted();
+    if (this.compactingSessions.has(sessionId)) throw new Error("This session is already being compacted.");
+    this.compactingSessions.add(sessionId);
+    try {
+      const { client, model, thinkingEnabled } = this.createOpenAIClient();
+      if (!client) return false;
+      const budget = this.getCompactionBudget(model);
+      let active = this.listSessionMessages(sessionId).filter((message) => !message.compacted);
+      let context = await this.prepareContext(active, model, thinkingEnabled);
+      const prices = context.sources.map((message) =>
+        estimateRequestTokens(
+          message.role === "tool"
+            ? [{ role: "tool", content: message.content ?? "", tool_call_id: "" }]
+            : this.messageConverter.buildMessages(
+                [message],
+                thinkingEnabled,
+                model,
+                this.getResolvedSettings().multimodal
+              )
+        )
+      );
+      const prefixes = compactPrefixes(active, prices, retain);
+      let overflowRetried = false;
+      let maxPrefix = Infinity;
+      for (;;) {
+        signal.throwIfAborted();
+        let selected: SessionMessage[] | undefined;
+        let replay: Awaited<ReturnType<SessionManager["prepareContext"]>> | undefined;
+        for (const end of prefixes.ends) {
+          if (end >= maxPrefix) continue;
+          const prefix = prefixes.history.slice(0, end);
+          const ids = new Set(prefix.map((message) => message.id));
+          const candidate = await this.prepareContext(
+            active.filter((message) => isFixedContext(message) || ids.has(message.id)),
+            model,
+            thinkingEnabled
+          );
+          const summaryMessages: ChatCompletionMessageParam[] = [
+            ...candidate.messages,
+            { role: "user", content: getCompactPrompt() },
+          ];
+          const cost = estimateRequestTokens(
+            summaryMessages,
+            getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
+          );
+          if (cost <= budget.input && estimateRequestBytes(summaryMessages) <= budget.byteThreshold) {
+            selected = prefix;
+            replay = candidate;
+            break;
+          }
+        }
+        if (!selected || !replay) {
+          if (prefixes.ends.length === 0) return false;
+          throw new Error(
+            "The conversation is too large to summarize safely. Shorten the input or start a new session."
+          );
+        }
+        const selectedIds = new Set(selected.map((message) => message.id));
+        const firstSelectedId = selected[0].id;
+        const snapshot = JSON.stringify(active);
+        let response: Awaited<ReturnType<SessionManager["sendPreparedCompletion"]>>;
+        try {
+          response = await this.sendPreparedCompletion(
+            replay.sources,
+            replay.messages,
+            { compaction: true, max_tokens: budget.output, tool_choice: "none" },
+            sessionId,
+            signal,
+            "SessionManager.compactSession"
+          );
+        } catch (error) {
+          signal.throwIfAborted();
+          if (
+            JSON.stringify(this.listSessionMessages(sessionId).filter((message) => !message.compacted)) !== snapshot
+          ) {
+            throw new Error("The conversation changed during compaction. Please try again.");
+          }
+          const count = imageOffloadCount(error);
+          if (
+            count > 0 &&
+            this.offloadSessionImages(
+              sessionId,
+              replay.sources.map((message) => message.id),
+              count
+            )
+          ) {
+            active = this.listSessionMessages(sessionId).filter((message) => !message.compacted);
+            context = await this.prepareContext(active, model, thinkingEnabled);
+            this.requestUsageAnchors.delete(sessionId);
+            continue;
+          }
+          if (!overflowRetried && isContextOverflow(error)) {
+            overflowRetried = true;
+            // Reduce substantially, rather than retrying an almost identical prefix.
+            maxPrefix = Math.max(2, Math.ceil(selected.length / 2) + 1);
+            maxPrefix = Math.min(maxPrefix, selected.length);
+            continue;
+          }
+          throw error;
+        }
+        signal.throwIfAborted();
+        const now = new Date().toISOString();
+        const usage = response.usage ?? null;
+        this.updateSessionEntry(sessionId, (entry) => ({
+          ...entry,
+          usage: accumulateUsage(entry.usage, usage),
+          usagePerModel: accumulateUsagePerModel(entry.usagePerModel, model, usage),
+          updateTime: now,
+        }));
+        const choice = response.choices?.[0];
+        const output = choice?.message;
+        const text =
+          typeof output?.content === "string"
+            ? output.content.replace(/<analysis>[\s\S]*?<\/analysis>/gi, "").trim()
+            : "";
+        if (
+          !text ||
+          output?.refusal ||
+          (Array.isArray(output?.tool_calls) && output.tool_calls.length > 0) ||
+          (choice?.finish_reason != null && choice.finish_reason !== "stop")
+        ) {
+          throw new Error("Compaction did not produce a complete text summary. The original conversation was kept.");
+        }
+        const summary: SessionMessage = {
+          id: crypto.randomUUID(),
+          sessionId,
+          role: "user",
+          content: frameCompactSummary(text),
+          contentParams: null,
+          messageParams: null,
+          compacted: false,
+          visible: false,
+          createTime: now,
+          updateTime: now,
+          meta: { isSummary: true },
+        };
+        const replacement = active.flatMap((message) =>
+          message.id === firstSelectedId ? [summary] : selectedIds.has(message.id) ? [] : [message]
+        );
+        const next = await this.prepareContext(replacement, model, thinkingEnabled);
+        const tokens = estimateRequestTokens(
+          next.messages,
+          getTools(this.getPromptToolOptions(), this.mcpToolDefinitions)
+        );
+        const previousBytes = estimateRequestBytes(context.messages);
+        const reduced =
+          previousBytes > budget.byteThreshold
+            ? estimateRequestBytes(next.messages) < previousBytes && tokens <= budget.input
+            : estimateRequestTokens(next.messages) < estimateRequestTokens(context.messages);
+        if (!reduced) {
+          throw new Error("Compaction did not reduce the conversation size. The original conversation was kept.");
+        }
+        signal.throwIfAborted();
+        const current = this.listSessionMessages(sessionId);
+        if (JSON.stringify(current.filter((message) => !message.compacted)) !== snapshot) {
+          throw new Error("The conversation changed during compaction. Please try again.");
+        }
+        const committed = current.flatMap((message) => {
+          const marked = selectedIds.has(message.id) ? { ...message, compacted: true, updateTime: now } : message;
+          return message.id === firstSelectedId ? [summary, marked] : [marked];
+        });
+        this.saveSessionMessages(sessionId, committed);
+        this.requestUsageAnchors.delete(sessionId);
+        this.updateSessionEntry(sessionId, (entry) => ({ ...entry, activeTokens: tokens, updateTime: now }));
+        return true;
+      }
+    } finally {
+      this.compactingSessions.delete(sessionId);
+    }
+  }
+
+  private offloadSessionImages(sessionId: string, sourceIds: string[], count: number): boolean {
+    const { model } = this.createOpenAIClient();
+    const multimodal = supportsMultimodal(model, this.getResolvedSettings().multimodal);
+    if (!multimodal && !this.getDeepSeekFilesSettings().enabled) return false;
+    const sources = new Set(sourceIds);
+    let changed = false;
+    const messages = this.listSessionMessages(sessionId).map((message) => {
+      if (!sources.has(message.id) || message.compacted || (message.role !== "user" && message.role !== "system"))
+        return message;
+      const omitted = new Set(message.meta?.omittedImages ?? []);
+      const params = Array.isArray(message.contentParams)
+        ? message.contentParams
+        : message.contentParams
+          ? [message.contentParams]
+          : [];
+      const keys = params.flatMap((part, index) => (part?.type === "image_url" ? [`content:${index}`] : []));
+      if (message.role === "user" && multimodal) {
+        (message.meta?.userPrompt?.imageUrls ?? []).forEach((url, index) => {
+          if (this.getLocalPromptImagePath(url) || /^https?:\/\//i.test(url)) keys.push(`prompt:${index}`);
+        });
+      }
+      for (const key of keys) {
+        if (count <= 0) break;
+        if (omitted.has(key)) continue;
+        omitted.add(key);
+        count--;
+        changed = true;
+      }
+      return omitted.size === (message.meta?.omittedImages?.length ?? 0)
+        ? message
+        : {
+            ...message,
+            meta: { ...message.meta, omittedImages: [...omitted] },
+            updateTime: new Date().toISOString(),
+          };
+    });
+    if (changed) this.saveSessionMessages(sessionId, messages);
+    return changed;
   }
 
   private getPromptToolOptions(): {
@@ -2092,54 +2651,44 @@ ${agentInstructions}
     multimodal: MultimodalMode = "default"
   ): Promise<SessionMessage[]> {
     const includeImageContent = supportsMultimodal(model, multimodal);
-    const prepared = await Promise.all(
+    return await Promise.all(
       messages.map(async (message) => {
-        const imageUrls = message.role === "user" ? message.meta?.userPrompt?.imageUrls : undefined;
-        const promptImages: Array<{ source: "file" | "url"; value: string }> = [];
-        for (const imageUrl of imageUrls ?? []) {
-          const filePath = this.getLocalPromptImagePath(imageUrl);
-          if (filePath) {
-            promptImages.push({ source: "file", value: filePath });
-          } else if (/^https?:\/\//i.test(imageUrl)) {
-            promptImages.push({ source: "url", value: imageUrl });
-          }
-        }
-        if (promptImages.length === 0) {
-          return message;
-        }
-
-        const contentParams = Array.isArray(message.contentParams)
-          ? [...message.contentParams]
+        const omitted = new Set(message.meta?.omittedImages ?? []);
+        const params = Array.isArray(message.contentParams)
+          ? message.contentParams
           : message.contentParams
             ? [message.contentParams]
             : [];
-        if (includeImageContent) {
-          const imageParts = await Promise.all(
-            promptImages.map(async ({ source, value }) => {
-              if (source === "url") {
-                return { type: "image_url", image_url: { url: value } };
-              }
-              const { image } = await loadImageFile(value, this.loadSharp);
-              return {
-                type: "image_url",
-                image_url: { url: `data:${image.mediaType};base64,${image.data.toString("base64")}` },
-              };
-            })
-          );
-          for (const imagePart of imageParts) {
-            contentParams.push(imagePart);
+        const contentParams = params.map((part, index) => {
+          if (part?.type !== "image_url" || !omitted.has(`content:${index}`)) return part;
+          const url = typeof part.image_url?.url === "string" ? part.image_url.url : "";
+          const reference = url.startsWith("data:") ? `session attachment ${message.id}/content:${index}` : url;
+          return { type: "text", text: `[Image omitted: ${reference}]` };
+        });
+        const imageUrls = message.role === "user" ? (message.meta?.userPrompt?.imageUrls ?? []) : [];
+        for (const [index, imageUrl] of imageUrls.entries()) {
+          const filePath = this.getLocalPromptImagePath(imageUrl);
+          if (!filePath && !/^https?:\/\//i.test(imageUrl)) continue;
+          if (omitted.has(`prompt:${index}`)) {
+            contentParams.push({ type: "text", text: `[Image omitted: ${filePath ?? imageUrl}]` });
+          } else if (!includeImageContent) {
+            contentParams.push({
+              type: "text",
+              text: `<message_meta>\n${JSON.stringify({ images: [filePath ?? imageUrl] }, null, 2)}\n</message_meta>`,
+            });
+          } else if (filePath) {
+            const { image } = await loadImageFile(filePath, this.loadSharp);
+            contentParams.push({
+              type: "image_url",
+              image_url: { url: `data:${image.mediaType};base64,${image.data.toString("base64")}` },
+            });
+          } else {
+            contentParams.push({ type: "image_url", image_url: { url: imageUrl } });
           }
         }
-        if (!includeImageContent) {
-          contentParams.push({
-            type: "text",
-            text: `<message_meta>\n${JSON.stringify({ images: promptImages.map(({ value }) => value) }, null, 2)}\n</message_meta>`,
-          });
-        }
-        return { ...message, contentParams };
+        return contentParams.length || params.length ? { ...message, contentParams } : message;
       })
     );
-    return prepared;
   }
 
   private getLocalPromptImagePath(imageUrl: string): string | null {
@@ -2152,16 +2701,11 @@ ${agentInstructions}
   }
 
   private reportNewPrompt(): void {
-    const { machineId, telemetryEnabled } = this.createOpenAIClient();
-    reportNewPrompt({ enabled: telemetryEnabled ?? true, machineId });
+    const { machineId, telemetryEnabled, plusApiKey } = this.createOpenAIClient();
+    reportNewPrompt({ enabled: telemetryEnabled ?? true, machineId, plusApiKey });
   }
 
   interruptActiveSession(): void {
-    const controller = this.activePromptController;
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
-    }
-
     const sessionId = this.activeSessionId;
     if (sessionId) {
       this.interruptSession(sessionId);
@@ -2169,6 +2713,7 @@ ${agentInstructions}
   }
 
   interruptSession(sessionId: string): void {
+    this.getRuntime(sessionId).interrupt();
     const session = this.getSession(sessionId);
     const processIds = this.getProcessIds(session?.processes ?? null);
     const killedPids: number[] = [];
@@ -2182,12 +2727,6 @@ ${agentInstructions}
         continue;
       }
       failedPids.push(pid);
-    }
-
-    const controller = this.sessionControllers.get(sessionId);
-    if (controller) {
-      controller.abort();
-      this.sessionControllers.delete(sessionId);
     }
 
     const now = new Date().toISOString();
@@ -2211,7 +2750,8 @@ ${agentInstructions}
   }
 
   private isInterrupted(sessionId: string): boolean {
-    return !this.sessionControllers.has(sessionId);
+    const controller = this.runtimes.get(sessionId)?.controller;
+    return !controller || controller.signal.aborted;
   }
 
   /**
@@ -2228,7 +2768,7 @@ ${agentInstructions}
     }));
   }
 
-  adjustActiveBashTimeout(deltaMs: number): BashTimeoutAdjustment | null {
+  adjustActiveBashTimeout(deltaMs: number, processId?: string): BashTimeoutAdjustment | null {
     const sessionId = this.activeSessionId;
     if (!sessionId || !Number.isFinite(deltaMs)) {
       return null;
@@ -2240,6 +2780,7 @@ ${agentInstructions}
 
     let selectedPid: string | null = null;
     for (const pid of session.processes.keys()) {
+      if (processId !== undefined && pid !== processId) continue;
       if (this.processTimeoutControls.has(this.getProcessControlKey(sessionId, pid))) {
         selectedPid = pid;
       }
@@ -2299,6 +2840,8 @@ ${agentInstructions}
       updateTime: now,
       processes: null,
       planMode: source.planMode,
+      autoTitlePending: true,
+      usingPlus: source.usingPlus,
       forkedFrom: {
         sessionId: sourceSessionId,
         messageId: sourceMessage.id,
@@ -2361,6 +2904,40 @@ ${agentInstructions}
     return true;
   }
 
+  private maybeGenerateSessionTitle(sessionId: string, userPrompt: UserPromptContent): void {
+    const entry = this.getSession(sessionId);
+    if (
+      !entry?.autoTitlePending ||
+      userPrompt.isAnswers ||
+      hasUserPermissionReplies(userPrompt) ||
+      this.isContinuePrompt(userPrompt)
+    ) {
+      return;
+    }
+    this.updateSessionEntry(sessionId, (existing) => ({ ...existing, autoTitlePending: false }));
+    if (!userPrompt.text?.trim()) return;
+
+    const prompt = entry.forkedFrom
+      ? recentConversationTitlePrompt(this.listSessionMessages(sessionId))
+      : firstMessageTitlePrompt(userPrompt.text);
+    if (!prompt) return;
+    const controller = new AbortController();
+    this.titleControllers.set(sessionId, controller);
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    timeout.unref();
+    void generateSessionTitle(this.createOpenAIClient, prompt, controller.signal)
+      .then((title) => {
+        if (title && !controller.signal.aborted) this.renameSession(sessionId, title);
+      })
+      .catch(() => {
+        // Naming is best effort; keep the existing title on failure.
+      })
+      .finally(() => {
+        clearTimeout(timeout);
+        this.titleControllers.delete(sessionId);
+      });
+  }
+
   /**
    * Rename a session by updating its summary (display title).
    * Returns true if the session was found and renamed, false otherwise.
@@ -2402,17 +2979,63 @@ ${agentInstructions}
     return messages;
   }
 
+  editSessionMessage(sessionId: string, target: SessionMessageTarget, tab: SessionMessageTab, text: string): void {
+    this.updateSessionMessageHistory(sessionId, (messages) => editSessionMessageHistory(messages, target, tab, text));
+  }
+
+  deleteSessionMessage(sessionId: string, target: SessionMessageTarget): void {
+    this.updateSessionMessageHistory(sessionId, (messages) => deleteSessionMessageHistory(messages, target));
+  }
+
+  private updateSessionMessageHistory(
+    sessionId: string,
+    update: (messages: SessionMessage[]) => SessionMessage[]
+  ): void {
+    const entry = this.getSession(sessionId);
+    if (!entry) throw new Error("Session was not found.");
+    if (this.isSessionRunning(sessionId)) throw new Error("Wait for the session to finish before editing messages.");
+    const original = this.listSessionMessages(sessionId);
+    const updated = update(original);
+    const plan = refreshEditedToolPermissions(original, updated, (toolCalls) =>
+      this.computeToolPermissions(sessionId, toolCalls)
+    );
+    this.replaceSessionHistory(sessionId, updated, reconcileSessionWaitState(entry, updated, plan));
+  }
+
+  private replaceSessionHistory(
+    sessionId: string,
+    messages: SessionMessage[],
+    state?: SessionWaitState & { processes?: SessionEntry["processes"] }
+  ): void {
+    const normalized = messages.map((message) => this.normalizeSessionMessage(message));
+    this.saveSessionMessages(sessionId, normalized);
+    this.requestUsageAnchors.delete(sessionId);
+    clearSessionState(sessionId);
+    rebuildSessionStateFromHistory(sessionId, normalized);
+    const latestAssistant = [...normalized].reverse().find((message) => message.role === "assistant");
+    const params = latestAssistant?.messageParams as { reasoning_content?: string } | null | undefined;
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      ...(state ?? reconcileSessionWaitState(entry, normalized)),
+      assistantReply: latestAssistant?.content ?? null,
+      assistantThinking: typeof params?.reasoning_content === "string" ? params.reasoning_content : null,
+      assistantRefusal: null,
+      updateTime: new Date().toISOString(),
+    }));
+  }
+
   listUndoTargets(sessionId: string): UndoTarget[] {
+    const checkpoints = new Map<string, boolean>();
     return this.listSessionMessages(sessionId)
       .map((message, index) => ({ message, index }))
       .filter(({ message }) => this.isUndoTargetMessage(message))
-      .map(({ message, index }) => ({
-        message,
-        index,
-        canRestoreCode: Boolean(
-          message.checkpointHash && this.canRestoreCheckpointHash(sessionId, message.checkpointHash)
-        ),
-      }));
+      .map(({ message, index }) => {
+        const hash = message.checkpointHash;
+        if (hash && !checkpoints.has(hash)) {
+          checkpoints.set(hash, this.canRestoreCheckpointHash(sessionId, hash));
+        }
+        return { message, index, canRestoreCode: hash ? checkpoints.get(hash)! : false };
+      });
   }
 
   restoreSessionConversation(sessionId: string, messageId: string): SessionMessage[] {
@@ -2422,27 +3045,21 @@ ${agentInstructions}
       throw new Error("Selected message was not found in this session.");
     }
 
-    const keptMessages = messages.slice(0, targetIndex);
-    this.saveSessionMessages(sessionId, keptMessages);
     const now = new Date().toISOString();
-    const latestAssistant = [...keptMessages].reverse().find((message) => message.role === "assistant");
-    const latestAssistantParams = latestAssistant?.messageParams as
-      | { tool_calls?: unknown[]; reasoning_content?: string }
-      | null
-      | undefined;
-
-    this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      assistantReply: latestAssistant?.content ?? null,
-      assistantThinking:
-        typeof latestAssistantParams?.reasoning_content === "string" ? latestAssistantParams.reasoning_content : null,
-      assistantRefusal: null,
+    const precedingMessages = messages.slice(0, targetIndex);
+    // Summaries may precede their source messages and contain content after the undo target.
+    const keptMessages = messages[targetIndex].compacted
+      ? precedingMessages
+          .filter((message) => !message.meta?.isSummary)
+          .map((message) => (message.compacted ? { ...message, compacted: false, updateTime: now } : message))
+      : precedingMessages;
+    this.replaceSessionHistory(sessionId, keptMessages, {
       toolCalls: null,
       status: "completed",
       failReason: null,
+      askPermissions: undefined,
       processes: null,
-      updateTime: now,
-    }));
+    });
     return keptMessages;
   }
 
@@ -2560,7 +3177,7 @@ ${agentInstructions}
   }
 
   private isUndoTargetMessage(message: SessionMessage): boolean {
-    return message.role === "user" && message.visible && !message.compacted;
+    return message.role === "user" && message.visible && !message.meta?.isSummary;
   }
 
   private ensureProjectDir(): string {
@@ -2638,6 +3255,8 @@ ${agentInstructions}
     sessionId: string,
     options: { removeMessages: boolean; processIds?: number[] }
   ): void {
+    this.runtimes.get(sessionId)?.dispose();
+    this.runtimes.delete(sessionId);
     const processIds = options.processIds ?? [];
     for (const pid of processIds) {
       const processControlKey = this.getProcessControlKey(sessionId, pid);
@@ -2648,13 +3267,10 @@ ${agentInstructions}
       this.killTrackedProcess(processControlKey, pid);
     }
 
+    this.requestUsageAnchors.delete(sessionId);
+    this.sessionPermissionAllows.delete(sessionId);
     clearSessionState(sessionId);
     clearSessionWorkingDir(sessionId);
-    const controller = this.sessionControllers.get(sessionId);
-    if (controller && !controller.signal.aborted) {
-      controller.abort();
-    }
-    this.sessionControllers.delete(sessionId);
     if (options.removeMessages) {
       this.removeSessionMessages([sessionId]);
       try {
@@ -2662,6 +3278,21 @@ ${agentInstructions}
       } catch {
         // Ignore cleanup failures, matching message cleanup behavior.
       }
+    }
+  }
+
+  private async persistUserHistory(message: SessionMessage): Promise<void> {
+    try {
+      await appendHistoryEntry(
+        {
+          session_id: message.sessionId,
+          ts: Math.floor(Date.parse(message.createTime) / 1000),
+          text: message.content ?? "",
+        },
+        this.getResolvedSettings().history
+      );
+    } catch {
+      this.addSessionSystemMessage(message.sessionId, "Could not save prompt history.", true);
     }
   }
 
@@ -2675,7 +3306,13 @@ ${agentInstructions}
     this.ensureProjectDir();
     const messagePath = this.getSessionMessagesPath(sessionId);
     const payload = messages.map((message) => JSON.stringify(message)).join("\n");
-    fs.writeFileSync(messagePath, payload ? `${payload}\n` : "", "utf8");
+    const temporaryPath = `${messagePath}.${crypto.randomUUID()}.tmp`;
+    try {
+      fs.writeFileSync(temporaryPath, payload ? `${payload}\n` : "", "utf8");
+      fs.renameSync(temporaryPath, messagePath);
+    } finally {
+      fs.rmSync(temporaryPath, { force: true });
+    }
   }
 
   private updateSessionEntry(sessionId: string, updater: (entry: SessionEntry) => SessionEntry): SessionEntry | null {
@@ -2927,6 +3564,7 @@ ${agentInstructions}
       messageParams: null,
       compacted: false,
       visible: message.visible ?? false,
+      meta: { isToolFollowUp: true },
       createTime: now,
       updateTime: now,
     };
@@ -2980,10 +3618,6 @@ ${agentInstructions}
     };
   }
 
-  private generateToolCallId(): string {
-    return crypto.randomBytes(16).toString("hex");
-  }
-
   private normalizeLlmToolCalls(rawToolCalls: unknown[] | null | undefined): unknown[] | null {
     if (!Array.isArray(rawToolCalls) || rawToolCalls.length === 0) {
       return null;
@@ -3002,7 +3636,7 @@ ${agentInstructions}
 
       return {
         ...record,
-        id: this.generateToolCallId(),
+        id: generateToolCallId(),
       };
     });
   }
@@ -3086,8 +3720,7 @@ ${agentInstructions}
   ): Promise<{ waitingForUser: boolean }> {
     const loadedSkillNames = new Set<string>();
     const hooks: ToolExecutionHooks = {
-      signal: this.sessionControllers.get(sessionId)?.signal,
-      onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command),
+      signal: this.runtimes.get(sessionId)?.controller?.signal,
       onProcessExit: (pid) => this.removeSessionProcess(sessionId, pid),
       onProcessStdout: (pid, chunk) => this.onProcessStdout?.(Number(pid), chunk),
       onProcessTimeoutControl: (pid, control) => this.setSessionProcessTimeoutControl(sessionId, pid, control),
@@ -3101,41 +3734,35 @@ ${agentInstructions}
     const parsedToolCalls = toolCalls
       .map((toolCall) => parseToolCallForPermissions(toolCall))
       .filter((toolCall): toolCall is PermissionToolCall => Boolean(toolCall));
-    const toolExecutions: ToolCallExecution[] = [];
-    for (const toolCall of parsedToolCalls) {
-      if (hooks.shouldStop?.()) {
-        break;
-      }
-      const blockedResult = buildPermissionToolExecution(toolCall, options);
-      if (blockedResult) {
-        toolExecutions.push(blockedResult);
-        continue;
-      }
-      const executions = await this.toolExecutor.executeToolCalls(sessionId, [toolCall], hooks);
-      toolExecutions.push(...executions);
-    }
-    if (this.isInterrupted(sessionId)) {
-      return { waitingForUser: false };
-    }
     let waitingForUser = false;
     const followUpMessages: SessionMessage[] = [];
-    for (const execution of toolExecutions) {
-      if (execution.result.awaitUserResponse === true) {
-        waitingForUser = true;
-      }
-      const toolFunction = this.messageConverter.findToolFunction(toolCalls, execution.toolCallId);
-      const toolMessage = this.buildToolMessage(
-        sessionId,
-        execution.toolCallId,
-        execution.content,
-        toolFunction,
-        execution.result.name === "skill" ? execution.result.metadata : undefined
-      );
-      this.appendSessionMessage(sessionId, toolMessage);
-      this.onAssistantMessage(toolMessage, true);
+    for (const toolCall of parsedToolCalls) {
+      if (hooks.shouldStop?.()) break;
+      const blockedResult = buildPermissionToolExecution(toolCall, options);
+      const executions = blockedResult
+        ? [blockedResult]
+        : await this.toolExecutor.executeToolCalls(sessionId, [toolCall], {
+            ...hooks,
+            onProcessStart: (pid, command) => this.addSessionProcess(sessionId, pid, command, toolCall),
+          });
+      if (this.isInterrupted(sessionId)) return { waitingForUser: false };
 
-      for (const followUpMessage of execution.result.followUpMessages ?? []) {
-        followUpMessages.push(this.buildFollowUpMessage(sessionId, followUpMessage));
+      // Publish each result before starting the next command so Process Output can retain it.
+      for (const execution of executions) {
+        if (execution.result.awaitUserResponse === true) waitingForUser = true;
+        const toolFunction = this.messageConverter.findToolFunction(toolCalls, execution.toolCallId);
+        const toolMessage = this.buildToolMessage(
+          sessionId,
+          execution.toolCallId,
+          execution.content,
+          toolFunction,
+          execution.result.name === "skill" ? execution.result.metadata : undefined
+        );
+        this.appendSessionMessage(sessionId, toolMessage);
+        this.onAssistantMessage(toolMessage, true);
+        for (const followUpMessage of execution.result.followUpMessages ?? []) {
+          followUpMessages.push(this.buildFollowUpMessage(sessionId, followUpMessage));
+        }
       }
     }
 
@@ -3146,6 +3773,7 @@ ${agentInstructions}
   }
 
   private cloneUserPromptForMeta(prompt: UserPromptContent): UserPromptContent {
+    // Session grants are deliberately excluded: restoring history must not restore authorization.
     return {
       text: prompt.text,
       imageUrls: prompt.imageUrls ? [...prompt.imageUrls] : undefined,
@@ -3179,28 +3807,7 @@ ${agentInstructions}
     if (!hasUserContent) {
       return;
     }
-    this.reportNewPrompt();
-    const signal = controller.signal;
-    const userMessage = this.buildUserMessage(sessionId, userPrompt);
-    this.appendSessionMessage(sessionId, userMessage);
-    let matchedSkills: SkillInfo[] = [];
-    if (userPrompt.text) {
-      const skills = await this.listSkills(sessionId);
-      const skillNames = await this.identifyMatchingSkillNames(skills, userPrompt.text, { signal, sessionId });
-      this.throwIfAborted(signal);
-      const skillSet = new Set(skillNames);
-      matchedSkills = skills.filter((skill) => skillSet.has(skill.name));
-    }
-    userPrompt.skills = await this.normalizeSkills(userPrompt.skills, sessionId);
-    this.throwIfAborted(signal);
-    this.appendSkillMessages(sessionId, userPrompt.skills);
-    this.appendSkillCatalogMessage(
-      sessionId,
-      this.mergeSkillCatalog(
-        this.listPreloadedSkillCatalog(sessionId),
-        matchedSkills.map((skill) => ({ name: skill.name, description: skill.description }))
-      )
-    );
+    await this.appendUserPrompt(sessionId, userPrompt, controller.signal);
   }
 
   private buildToolParamsSnippet(toolFunction: unknown | null): string {
@@ -3312,7 +3919,7 @@ ${agentInstructions}
     }
   }
 
-  private maybeNotifyTaskCompletion(
+  private maybeNotifySessionStatus(
     sessionId: string,
     notifyCommand: string | undefined,
     startedAt: number,
@@ -3323,7 +3930,13 @@ ${agentInstructions}
     }
 
     const session = this.getSession(sessionId);
-    if (!session || (session.status !== "completed" && session.status !== "failed")) {
+    if (
+      !session ||
+      (session.status !== "completed" &&
+        session.status !== "failed" &&
+        session.status !== "waiting_for_user" &&
+        session.status !== "ask_permission")
+    ) {
       return;
     }
 
@@ -3339,6 +3952,7 @@ ${agentInstructions}
     }
 
     launchNotifyScript(notifyCommand, Date.now() - startedAt, this.projectRoot, undefined, configuredEnv, {
+      sessionId,
       status: session.status,
       failReason: session.failReason ?? undefined,
       body,
@@ -3346,12 +3960,23 @@ ${agentInstructions}
     });
   }
 
-  private addSessionProcess(sessionId: string, processId: string | number, command: string): void {
+  private addSessionProcess(
+    sessionId: string,
+    processId: string | number,
+    command: string,
+    toolCall?: PermissionToolCall
+  ): void {
+    const args = toolCall ? JSON.parse(toolCall.function.arguments) : {};
     const now = new Date().toISOString();
     this.liveProcessKeys.add(this.getProcessControlKey(sessionId, processId));
     this.updateSessionEntry(sessionId, (entry) => {
       const processes = new Map(entry.processes ?? []);
-      processes.set(String(processId), { startTime: now, command });
+      processes.set(String(processId), {
+        startTime: now,
+        command,
+        toolCallId: toolCall?.id,
+        runInBackground: args.run_in_background === true || args.run_in_background === "true",
+      });
       return {
         ...entry,
         processes,
@@ -3560,6 +4185,7 @@ ${agentInstructions}
     return {
       id: typeof value.id === "string" ? value.id : crypto.randomUUID(),
       summary: typeof value.summary === "string" ? value.summary : null,
+      autoTitlePending: value.autoTitlePending === true,
       assistantReply: typeof value.assistantReply === "string" ? value.assistantReply : null,
       assistantThinking: typeof value.assistantThinking === "string" ? value.assistantThinking : null,
       assistantRefusal: typeof value.assistantRefusal === "string" ? value.assistantRefusal : null,
@@ -3574,6 +4200,7 @@ ${agentInstructions}
       processes: this.deserializeProcesses(value.processes),
       askPermissions: normalizeAskPermissions(value.askPermissions),
       planMode: value.planMode === true,
+      usingPlus: value.usingPlus === true,
       pluginRateLimitedTool: this.normalizePluginRateLimitedTool(value.pluginRateLimitedTool),
       forkedFrom: this.normalizeForkedFrom(value.forkedFrom),
     };
@@ -3651,6 +4278,8 @@ ${agentInstructions}
         const obj = entry as {
           startTime?: unknown;
           command?: unknown;
+          toolCallId?: unknown;
+          runInBackground?: unknown;
           timeoutMs?: unknown;
           deadlineAt?: unknown;
           timedOut?: unknown;
@@ -3660,6 +4289,8 @@ ${agentInstructions}
         processes.set(pid, {
           startTime,
           command,
+          toolCallId: typeof obj.toolCallId === "string" ? obj.toolCallId : undefined,
+          runInBackground: typeof obj.runInBackground === "boolean" ? obj.runInBackground : undefined,
           timeoutMs: typeof obj.timeoutMs === "number" ? obj.timeoutMs : undefined,
           deadlineAt: typeof obj.deadlineAt === "string" ? obj.deadlineAt : undefined,
           timedOut: typeof obj.timedOut === "boolean" ? obj.timedOut : undefined,

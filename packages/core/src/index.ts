@@ -10,11 +10,14 @@ export {
   writeSettings,
   writeProjectSettings,
   writeModelConfigSelection,
+  writeReasoningSummarySelection,
   applyModelConfigSelection,
   modelConfigKey,
   getUserSettingsPath,
   getProjectSettingsPath,
+  getDefaultSettingsTarget,
   readDeepcodePlusApiKey,
+  readDeepcodePlusSettings,
   getDefaultContextWindow,
   getDefaultAutoCompactWindow,
   DEFAULT_MODEL,
@@ -27,11 +30,31 @@ export {
   MAX_FILES_API_TIMEOUT_MS,
   ATLASCLOUD_DEFAULT_MODEL,
   ATLASCLOUD_BASE_URL,
+  PERMISSION_SCOPES,
 } from "./settings";
+export {
+  readPermissionSettingsEdit,
+  getPermissionScopeSelection,
+  applyPermissionSettingsChanges,
+  previewPermissionSettings,
+  writePermissionSettingsChanges,
+} from "./permission-settings";
 export type {
+  PermissionScopeSelection,
+  PermissionSettingsChanges,
+  PermissionSettingsEdit,
+} from "./permission-settings";
+export type {
+  DeepcodePlusSettings,
+  SubscriptionPlan,
   DeepcodingSettings,
+  ExperimentalSettings,
+  ResolvedExperimentalSettings,
+  ReasoningSummaryMode,
+  SettingsTrace,
   ResolvedDeepcodingSettings,
   ModelConfigSelection,
+  SettingsTarget,
   PermissionScope,
   PermissionSettings,
   PermissionDefaultMode,
@@ -44,6 +67,7 @@ export type {
 
 // Session
 export { SessionManager, getProjectCode, getCompactPromptTokenThreshold } from "./session";
+export { isValidSessionId } from "./common/session-id";
 export type {
   SessionMessage,
   SessionEntry,
@@ -78,6 +102,7 @@ export type { ToolDefinition, SkillPromptDocument, PromptToolOptions } from "./p
 export { ToolExecutor } from "./tools/executor";
 export type {
   CreateOpenAIClient,
+  OpenAIClientResult,
   ToolCall,
   ToolExecutionContext,
   ToolExecutionHooks,
@@ -109,7 +134,12 @@ export { McpClient } from "./mcp/mcp-client";
 export type { McpServerStatus } from "./mcp/mcp-manager";
 
 // Common utilities
-export { createOpenAIClient, resolveOpenAIConnection, DEEPCODE_PLUS_BASE_URL } from "./common/openai-client";
+export {
+  createOpenAIClient,
+  createOpenAIClientFactory,
+  resolveOpenAIConnection,
+  DEEPCODE_PLUS_BASE_URL,
+} from "./common/openai-client";
 export { buildThinkingRequestOptions } from "./common/openai-thinking";
 export { readTextFileWithMetadata, writeTextFile, buildDiffPreview, ensureParentDirectory } from "./common/file-utils";
 export { normalizeFilePath, getSnippet, clearSessionState, recordFileState, getFileState } from "./common/state";
@@ -147,6 +177,7 @@ export type {
   BashPermissionScope,
   MessageToolPermission,
   PermissionDecision,
+  PermissionReply,
   PermissionToolCall,
   UserToolPermission,
 } from "./common/permissions";
@@ -154,3 +185,37 @@ export type {
 // State types
 export type { FileState, FileSnippet, FileLineEnding } from "./common/state";
 export type { FileReadMetadata } from "./common/file-utils";
+
+export {
+  checkPlusSubscription,
+  withPlusSubscription,
+  normalizePlusApiKey,
+  resolveEffectivePlusSettings,
+  writeDeepcodePlusApiKey,
+} from "./common/plus-subscription";
+export type { PlusSubscriptionStatus, OpenAIConnection, OpenAIConnectionContext } from "./common/plus-subscription";
+
+export { getDiffDetails, getDiffFilePath, parseLegacyDiffPreview } from "./common/diff-preview";
+export type { DiffDetails, DiffLine } from "./common/diff-preview";
+
+export {
+  appendHistoryEntry,
+  getMessageHistoryPath,
+  getHistoryRevision,
+  readHistoryBatch,
+  HistoryChangedError,
+  isUserHistoryMessage,
+  resolveHistorySettings,
+  DEFAULT_HISTORY_SETTINGS,
+} from "./common/message-history";
+export type {
+  HistorySettings,
+  ResolvedHistorySettings,
+  HistoryEntry,
+  HistoryCursor,
+  HistoryBatch,
+} from "./common/message-history";
+
+export type { PromptContent, QueuedMessage, QueuePausedReason } from "./prompt-queue";
+
+export type { SessionMessageTarget, SessionMessageTab } from "./session-message-edit";

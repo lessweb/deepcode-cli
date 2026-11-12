@@ -1,12 +1,15 @@
 import React, { useMemo, useState } from "react";
 import { Box, Text, useInput, useWindowSize } from "ink";
-import type { UndoTarget } from "@vegamo/deepcode-core";
+import type { UndoTarget, QueuedMessage, SessionMessage } from "@vegamo/deepcode-core";
+import { extractImageUrlsFromContentParams } from "../utils";
 
-export type UndoRestoreMode = "code-and-conversation" | "conversation";
+export type UndoRestoreMode = "code-and-conversation" | "conversation" | "remove" | "edit";
+export type QueueUndoTarget = UndoTarget & { queued?: QueuedMessage };
 
 type Props = {
-  targets: UndoTarget[];
-  onSelect: (target: UndoTarget, mode: UndoRestoreMode) => void;
+  targets: QueueUndoTarget[];
+  busy?: boolean;
+  onSelect: (target: QueueUndoTarget, mode: UndoRestoreMode) => void;
   onCancel: () => void;
 };
 
@@ -14,10 +17,11 @@ type Phase = "message" | "mode";
 
 const MAX_VISIBLE_TARGETS = 7;
 
-export function UndoSelector({ targets, onSelect, onCancel }: Props): React.ReactElement {
+export function UndoSelector({ targets, busy = false, onSelect, onCancel }: Props): React.ReactElement {
   const [phase, setPhase] = useState<Phase>("message");
   const [targetIndex, setTargetIndex] = useState(Math.max(0, targets.length - 1));
   const [modeIndex, setModeIndex] = useState(0);
+  const [selected, setSelected] = useState<QueueUndoTarget | null>(null);
   const { columns, rows } = useWindowSize();
 
   const safeTargetIndex = useMemo(() => {
@@ -27,7 +31,13 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
     return Math.max(0, Math.min(targetIndex, targets.length - 1));
   }, [targetIndex, targets.length]);
 
-  const selectedTarget = targets[safeTargetIndex] ?? null;
+  const selectedTarget =
+    phase === "mode"
+      ? (targets.find(
+          (target) => target.message.id === selected?.message.id && Boolean(target.queued) === Boolean(selected?.queued)
+        ) ?? null)
+      : (targets[safeTargetIndex] ?? null);
+  const selectionDisabled = busy && !selectedTarget?.queued;
   const maxVisible = Math.max(1, Math.min(MAX_VISIBLE_TARGETS, rows - 8));
   const scrollOffset = Math.max(0, Math.min(safeTargetIndex - Math.floor(maxVisible / 2), targets.length - maxVisible));
   const visibleTargets = targets.slice(scrollOffset, scrollOffset + maxVisible);
@@ -63,8 +73,9 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
         setTargetIndex(targets.length - 1);
         return;
       }
-      if (key.return) {
-        setModeIndex(selectedTarget?.canRestoreCode ? 0 : 1);
+      if (key.return && selectedTarget && !selectionDisabled) {
+        setSelected(selectedTarget);
+        setModeIndex(selectedTarget?.queued || selectedTarget?.canRestoreCode ? 0 : 1);
         setPhase("mode");
       }
       return;
@@ -74,15 +85,24 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
       setModeIndex((index) => (index === 0 ? 1 : 0));
       return;
     }
-    if (key.return && selectedTarget) {
-      onSelect(selectedTarget, modeIndex === 0 ? "code-and-conversation" : "conversation");
+    if (key.return && selectedTarget && !selectionDisabled) {
+      onSelect(
+        selectedTarget,
+        selectedTarget.queued
+          ? modeIndex === 0
+            ? "remove"
+            : "edit"
+          : modeIndex === 0
+            ? "code-and-conversation"
+            : "conversation"
+      );
     }
   });
 
   if (targets.length === 0) {
     return (
       <Box flexDirection="column" marginTop={1}>
-        <Text color="yellow">Nothing to undo yet.</Text>
+        <Text color="yellow">{busy ? "No pending messages." : "Nothing to undo yet."}</Text>
         <Text dimColor>Press Esc to go back.</Text>
       </Box>
     );
@@ -102,7 +122,7 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
           <Text bold color="#229ac3">
             Undo
           </Text>
-          <Text dimColor> restore to the point before a prompt</Text>
+          <Text dimColor> select a prompt</Text>
         </Box>
         {phase === "message" ? (
           <Box
@@ -120,16 +140,17 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
             {visibleTargets.map((target, visibleIndex) => {
               const actualIndex = scrollOffset + visibleIndex;
               const isActive = actualIndex === safeTargetIndex;
+              const disabled = busy && !target.queued;
               return (
                 <Box key={target.message.id} height={2} marginBottom={1}>
-                  <Text color="#229ac3">{isActive ? "> " : "  "}</Text>
+                  <Text color={disabled ? "gray" : "#229ac3"}>{isActive ? "> " : "  "}</Text>
                   <Box flexDirection="column" flexGrow={1}>
-                    <Text color={isActive ? "#229ac3" : undefined} bold={isActive}>
-                      {formatUndoMessage(target.message.content)}
+                    <Text color={isActive && !disabled ? "#229ac3" : undefined} bold={isActive} dimColor={disabled}>
+                      {formatUndoMessage(target.message)}
                     </Text>
                     <Text dimColor>
                       {formatTimestamp(target.message.createTime)}
-                      {target.canRestoreCode ? " · code checkpoint available" : " · conversation only"}
+                      {target.queued ? " · pending" : ""}
                     </Text>
                   </Box>
                 </Box>
@@ -149,30 +170,49 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
             paddingX={1}
             overflow="hidden"
           >
-            <Text dimColor>Selected prompt:</Text>
-            <Text>{formatUndoMessage(selectedTarget?.message.content ?? "")}</Text>
-            <Box marginTop={1} flexDirection="column">
-              <Text color={modeIndex === 0 ? "cyanBright" : undefined}>
-                {modeIndex === 0 ? "> " : "  "}Restore code and conversation
-              </Text>
-              <Text dimColor>
-                {"  "}
-                {selectedTarget?.canRestoreCode
-                  ? "Restore files from the recorded Git checkpoint, then fork the conversation."
-                  : "No code checkpoint is recorded for this prompt."}
-              </Text>
-              <Text color={modeIndex === 1 ? "cyanBright" : undefined}>
-                {modeIndex === 1 ? "> " : "  "}Restore conversation
-              </Text>
-              <Text dimColor>{"  "}Fork the conversation without changing files.</Text>
-            </Box>
+            <Text dimColor>Selected message:</Text>
+            <Text>{formatUndoMessage(selectedTarget?.message)}</Text>
+            {!selectedTarget ? (
+              <Text>This message is no longer available.</Text>
+            ) : selectionDisabled ? (
+              <Text>This prompt cannot be changed while running.</Text>
+            ) : selectedTarget.queued ? (
+              <Box marginTop={1} flexDirection="column">
+                <Text color={modeIndex === 0 ? "cyanBright" : undefined}>{modeIndex === 0 ? "> " : "  "}Remove</Text>
+                <Text dimColor>{"  "}↩️ Remove this message from the queue.</Text>
+                <Box marginTop={1} flexDirection="column">
+                  <Text color={modeIndex === 1 ? "cyanBright" : undefined}>{modeIndex === 1 ? "> " : "  "}Edit</Text>
+                  <Text dimColor>{"  "}✏️ Edit this message before it is sent.</Text>
+                </Box>
+              </Box>
+            ) : (
+              <Box marginTop={1} flexDirection="column">
+                <Text color={modeIndex === 0 ? "cyanBright" : undefined}>
+                  {modeIndex === 0 ? "> " : "  "}Restore files and conversation
+                </Text>
+                <Text dimColor>
+                  {"  "}
+                  {selectedTarget?.canRestoreCode
+                    ? "Also restore files with saved history to their recorded state."
+                    : "No code checkpoint is recorded for this prompt."}
+                </Text>
+                <Box marginTop={1} flexDirection="column">
+                  <Text color={modeIndex === 1 ? "cyanBright" : undefined}>
+                    {modeIndex === 1 ? "> " : "  "}Restore conversation only
+                  </Text>
+                  <Text dimColor>{"  "}Leave files unchanged.</Text>
+                </Box>
+              </Box>
+            )}
           </Box>
         )}
         <Box>
           <Text dimColor>
-            {phase === "message"
-              ? "↑/↓ navigate · Enter choose · Esc cancel"
-              : "↑/↓ choose restore mode · Enter restore · Esc back"}
+            {selectionDisabled
+              ? "↑/↓ navigate · Esc cancel"
+              : phase === "message"
+                ? "↑/↓ navigate · Enter choose · Esc cancel"
+                : "↑/↓ choose · Enter confirm · Esc back"}
           </Text>
         </Box>
       </Box>
@@ -180,9 +220,13 @@ export function UndoSelector({ targets, onSelect, onCancel }: Props): React.Reac
   );
 }
 
-function formatUndoMessage(content: unknown): string {
+function formatUndoMessage(message?: SessionMessage): string {
+  const content = message?.content;
+  const imageCount =
+    message?.meta?.userPrompt?.imageUrls?.length ?? extractImageUrlsFromContentParams(message?.contentParams).length;
   const text = typeof content === "string" && content.trim() ? content.trim() : "(empty message)";
-  const singleLine = text.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
+  const prefix = imageCount > 0 ? `(📎 ${imageCount} images) ` : "";
+  const singleLine = prefix + text.replace(/\r?\n/g, " ").replace(/\s+/g, " ");
   return singleLine.length > 90 ? `${singleLine.slice(0, 89)}…` : singleLine;
 }
 

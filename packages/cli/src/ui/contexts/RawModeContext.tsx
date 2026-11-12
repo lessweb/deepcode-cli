@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { DropdownMenuItem } from "../components/DropdownMenu";
+import { readRawMode } from "../../common/cli-config";
 
 export enum RawMode {
   None = "Normal mode",
@@ -46,8 +47,8 @@ export function useRawModeContext() {
 }
 
 export const RawModeProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [mode, _setMode] = useState<RawMode>(RawMode.Lite);
-  const previousModeRef = useRef<RawMode>(RawMode.Lite);
+  const [mode, _setMode] = useState<RawMode>(() => (readRawMode() === "normal" ? RawMode.None : RawMode.Lite));
+  const previousModeRef = useRef<RawMode>(mode);
 
   const setMode = useCallback<React.Dispatch<React.SetStateAction<RawMode>>>((next) => {
     _setMode((current) => {

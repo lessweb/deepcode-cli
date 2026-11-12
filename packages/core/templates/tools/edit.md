@@ -19,7 +19,7 @@ Usage:
   "type": "object",
   "properties": {
     "snippet_id": {
-      "description": "Required snippet_id returned by Read or a prior Edit error response.",
+      "description": "Required snippet ID from Read or Write (metadata.snippet.id), or a prior Edit error response.",
       "type": "string"
     },
     "file_path": {

@@ -337,7 +337,9 @@ export function SessionList({ sessions, onSelect, onCancel, onDelete, onRename }
                       )}
                     </Box>
                     <Box width="100%">
-                      <Text dimColor>{formatTimestamp(session.updateTime)} </Text>
+                      <Text dimColor>
+                        {formatTimestamp(session.updateTime)} · {session.id}
+                      </Text>
                     </Box>
                   </Box>
                 </Box>

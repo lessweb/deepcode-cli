@@ -10,6 +10,7 @@ import { GitFileHistory } from "../common/file-history";
 import { clearSessionState } from "../common/state";
 import { getSystemPrompt } from "../prompt";
 import { getProjectCode, SessionManager, type SessionMessage } from "../session";
+import { withPlusSubscription, type PlusSubscriptionStatus } from "../common/plus-subscription";
 import type { MultimodalMode } from "../common/model-capabilities";
 
 const originalFetch = globalThis.fetch;
@@ -136,7 +137,7 @@ test("SessionManager builds hidden user messages for image follow-ups", () => {
 
   assert.equal(message.role, "user");
   assert.equal(message.visible, false);
-  assert.equal(message.meta, undefined);
+  assert.deepEqual(message.meta, { isToolFollowUp: true });
   assert.equal(message.checkpointHash, undefined);
 });
 
@@ -438,6 +439,136 @@ test("SessionManager keeps usagePerModel null until response usage is available"
 
   assert.equal(manager.getSession(sessionId)?.usage, null);
   assert.equal(manager.getSession(sessionId)?.usagePerModel, null);
+});
+
+test("handleUserPrompt persists a requested session ID in lowercase and rejects reuse", async (t) => {
+  const workspace = createTempDir("deepcode-custom-session-workspace-");
+  const home = createTempDir("deepcode-custom-session-home-");
+  setHomeDir(home);
+  const requestedId = "0A5CB7A5-C39D-4C39-A11B-05F8B22B8DF6";
+  const sessionId = requestedId.toLowerCase();
+  const manager = createMockedClientSessionManager(workspace, [{ choices: [{ message: { content: "done" } }] }]);
+  t.after(() => manager.dispose());
+
+  await manager.handleUserPrompt({ text: "task" }, { sessionId: requestedId });
+
+  assert.equal(manager.getActiveSessionId(), sessionId);
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+  const messages = manager.listSessionMessages(sessionId);
+  assert.ok(messages.length > 0);
+  assert.ok(messages.every((message) => message.sessionId === sessionId));
+  assert.equal(messages.at(-1)?.content, "done");
+  const projectDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace));
+  const indexBefore = fs.readFileSync(path.join(projectDir, "sessions-index.json"), "utf8");
+  const messagesBefore = fs.readFileSync(path.join(projectDir, `${sessionId}.jsonl`), "utf8");
+
+  await assert.rejects(manager.handleUserPrompt({ text: "overwrite" }, { sessionId }), /already in use/);
+  assert.equal(fs.readFileSync(path.join(projectDir, "sessions-index.json"), "utf8"), indexBefore);
+  assert.equal(fs.readFileSync(path.join(projectDir, `${sessionId}.jsonl`), "utf8"), messagesBefore);
+});
+
+for (const source of ["same-project-index", "other-project-index", "other-project-messages"] as const) {
+  test(`createSession rejects a case-insensitive duplicate from ${source} before writing`, async (t) => {
+    const workspace = createTempDir("deepcode-duplicate-session-workspace-");
+    const home = createTempDir("deepcode-duplicate-session-home-");
+    setHomeDir(home);
+    const sessionId = "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6";
+    const projectsDir = path.join(home, ".deepcode", "projects");
+    const projectDir = path.join(projectsDir, getProjectCode(workspace));
+    const existingDir = source === "same-project-index" ? projectDir : path.join(projectsDir, "other-project");
+    fs.mkdirSync(existingDir, { recursive: true });
+    const filename = source === "other-project-messages" ? `${sessionId.toUpperCase()}.jsonl` : "sessions-index.json";
+    const contents =
+      source === "other-project-messages"
+        ? "existing messages\n"
+        : JSON.stringify({ entries: [{ id: sessionId.toUpperCase() }] });
+    const existingPath = path.join(existingDir, filename);
+    fs.writeFileSync(existingPath, contents);
+    const manager = createSessionManager(workspace, "machine-id-duplicate");
+    t.after(() => manager.dispose());
+
+    await assert.rejects(manager.createSession({ text: "task" }, undefined, sessionId), /already in use/);
+
+    assert.equal(fs.readFileSync(existingPath, "utf8"), contents);
+    assert.deepEqual(fs.readdirSync(existingDir), [filename]);
+    if (existingDir !== projectDir) assert.equal(fs.existsSync(projectDir), false);
+    assert.equal(manager.getActiveSessionId(), null);
+  });
+}
+
+for (const contents of ["{", "{}", '{"entries":[{}]}']) {
+  test(`createSession with a generated ID ignores another project's invalid index: ${contents}`, async (t) => {
+    const workspace = createTempDir("deepcode-generated-id-workspace-");
+    const home = createTempDir("deepcode-generated-id-home-");
+    setHomeDir(home);
+    const otherProject = path.join(home, ".deepcode", "projects", "other-project");
+    fs.mkdirSync(otherProject, { recursive: true });
+    const indexPath = path.join(otherProject, "sessions-index.json");
+    fs.writeFileSync(indexPath, contents);
+    const manager = createMockedClientSessionManager(workspace, [{ choices: [{ message: { content: "done" } }] }]);
+    t.after(() => manager.dispose());
+
+    await manager.handleUserPrompt({ text: "new task" });
+
+    const id = manager.getActiveSessionId()!;
+    assert.equal(manager.getSession(id)?.status, "completed");
+    assert.ok(manager.listSessionMessages(id).some((message) => message.content === "new task"));
+    assert.equal(fs.readFileSync(indexPath, "utf8"), contents);
+  });
+
+  test(`createSession refuses a custom ID when another project's index is invalid: ${contents}`, async (t) => {
+    const workspace = createTempDir("deepcode-invalid-index-workspace-");
+    const home = createTempDir("deepcode-invalid-index-home-");
+    setHomeDir(home);
+    const projectsDir = path.join(home, ".deepcode", "projects");
+    const existingDir = path.join(projectsDir, "other-project");
+    fs.mkdirSync(existingDir, { recursive: true });
+    const indexPath = path.join(existingDir, "sessions-index.json");
+    fs.writeFileSync(indexPath, contents);
+    const manager = createSessionManager(workspace, "machine-id-invalid-index");
+    t.after(() => manager.dispose());
+
+    await assert.rejects(
+      manager.createSession({ text: "task" }, undefined, "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6"),
+      /Unable to verify session ID availability/
+    );
+    assert.equal(fs.readFileSync(indexPath, "utf8"), contents);
+    assert.equal(fs.existsSync(path.join(projectsDir, getProjectCode(workspace))), false);
+  });
+}
+
+test("createSession rejects invalid explicit IDs without creating storage", async (t) => {
+  const workspace = createTempDir("deepcode-invalid-id-workspace-");
+  const home = createTempDir("deepcode-invalid-id-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-invalid-id");
+  t.after(() => manager.dispose());
+  for (const id of ["", "../outside", "not-a-uuid"]) {
+    await assert.rejects(manager.createSession({ text: "task" }, undefined, id), /Must be a valid UUID/);
+  }
+  assert.equal(fs.existsSync(path.join(home, ".deepcode", "projects")), false);
+});
+
+test("createSession allows reusing a fully deleted custom ID", async (t) => {
+  const workspace = createTempDir("deepcode-reuse-id-workspace-");
+  const home = createTempDir("deepcode-reuse-id-home-");
+  setHomeDir(home);
+  const sessionId = "0a5cb7a5-c39d-4c39-a11b-05f8b22b8df6";
+  const manager = createMockedClientSessionManager(workspace, [
+    { choices: [{ message: { content: "first" } }] },
+    { choices: [{ message: { content: "second" } }] },
+  ]);
+  t.after(() => manager.dispose());
+
+  await manager.handleUserPrompt({ text: "task" }, { sessionId });
+  assert.equal(manager.deleteSession(sessionId), true);
+  await manager.handleUserPrompt({ text: "new task" }, { sessionId });
+  assert.equal(manager.getActiveSessionId(), sessionId);
+  assert.equal(manager.getSession(sessionId)?.assistantReply, "second");
+  assert.equal(
+    manager.listSessionMessages(sessionId).some((message) => message.content === "first"),
+    false
+  );
 });
 
 test("SessionManager marks skills loaded from existing session messages", async () => {
@@ -797,10 +928,10 @@ test("SessionManager excludes implicit opt-out skills from automatic matching ca
     },
   };
   const manager = createMockedClientSessionManagerWithClient(workspace, client);
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "choose an automatic skill" });
-  const matchingPrompt = String(requests[0]?.messages?.[0]?.content ?? "");
+  const matchingPrompt = String(requests.find((request) => request.stream)?.messages?.[0]?.content ?? "");
 
   assert.match(matchingPrompt, /"name": "auto-skill"/);
   assert.doesNotMatch(matchingPrompt, /"name": "manual-only"/);
@@ -828,7 +959,7 @@ test("replySession appends the skill catalog only when content changes", async (
     chat: {
       completions: {
         create: async (request: any) => {
-          if (isSkillMatchingRequest(request)) {
+          if (isSkillMatchingRequest(request) && request.stream) {
             return createSkillMatchingResponse(matchingNames.shift() ?? []);
           }
           return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
@@ -837,7 +968,7 @@ test("replySession appends the skill catalog only when content changes", async (
     },
   };
   const manager = createMockedClientSessionManagerWithClient(workspace, client);
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first turn" });
   const listCatalogMessages = () =>
@@ -884,7 +1015,7 @@ test("skill tool stores the full document and metadata in its tool message", asy
   });
 
   const sessionId = await manager.createSession({ text: "" });
-  (manager as any).sessionControllers.set(sessionId, new AbortController());
+  (manager as any).getRuntime(sessionId).controller = new AbortController();
   await (manager as any).appendToolMessages(sessionId, [
     {
       id: "call-skill",
@@ -892,7 +1023,7 @@ test("skill tool stores the full document and metadata in its tool message", asy
       function: { name: "skill", arguments: JSON.stringify({ name: "skill-writer" }) },
     },
   ]);
-  (manager as any).sessionControllers.delete(sessionId);
+  (manager as any).getRuntime(sessionId).controller = undefined;
 
   const toolMessage = manager
     .listSessionMessages(sessionId)
@@ -932,7 +1063,7 @@ test("skill tool avoids duplicate loads within the same tool call batch", async 
 
   const manager = createSessionManager(workspace, "machine-id-skill-batch-dedupe");
   const sessionId = await manager.createSession({ text: "" });
-  (manager as any).sessionControllers.set(sessionId, new AbortController());
+  (manager as any).getRuntime(sessionId).controller = new AbortController();
   await (manager as any).appendToolMessages(
     sessionId,
     ["first", "second"].map((id) => ({
@@ -941,7 +1072,7 @@ test("skill tool avoids duplicate loads within the same tool call batch", async 
       function: { name: "skill", arguments: JSON.stringify({ name: "skill-writer" }) },
     }))
   );
-  (manager as any).sessionControllers.delete(sessionId);
+  (manager as any).getRuntime(sessionId).controller = undefined;
 
   const results = manager
     .listSessionMessages(sessionId)
@@ -976,7 +1107,7 @@ test("compactSession does not mark skill catalog messages compacted", async () =
     },
   };
   const manager = createMockedClientSessionManagerWithClient(workspace, client);
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "hello" });
   const now = new Date().toISOString();
@@ -998,9 +1129,9 @@ test("compactSession does not mark skill catalog messages compacted", async () =
     id: "assistant-1",
     sessionId,
     role: "assistant",
-    content: "first reply",
+    content: "first reply".repeat(1000),
     contentParams: null,
-    messageParams: null,
+    messageParams: { tool_calls: [{ id: "call-1", type: "function", function: { name: "Read", arguments: "{}" } }] },
     compacted: false,
     visible: true,
     createTime: now,
@@ -1410,7 +1541,7 @@ test("createSession stores /init and sends the active .deepcode project AGENTS p
   fs.writeFileSync(path.join(workspace, "AGENTS.md"), "root project instructions", "utf8");
 
   const manager = createSessionManager(workspace, "machine-id-init-deepcode");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "/init" });
   const messages = manager.listSessionMessages(sessionId);
@@ -1440,7 +1571,7 @@ test("createSession appends default system prompts in prefix-cache-friendly orde
   fs.writeFileSync(path.join(workspace, "AGENTS.md"), "root project instructions", "utf8");
 
   const manager = createSessionManager(workspace, "machine-id-system-order");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "hello" });
   const systemContents = manager
@@ -1489,11 +1620,14 @@ test("createSession includes agent instructions in the skill matching system pro
     },
   };
   const manager = createMockedClientSessionManagerWithClient(workspace, client);
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   await manager.createSession({ text: "pick the right workflow" });
 
-  const messages = (requests[0]?.messages ?? []) as Array<{ role?: string; content?: string }>;
+  const messages = (requests.find((request) => request.stream)?.messages ?? []) as Array<{
+    role?: string;
+    content?: string;
+  }>;
   assert.equal(messages[0]?.role, "system");
   assert.match(messages[0]?.content ?? "", /<agent-instructions>/);
   assert.match(messages[0]?.content ?? "", /prefer project-specific skill matching/);
@@ -1520,7 +1654,7 @@ test("replySession includes current agent instructions in the skill matching sys
     },
   };
   const manager = createMockedClientSessionManagerWithClient(workspace, client);
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "" });
   fs.writeFileSync(path.join(workspace, "AGENTS.md"), "use reply-time agent instructions", "utf8");
@@ -1552,7 +1686,7 @@ test("replySession stores /init and sends the active root project AGENTS path to
   fs.writeFileSync(path.join(workspace, "AGENTS.md"), "root project instructions", "utf8");
 
   const manager = createSessionManager(workspace, "machine-id-init-root");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   await manager.replySession(sessionId, { text: "/init" });
@@ -1580,7 +1714,7 @@ test("createSession stores /init and sends generate prompt when no project AGENT
   fs.writeFileSync(path.join(home, ".deepcode", "AGENTS.md"), "user instructions", "utf8");
 
   const manager = createSessionManager(workspace, "machine-id-init-generate");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "/init" });
   const messages = manager.listSessionMessages(sessionId);
@@ -1596,7 +1730,7 @@ test("createSession stores /init and sends generate prompt when no project AGENT
   assert.doesNotMatch(openAIUserMessage?.content ?? "", /Update \.\/AGENTS\.md/);
 });
 
-test("createSession reports a new prompt with the machineId token", async () => {
+test("createSession routes telemetry using the PLUS key and keeps the machineId token", async () => {
   const workspace = createTempDir("deepcode-session-workspace-");
   const home = createTempDir("deepcode-session-home-");
   setHomeDir(home);
@@ -1610,9 +1744,9 @@ test("createSession reports a new prompt with the machineId token", async () => 
     } as Response;
   }) as typeof fetch;
 
-  const manager = createSessionManager(workspace, "machine-id-123");
+  const manager = createSessionManager(workspace, "machine-id-123", "sk-" + "b".repeat(26));
   const activatedSessionIds: string[] = [];
-  (manager as any).activateSession = async (sessionId: string) => {
+  (manager as any).runSessionIterations = async (sessionId: string) => {
     activatedSessionIds.push(sessionId);
   };
 
@@ -1622,7 +1756,7 @@ test("createSession reports a new prompt with the machineId token", async () => 
   assert.equal(activatedSessionIds.length, 1);
   assert.equal(activatedSessionIds[0], sessionId);
   assert.equal(fetchCalls.length, 1);
-  assert.equal(String(fetchCalls[0].input), "https://deepcode.vegamo.cn/api/plugin/new");
+  assert.equal(String(fetchCalls[0].input), "https://www.deepcodeplus.com/api/plugin/new");
   assert.equal(fetchCalls[0].init?.method, "POST");
   assert.ok(fetchCalls[0].init?.signal instanceof AbortSignal);
   assert.deepEqual(JSON.parse(String(fetchCalls[0].init?.body)), {});
@@ -1644,7 +1778,7 @@ test("replySession reports a new prompt with the machineId token", async () => {
   }) as typeof fetch;
 
   const manager = createSessionManager(workspace, "machine-id-456");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   await flushPromises();
@@ -1675,7 +1809,7 @@ test("reporting a new prompt does not warn when the background request fails", a
   }) as typeof fetch;
 
   const manager = createSessionManager(workspace, "machine-id-failure");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   await manager.createSession({ text: "hello world" });
   await flushPromises();
@@ -1700,13 +1834,14 @@ test(
       notifyOutput
     );
 
-    await manager.createSession({ text: "notify success" });
+    const sessionId = await manager.createSession({ text: "notify success" });
 
     const records = await waitForNotifyRecords(notifyOutput, 1);
     assert.equal(records[0]?.STATUS, "completed");
     assert.equal(records[0]?.FAIL_REASON, null);
     assert.equal(records[0]?.BODY, "final answer");
     assert.equal(records[0]?.TITLE, "notify success");
+    assert.equal(records[0]?.SESSION_ID, sessionId);
     assert.match(String(records[0]?.DURATION), /^\d+$/);
   }
 );
@@ -1737,6 +1872,8 @@ test(
 
     const records = await waitForNotifyRecords(notifyOutput, 2);
     const failedRecord = records[1];
+    assert.equal(records[0]?.SESSION_ID, sessionId);
+    assert.equal(failedRecord?.SESSION_ID, sessionId);
     assert.equal(failedRecord?.STATUS, "failed");
     assert.equal(failedRecord?.FAIL_REASON, "second request failed");
     assert.equal(failedRecord?.BODY, "first answer");
@@ -1761,7 +1898,7 @@ test("replySession continues without appending /continue as a user message", asy
 
   const manager = createSessionManager(workspace, "machine-id-continue");
   const activatedSessionIds: string[] = [];
-  (manager as any).activateSession = async (sessionId: string) => {
+  (manager as any).runSessionIterations = async (sessionId: string) => {
     activatedSessionIds.push(sessionId);
   };
 
@@ -1798,7 +1935,7 @@ test("replySession records the current file-history branch head as checkpointHas
   setHomeDir(home);
 
   const manager = createSessionManager(workspace, "machine-id-checkpoint-hash");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const checkpointHash = createFileHistoryCommit(home, workspace, sessionId, { "note.txt": "checkpoint\n" });
@@ -1820,7 +1957,7 @@ test("createSession initializes file-history repo and session branch", async (t)
   setHomeDir(home);
 
   const manager = createSessionManager(workspace, "machine-id-file-history-init");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
@@ -1848,7 +1985,7 @@ test("createSession initializes an empty file-history manifest without scanning 
   fs.writeFileSync(path.join(workspace, "nested", "another.txt"), "also keep me\n", "utf8");
 
   const manager = createSessionManager(workspace, "machine-id-file-history-empty-init");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
@@ -1870,7 +2007,7 @@ test("replySession snapshots manual edits to tracked files before appending the 
 
   const filePath = path.join(workspace, "hello_world.py");
   const manager = createSessionManager(workspace, "machine-id-prompt-checkpoint-manual-edit");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "create hello world" });
   const gitDir = getFileHistoryGitDir(home, workspace);
@@ -1909,7 +2046,7 @@ test("replySession inserts hidden system notice for manually changed tracked fil
   const firstPath = path.join(workspace, "a.txt");
   const secondPath = path.join(workspace, "b.txt");
   const manager = createSessionManager(workspace, "machine-id-manual-change-notice");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
@@ -1944,7 +2081,7 @@ test("replySession does not insert manual-change notice when tracked files are u
 
   const filePath = path.join(workspace, "tracked.txt");
   const manager = createSessionManager(workspace, "machine-id-no-manual-change-notice");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
@@ -1976,7 +2113,7 @@ test("replySession reports manual deletion of a tracked file", async (t) => {
 
   const filePath = path.join(workspace, "deleted.txt");
   const manager = createSessionManager(workspace, "machine-id-manual-delete-notice");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
@@ -2009,7 +2146,7 @@ test("replySession ignores manually created untracked files", async (t) => {
   const trackedPath = path.join(workspace, "tracked.txt");
   const untrackedPath = path.join(workspace, "untracked.txt");
   const manager = createSessionManager(workspace, "machine-id-untracked-manual-file");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
@@ -2042,7 +2179,7 @@ test("replySession does not insert manual-change notice for /continue", async (t
 
   const filePath = path.join(workspace, "tracked.txt");
   const manager = createSessionManager(workspace, "machine-id-continue-no-manual-change-notice");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
@@ -2075,7 +2212,7 @@ test("replySession does not insert manual-change notice for permission-only repl
 
   const filePath = path.join(workspace, "tracked.txt");
   const manager = createSessionManager(workspace, "machine-id-permission-no-manual-change-notice");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const fileHistory = new GitFileHistory(workspace, getFileHistoryGitDir(home, workspace));
@@ -2192,7 +2329,7 @@ test("Write checkpoints restore tool-touched files outside the workspace and lea
   const sessionId = await manager.createSession({ text: "create an outside file" });
   const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
   assert.ok(userMessage?.checkpointHash);
-  assert.equal(fs.readFileSync(outsideFilePath, "utf8"), "outside\n");
+  assert.equal(fs.readFileSync(outsideFilePath, "utf8"), `outside${os.EOL}`);
 
   fs.writeFileSync(unrelatedWorkspaceFilePath, "keep\n", "utf8");
   manager.restoreSessionCode(sessionId, userMessage.id);
@@ -2236,7 +2373,7 @@ test("missing git executable does not block sessions or Write tool calls", async
     const sessionId = await manager.createSession({ text: "create an index page" });
     const userMessage = manager.listSessionMessages(sessionId).find((message) => message.role === "user");
 
-    assert.equal(fs.readFileSync(filePath, "utf8"), "<h1>No Git</h1>\n");
+    assert.equal(fs.readFileSync(filePath, "utf8"), `<h1>No Git</h1>${os.EOL}`);
     assert.equal(userMessage?.checkpointHash, undefined);
     assert.equal(manager.getSession(sessionId)?.status, "completed");
   } finally {
@@ -2254,7 +2391,7 @@ test("restoreSessionConversation truncates messages before the selected user pro
   setHomeDir(home);
 
   const manager = createSessionManager(workspace, "machine-id-undo-conversation");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const firstAssistant = (manager as any).buildAssistantMessage(
@@ -2286,6 +2423,99 @@ test("restoreSessionConversation truncates messages before the selected user pro
   assert.ok(!contents.includes("second prompt"));
   assert.ok(!contents.includes("second answer"));
   assert.equal(manager.getSession(sessionId)?.assistantReply, "first answer");
+});
+
+test("listUndoTargets checks shared checkpoints once per listing and refreshes their availability", (t) => {
+  const manager = createSessionManager(process.cwd(), "undo-checkpoints");
+  t.after(() => manager.dispose());
+  const sessionId = "undo-checkpoints";
+  const valid = "a".repeat(40);
+  const missing = "b".repeat(40);
+  const messages = [
+    ...Array.from({ length: 15 }, (_, index) => ({
+      ...buildTestMessage(`prompt-${index}`, sessionId, "user", `prompt ${index}`),
+      checkpointHash: valid,
+    })),
+    { ...buildTestMessage("missing-1", sessionId, "user", "missing"), checkpointHash: missing },
+    { ...buildTestMessage("missing-2", sessionId, "user", "missing"), checkpointHash: missing },
+    buildTestMessage("no-checkpoint", sessionId, "user", "no checkpoint"),
+  ];
+  t.mock.method(manager, "listSessionMessages", () => messages);
+  const available = new Set([valid]);
+  const check = t.mock.method(GitFileHistory.prototype, "canRestore", (_sessionId: string, hash: string) =>
+    available.has(hash)
+  );
+
+  const targets = manager.listUndoTargets(sessionId);
+  assert.deepEqual(
+    targets.map((target) => target.message),
+    messages
+  );
+  assert.deepEqual(
+    targets.map((target) => target.index),
+    messages.map((_, index) => index)
+  );
+  assert.deepEqual(
+    targets.map((target) => target.canRestoreCode),
+    [...Array(15).fill(true), false, false, false]
+  );
+  assert.deepEqual(
+    check.mock.calls.map((call) => call.arguments),
+    [
+      [sessionId, valid],
+      [sessionId, missing],
+    ]
+  );
+
+  available.clear();
+  assert.ok(manager.listUndoTargets(sessionId).every((target) => !target.canRestoreCode));
+  assert.equal(check.mock.callCount(), 4);
+});
+
+test("undo restores code and conversation from a compacted prompt checkpoint", async (t) => {
+  if (!hasGit()) {
+    t.skip("git is not available");
+    return;
+  }
+  const workspace = createTempDir("deepcode-undo-compacted-code-workspace-");
+  const home = createTempDir("deepcode-undo-compacted-code-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "machine-id-undo-compacted-code");
+  (manager as any).runSessionIterations = async () => {};
+  const sessionId = await manager.createSession({ text: "original prompt" });
+  const checkpointHash = createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "before\n" });
+  createFileHistoryCommit(home, workspace, sessionId, { "tracked.txt": "after\n" });
+  fs.writeFileSync(path.join(workspace, "tracked.txt"), "after\n", "utf8");
+  const answer = buildTestMessage("original-answer", sessionId, "assistant", "original answer");
+  const target = {
+    ...buildTestMessage("compacted-target", sessionId, "user", "restore here"),
+    compacted: true,
+    checkpointHash,
+  };
+  const originals = [...manager.listSessionMessages(sessionId), answer];
+  (manager as any).saveSessionMessages(sessionId, [
+    {
+      ...buildTestMessage("summary", sessionId, "user", "Includes later information"),
+      visible: false,
+      meta: { isSummary: true },
+    },
+    ...originals.map((message) => ({ ...message, compacted: true })),
+    target,
+    buildTestMessage("later-answer", sessionId, "assistant", "later answer"),
+  ]);
+
+  const undoTarget = manager.listUndoTargets(sessionId).find((item) => item.message.id === target.id);
+  assert.ok(undoTarget?.canRestoreCode);
+  manager.restoreSessionCode(sessionId, target.id);
+  manager.restoreSessionConversation(sessionId, target.id);
+
+  assert.equal(fs.readFileSync(path.join(workspace, "tracked.txt"), "utf8"), "before\n");
+  assert.deepEqual(
+    manager.listSessionMessages(sessionId).map((message) => message.id),
+    originals.map((message) => message.id)
+  );
+  assert.ok(manager.listSessionMessages(sessionId).every((message) => !message.compacted));
+  assert.equal(manager.getSession(sessionId)?.assistantReply, "original answer");
 });
 
 test("restoreSessionCode restores project files from the recorded Git checkpoint", async (t) => {
@@ -2416,8 +2646,8 @@ test("replySession /continue runs trailing pending tool calls before requesting 
     }),
   ];
   const manager = createMockedClientSessionManager(workspace, responses);
-  const originalActivateSession = manager.activateSession.bind(manager);
-  (manager as any).activateSession = async () => {};
+  const originalActivateSession = (manager as any).runSessionIterations.bind(manager);
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const pendingAssistant = (manager as any).buildAssistantMessage(
@@ -2434,7 +2664,7 @@ test("replySession /continue runs trailing pending tool calls before requesting 
   ) as SessionMessage;
   fs.writeFileSync(path.join(workspace, "note.txt"), "hello from pending tool\n", "utf8");
   (manager as any).appendSessionMessage(sessionId, pendingAssistant);
-  (manager as any).activateSession = originalActivateSession;
+  (manager as any).runSessionIterations = originalActivateSession;
 
   await manager.replySession(sessionId, { text: "/continue" });
 
@@ -2485,8 +2715,8 @@ test("replySession rebuilds snippet state from persisted read history before edi
     createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 }),
   ];
   const manager = createMockedClientSessionManager(workspace, responses);
-  const originalActivateSession = manager.activateSession.bind(manager);
-  (manager as any).activateSession = async () => {};
+  const originalActivateSession = (manager as any).runSessionIterations.bind(manager);
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const readToolMessage = (manager as any).buildToolMessage(
@@ -2510,7 +2740,7 @@ test("replySession rebuilds snippet state from persisted read history before edi
   (manager as any).appendSessionMessage(sessionId, readToolMessage);
 
   clearSessionState(sessionId);
-  (manager as any).activateSession = originalActivateSession;
+  (manager as any).runSessionIterations = originalActivateSession;
 
   await manager.replySession(sessionId, { text: "change beta" });
 
@@ -2751,8 +2981,8 @@ test("replySession applies permission replies, runs pending tools, and stores al
       defaultMode: "allowAll",
     }
   );
-  const originalActivateSession = manager.activateSession.bind(manager);
-  (manager as any).activateSession = async () => {};
+  const originalActivateSession = (manager as any).runSessionIterations.bind(manager);
+  (manager as any).runSessionIterations = async () => {};
   const sessionId = await manager.createSession({ text: "first prompt" });
   const assistant = (manager as any).buildAssistantMessage(
     sessionId,
@@ -2768,7 +2998,7 @@ test("replySession applies permission replies, runs pending tools, and stores al
   ) as SessionMessage;
   assistant.meta = { ...(assistant.meta ?? {}), permissions: [{ toolCallId: "call-read", permission: "ask" }] };
   (manager as any).appendSessionMessage(sessionId, assistant);
-  (manager as any).activateSession = originalActivateSession;
+  (manager as any).runSessionIterations = originalActivateSession;
 
   await manager.replySession(sessionId, {
     text: "/continue",
@@ -2799,8 +3029,8 @@ test("replySession turns denied permission replies into tool errors before appen
       defaultMode: "allowAll",
     }
   );
-  const originalActivateSession = manager.activateSession.bind(manager);
-  (manager as any).activateSession = async () => {};
+  const originalActivateSession = (manager as any).runSessionIterations.bind(manager);
+  (manager as any).runSessionIterations = async () => {};
   const sessionId = await manager.createSession({ text: "first prompt" });
   const assistant = (manager as any).buildAssistantMessage(
     sessionId,
@@ -2816,7 +3046,7 @@ test("replySession turns denied permission replies into tool errors before appen
   ) as SessionMessage;
   assistant.meta = { ...(assistant.meta ?? {}), permissions: [{ toolCallId: "call-write", permission: "ask" }] };
   (manager as any).appendSessionMessage(sessionId, assistant);
-  (manager as any).activateSession = originalActivateSession;
+  (manager as any).runSessionIterations = originalActivateSession;
 
   await manager.replySession(sessionId, {
     text: "Do not write outside the workspace.",
@@ -2834,7 +3064,7 @@ test("replySession turns denied permission replies into tool errors before appen
   assert.equal(userMessage?.content, "Do not write outside the workspace.");
 });
 
-test("replySession preserves raw session messages when a previous tool call is pending", async () => {
+test("replySession appends new instructions without executing pending tools", async () => {
   const workspace = createTempDir("deepcode-pending-tool-workspace-");
   const home = createTempDir("deepcode-pending-tool-home-");
   setHomeDir(home);
@@ -2845,8 +3075,9 @@ test("replySession preserves raw session messages when a previous tool call is p
       text: async () => "",
     }) as Response) as typeof fetch;
 
-  const manager = createSessionManager(workspace, "machine-id-pending-tool");
-  (manager as any).activateSession = async () => {};
+  const manager = createMockedClientSessionManager(workspace, []);
+  const activate = (manager as any).runSessionIterations;
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ text: "first prompt" });
   const assistantMessage = (manager as any).buildAssistantMessage(
@@ -2863,17 +3094,24 @@ test("replySession preserves raw session messages when a previous tool call is p
   ) as SessionMessage;
   (manager as any).appendSessionMessage(sessionId, assistantMessage);
 
+  (manager as any).runSessionIterations = activate;
+  let executions = 0;
+  (manager as any).toolExecutor.executeToolCalls = async () => {
+    executions++;
+    return [{ toolCallId: "call-1", content: "done", result: { name: "bash" } }];
+  };
+  (manager as any).requestSessionCompletion = async () => ({ choices: [{ message: { content: "done" } }] });
   await manager.replySession(sessionId, { text: "second prompt" });
 
   const messages = manager.listSessionMessages(sessionId);
   const assistantIndex = messages.findIndex((message) => message.id === assistantMessage.id);
   assert.notEqual(assistantIndex, -1);
+  assert.equal(executions, 0);
   assert.equal(messages[assistantIndex + 1]?.role, "user");
   assert.equal(messages[assistantIndex + 1]?.content, "second prompt");
-  assert.equal(
-    messages.some((message) => String(message.content).includes("Previous tool call did not complete.")),
-    false
-  );
+  const context = manager.buildOpenAIMessages(messages, false, "test");
+  const toolResult = context.find((message) => message.role === "tool");
+  assert.equal(JSON.parse(String(toolResult?.content)).metadata.interrupted, true);
 });
 
 test("buildOpenAIMessages inserts interrupted results for missing tool messages", () => {
@@ -3514,9 +3752,9 @@ test("SessionManager resets active tokens to latest post-compaction response usa
 
   const responses = [
     createChatResponse("large", {
-      prompt_tokens: 139_990,
+      prompt_tokens: 209_990,
       completion_tokens: 10,
-      total_tokens: 140_000,
+      total_tokens: 210_000,
     }),
     createChatResponse("summary", {
       prompt_tokens: 100,
@@ -3531,21 +3769,21 @@ test("SessionManager resets active tokens to latest post-compaction response usa
   ];
   const manager = createMockedClientSessionManager(workspace, responses);
 
-  const sessionId = await manager.createSession({ text: "" });
-  assert.equal(manager.getSession(sessionId)?.activeTokens, 140_000);
+  const sessionId = await manager.createSession({ text: "history ".repeat(1000) });
+  assert.equal(manager.getSession(sessionId)?.activeTokens, 210_000);
 
-  await manager.replySession(sessionId, { text: "" });
+  await manager.replySession(sessionId, { text: "new input ".repeat(16000) });
 
   const session = manager.getSession(sessionId);
   const usage = session?.usage as Record<string, any>;
   const usagePerModel = session?.usagePerModel?.["test-model"] as Record<string, any>;
   assert.equal(session?.activeTokens, 7);
-  assert.equal(usage.prompt_tokens, 140_095);
+  assert.equal(usage.prompt_tokens, 210_095);
   assert.equal(usage.completion_tokens, 35);
-  assert.equal(usage.total_tokens, 140_130);
-  assert.equal(usagePerModel.prompt_tokens, 140_095);
+  assert.equal(usage.total_tokens, 210_130);
+  assert.equal(usagePerModel.prompt_tokens, 210_095);
   assert.equal(usagePerModel.completion_tokens, 35);
-  assert.equal(usagePerModel.total_tokens, 140_130);
+  assert.equal(usagePerModel.total_tokens, 210_130);
   assert.equal(usagePerModel.total_reqs, 3);
 });
 
@@ -3555,14 +3793,14 @@ test("SessionManager uses the configured auto compact window", async () => {
   setHomeDir(home);
 
   const responses = [
-    createChatResponse("large", { prompt_tokens: 990, completion_tokens: 10, total_tokens: 1000 }),
+    createChatResponse("large", { prompt_tokens: 99_990, completion_tokens: 10, total_tokens: 100_000 }),
     createChatResponse("summary", { prompt_tokens: 50, completion_tokens: 10, total_tokens: 60 }),
     createChatResponse("after compact", { prompt_tokens: 5, completion_tokens: 2, total_tokens: 7 }),
   ];
-  const manager = createMockedClientSessionManager(workspace, responses, 500);
+  const manager = createMockedClientSessionManager(workspace, responses, 90_000);
 
-  const sessionId = await manager.createSession({ text: "" });
-  await manager.replySession(sessionId, { text: "" });
+  const sessionId = await manager.createSession({ text: "history ".repeat(1000) });
+  await manager.replySession(sessionId, { text: "new input ".repeat(16000) });
 
   assert.equal(manager.getSession(sessionId)?.activeTokens, 7);
   assert.equal(manager.getSession(sessionId)?.usagePerModel?.["test-model"]?.total_reqs, 3);
@@ -3866,7 +4104,7 @@ test("SessionManager retries a stream after sixty seconds without data", async (
   assert.equal(retryError, "Model stream was idle for 60 seconds.");
 });
 
-test("SessionManager persists session and user message before skill matching is cancelled", async () => {
+test("SessionManager retains an uncommitted prompt in the queue when skill matching is cancelled", async () => {
   const workspace = createTempDir("deepcode-skill-abort-workspace-");
   const home = createTempDir("deepcode-skill-abort-home-");
   setHomeDir(home);
@@ -3896,13 +4134,14 @@ test("SessionManager persists session and user message before skill matching is 
 
   await manager.handleUserPrompt({ text: "please use demo" });
 
-  // Session and user message are persisted before skill matching triggers an abort.
   assert.equal(manager.listSessions().length, 1);
   const [session] = manager.listSessions();
-  assert.equal(session?.status, "pending");
-  const messages = manager.listSessionMessages(session!.id);
-  const userMessage = messages.find((m) => m.role === "user");
-  assert.equal(userMessage?.content, "please use demo");
+  assert.equal(session?.status, "interrupted");
+  assert.equal(
+    manager.listSessionMessages(session!.id).some((m) => m.role === "user"),
+    false
+  );
+  assert.equal(manager.listQueuedMessages(session!.id)[0]?.content.text, "please use demo");
 });
 
 test("SessionManager treats OpenAI APIUserAbortError as interrupted", async () => {
@@ -4007,6 +4246,44 @@ rl.on("line", (line) => {
   manager.dispose();
 });
 
+test("SessionManager publishes each tool result before starting the next tool", async () => {
+  const workspace = createTempDir("deepcode-process-history-");
+  setHomeDir(createTempDir("deepcode-process-history-home-"));
+  const manager = createSessionManager(workspace, "");
+  const sessionId = await manager.createSession({ text: "hello" });
+  const calls = ["first", "second"].map((id) => ({
+    id,
+    type: "function",
+    function: {
+      name: "bash",
+      arguments: JSON.stringify({ command: "echo hello", run_in_background: id === "second" }),
+    },
+  }));
+  const internals = manager as any;
+  internals.getRuntime(sessionId).controller = new AbortController();
+  let count = 0;
+  internals.toolExecutor.executeToolCalls = async (_sessionId: string, batch: typeof calls, hooks: any) => {
+    const call = batch[0]!;
+    if (count++ > 0) {
+      assert.ok(
+        manager
+          .listSessionMessages(sessionId)
+          .some((message) => (message.messageParams as { tool_call_id?: string })?.tool_call_id === "first")
+      );
+    }
+    hooks.onProcessStart(123, "echo hello");
+    const process = manager.getSession(sessionId)?.processes?.get("123");
+    assert.equal(process?.toolCallId, call.id);
+    assert.equal(process?.runInBackground, call.id === "second");
+    hooks.onProcessExit(123);
+    const result = { ok: true, name: "bash", output: "hello", metadata: { exitCode: 0 } };
+    return [{ toolCallId: call.id, result, content: JSON.stringify(result) }];
+  };
+  await internals.appendToolMessages(sessionId, calls);
+  assert.equal(count, 2);
+  manager.dispose();
+});
+
 test("SessionManager adjusts the active Bash timeout control and session metadata", async () => {
   const workspace = createTempDir("deepcode-bash-timeout-session-");
   const home = createTempDir("deepcode-bash-timeout-home-");
@@ -4035,7 +4312,8 @@ test("SessionManager adjusts the active Bash timeout control and session metadat
     },
   });
 
-  const adjustment = manager.adjustActiveBashTimeout(5 * 60 * 1000);
+  assert.equal(manager.adjustActiveBashTimeout(5 * 60 * 1000, "missing"), null);
+  const adjustment = manager.adjustActiveBashTimeout(5 * 60 * 1000, "123");
   const processInfo = manager.getSession(sessionId)?.processes?.get("123");
 
   assert.equal(adjustment?.processId, "123");
@@ -4050,7 +4328,7 @@ test("SessionManager.deleteSession removes session entry from the index", () => 
   setHomeDir(home);
 
   const manager = createSessionManager(workspace, "machine-id-delete");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   // Create two sessions
   const session1 = createSessionAndMessages(manager, "session-delete-1", "First session");
@@ -4073,7 +4351,7 @@ test("SessionManager.deleteSession removes the messages file", () => {
   setHomeDir(home);
 
   const manager = createSessionManager(workspace, "machine-id-delete-msg");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = createSessionAndMessages(manager, "session-delete-msg", "Test session");
   const messagePath = path.join(home, ".deepcode", "projects", getProjectCode(workspace), `${sessionId}.jsonl`);
@@ -4092,7 +4370,7 @@ test("sessions persist pasted images as file URLs without changing user content"
   const home = createTempDir("deepcode-session-image-home-");
   setHomeDir(home);
   const manager = createSessionManagerForModel(workspace, "deepseek-chat");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({
     text: "Inspect these images",
@@ -4122,7 +4400,7 @@ test("native multimodal sessions persist pasted images without storing inline co
   const home = createTempDir("deepcode-native-image-home-");
   setHomeDir(home);
   const manager = createSessionManagerForModel(workspace, "custom-vision-model");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
   const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
@@ -4139,7 +4417,7 @@ test("multimodal off forces non-multimodal image handling for a multimodal model
   const home = createTempDir("deepcode-multimodal-off-home-");
   setHomeDir(home);
   const manager = createSessionManagerForModel(workspace, "custom-vision-model", "off");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
   const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
@@ -4155,7 +4433,7 @@ test("multimodal on persists images for a non-multimodal model", async () => {
   const home = createTempDir("deepcode-multimodal-on-home-");
   setHomeDir(home);
   const manager = createSessionManagerForModel(workspace, "deepseek-chat", "on");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const sessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
   const imagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images", sessionId);
@@ -4413,11 +4691,21 @@ test("Files API mode invalidates a rejected file ID and uploads it once more", a
   assert.deepEqual(retriedUserMessage.content, [{ type: "file", file_id: "file-image-2" }]);
 });
 
-test("Files API mode checks the aggregate request limit before uploading", async () => {
+test("Files API mode omits over-budget images before uploading and preserves the attachment", async () => {
   const workspace = createTempDir("deepcode-files-limit-workspace-");
   const home = createTempDir("deepcode-files-limit-home-");
   setHomeDir(home);
-  const client = { chat: { completions: { create: async () => assert.fail("chat request must not start") } } };
+  const requests: any[] = [];
+  const client = {
+    chat: {
+      completions: {
+        create: async (request: any) => {
+          requests.push(request);
+          return createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+        },
+      },
+    },
+  };
   const manager = new SessionManager({
     projectRoot: workspace,
     createOpenAIClient: () => ({
@@ -4443,8 +4731,14 @@ test("Files API mode checks the aggregate request limit before uploading", async
 
   const sessionId = await manager.createSession({ imageUrls: [await createOnePixelPngDataUrl()] });
 
-  assert.equal(manager.getSession(sessionId)?.status, "failed");
-  assert.match(manager.getSession(sessionId)?.failReason ?? "", /configured 4-byte/);
+  assert.equal(manager.getSession(sessionId)?.status, "completed");
+  assert.equal(requests.length, 1);
+  assert.match(JSON.stringify(requests[0].messages), /Image omitted:/);
+  const imageMessage = manager
+    .listSessionMessages(sessionId)
+    .find((message) => message.meta?.userPrompt?.imageUrls?.length);
+  assert.deepEqual(imageMessage?.meta?.omittedImages, ["prompt:0"]);
+  assert.ok(imageMessage?.meta?.userPrompt?.imageUrls?.length);
 });
 
 test("sessions reject unsupported pasted image data before creating a session", async () => {
@@ -4452,7 +4746,7 @@ test("sessions reject unsupported pasted image data before creating a session", 
   const home = createTempDir("deepcode-invalid-image-home-");
   setHomeDir(home);
   const manager = createSessionManagerForModel(workspace, "deepseek-chat");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   await assert.rejects(
     manager.createSession({ imageUrls: ["data:image/bmp;base64,aGVsbG8="] }),
@@ -4469,7 +4763,7 @@ test("forkSession copies image resources and rewrites stored paths", async () =>
   const home = createTempDir("deepcode-fork-image-home-");
   setHomeDir(home);
   const manager = createSessionManagerForModel(workspace, "deepseek-chat");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
   const sourceSessionId = await manager.createSession({ imageUrls: ["data:image/png;base64,aGVsbG8="] });
   const forkedSessionId = manager.forkSession(sourceSessionId);
   const projectImagesDir = path.join(home, ".deepcode", "projects", getProjectCode(workspace), "images");
@@ -4505,7 +4799,7 @@ test("SessionManager.deleteSession does not affect other sessions", () => {
   setHomeDir(home);
 
   const manager = createSessionManager(workspace, "machine-id-delete-others");
-  (manager as any).activateSession = async () => {};
+  (manager as any).runSessionIterations = async () => {};
 
   const session1 = createSessionAndMessages(manager, "session-keep-1", "Keep session 1");
   const session2 = createSessionAndMessages(manager, "session-keep-2", "Keep session 2");
@@ -4779,7 +5073,7 @@ function runFileHistoryGit(
   );
 }
 
-function createSessionManager(projectRoot: string, machineId: string): SessionManager {
+function createSessionManager(projectRoot: string, machineId: string, plusApiKey?: string): SessionManager {
   return new SessionManager({
     projectRoot,
     createOpenAIClient: () => ({
@@ -4788,6 +5082,7 @@ function createSessionManager(projectRoot: string, machineId: string): SessionMa
       baseURL: "https://api.deepseek.com",
       thinkingEnabled: false,
       machineId,
+      plusApiKey,
     }),
     getResolvedSettings: () => ({ model: "test-model" }),
     renderMarkdown: (text) => text,
@@ -4854,6 +5149,7 @@ function createNotifyingSessionManager(
       notify: notifyPath,
       env: {
         NOTIFY_OUTPUT: notifyOutput,
+        SESSION_ID: "stale-session-id",
         STATUS: "stale-status",
         FAIL_REASON: "stale-failure",
         BODY: "stale-body",
@@ -5027,7 +5323,7 @@ function createNotifyRecorderScript(dir: string): string {
     scriptPath,
     `#!/usr/bin/env node
 const fs = require("fs");
-const keys = ["DURATION", "STATUS", "FAIL_REASON", "BODY", "TITLE"];
+const keys = ["DURATION", "STATUS", "FAIL_REASON", "BODY", "TITLE", "SESSION_ID"];
 const record = {};
 for (const key of keys) {
   record[key] = Object.prototype.hasOwnProperty.call(process.env, key) ? process.env[key] : null;
@@ -5169,32 +5465,196 @@ test("interrupt settles an active prompt waiting for an internal tool request", 
   const sessionId = await manager.createSession({ text: "" });
   manager.setActiveSessionId(sessionId);
   enabled = true;
-  // Exercise handleUserPrompt's controller lifetime with a pending built-in tool batch.
-  manager.replySession = async (_id, _prompt, controller) => {
-    (manager as any).sessionControllers.set(sessionId, controller);
-    await (manager as any).appendToolMessages(sessionId, [
-      {
-        id: "cancel-search",
-        type: "function",
-        function: { name: "WebSearch", arguments: '{"query":"query"}' },
-      },
-    ]);
-  };
-  const prompt = manager.handleUserPrompt({ text: "continue" });
+  const internals = manager as any;
+  manager.listSkills = async () => [];
+  internals.maybeGenerateSessionTitle = () => {};
+  const pendingTool = internals.buildAssistantMessage(sessionId, "", [
+    {
+      id: "cancel-search",
+      type: "function",
+      function: { name: "WebSearch", arguments: '{"query":"query"}' },
+    },
+  ]);
+  internals.appendSessionMessage(sessionId, pendingTool);
+  const prompt = manager.handleUserPrompt({ text: "/continue" });
   await started;
   manager.interruptActiveSession();
   await prompt;
   assert.equal(manager.getSession(sessionId)?.status, "interrupted");
-  assert.equal((manager as any).activePromptController, null);
+  assert.equal(manager.isSessionRunning(sessionId), false);
   assert.equal(
     manager.listSessionMessages(sessionId).some((message) => message.role === "tool"),
     false
   );
-  let resumed = false;
-  manager.replySession = async (_id, _prompt, controller) => {
-    assert.equal(controller?.signal.aborted, false);
-    resumed = true;
+  internals.toolExecutor.executeToolCalls = async () => [
+    { toolCallId: "cancel-search", content: "done", result: { name: "WebSearch" } },
+  ];
+  internals.requestSessionCompletion = async (_id: string, signal: AbortSignal) => {
+    assert.equal(signal.aborted, false);
+    return { choices: [{ message: { content: "resumed" } }] };
   };
   await manager.handleUserPrompt({ text: "next" });
-  assert.equal(resumed, true);
+  assert.equal(manager.getSession(sessionId)?.assistantReply, "resumed");
+});
+
+test("sessions prepare subscription before skill matching and preserve the actual route across reloads", async () => {
+  const workspace = createTempDir("deepcode-subscription-workspace-");
+  setHomeDir(createTempDir("deepcode-subscription-home-"));
+  let checks = 0;
+  let status: PlusSubscriptionStatus = "full ability";
+  const calls: Array<{ key?: string; skill: boolean }> = [];
+  const factory = withPlusSubscription(
+    () => ({ apiKey: "regular", baseURL: "https://regular.test" }),
+    ({ connection }) => ({
+      ...connection,
+      model: "test-model",
+      thinkingEnabled: false,
+      telemetryEnabled: false,
+      client: {
+        chat: {
+          completions: {
+            create: async (request: any) => {
+              assert.ok(checks > 0, "subscription must be checked before any LLM request");
+              const skill = isSkillMatchingRequest(request);
+              calls.push({ key: connection.apiKey, skill });
+              return skill
+                ? createSkillMatchingResponse()
+                : createChatResponse("done", { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 });
+            },
+          },
+        },
+      } as any,
+    }),
+    {
+      readSettings: () => ({ apiKey: "sk-aaaaaaaaaaaaaaaaaaaaaaaa", subscriptionPlan: "default" }),
+      checkSubscription: async () => {
+        checks++;
+        return status;
+      },
+    }
+  );
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: factory,
+    getResolvedSettings: () => ({ model: "test-model" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  try {
+    const sessionId = await manager.createSession({ text: "hello" });
+    assert.equal(checks, 1);
+    assert.equal(manager.getSession(sessionId)?.status, "completed");
+    assert.equal(manager.getSession(sessionId)?.usingPlus, true);
+    assert.ok(calls.some((call) => call.skill));
+    assert.ok(calls.some((call) => !call.skill));
+    assert.ok(calls.every((call) => call.key === "sk-aaaaaaaaaaaaaaaaaaaaaaaa"));
+    const reloaded = createSessionManager(workspace, "reload-subscription");
+    assert.equal(reloaded.getSession(sessionId)?.usingPlus, true);
+    reloaded.dispose();
+    calls.length = 0;
+    status = "api only";
+    await manager.replySession(sessionId, { text: "next" });
+    assert.equal(checks, 2);
+    assert.equal(manager.getSession(sessionId)?.usingPlus, false);
+    assert.ok(calls.length > 0);
+    assert.ok(calls.every((call) => call.key === "regular"));
+    await manager.replySession(sessionId, { text: "/continue" });
+    assert.equal(checks, 3);
+    await manager.replySession("missing-session", { text: "new" });
+    assert.equal(checks, 4, "reply delegating to create must probe only once");
+  } finally {
+    manager.dispose();
+  }
+});
+
+test("on without PLUS key fails clearly without falling back to a regular key", async () => {
+  const workspace = createTempDir("deepcode-missing-plus-workspace-");
+  setHomeDir(createTempDir("deepcode-missing-plus-home-"));
+  const factory = withPlusSubscription(
+    () => ({ apiKey: "regular", baseURL: "https://regular.test" }),
+    ({ connection }) => {
+      assert.equal(connection.apiKey, undefined);
+      return { ...connection, client: null, model: "test", thinkingEnabled: false, telemetryEnabled: false };
+    },
+    { readSettings: () => ({ subscriptionPlan: "on" }) }
+  );
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: factory,
+    getResolvedSettings: () => ({ model: "test" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  try {
+    const id = await manager.createSession({ text: "hello" });
+    assert.equal(manager.getSession(id)?.status, "failed");
+    assert.match(manager.getSession(id)?.failReason ?? "", /PLUS_API_KEY/);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test("cancelling subscription preparation starts no LLM calls or new session", async () => {
+  const workspace = createTempDir("deepcode-cancel-subscription-workspace-");
+  setHomeDir(createTempDir("deepcode-cancel-subscription-home-"));
+  const controller = new AbortController();
+  const factory = withPlusSubscription(
+    () => ({ apiKey: "regular", baseURL: "https://regular.test" }),
+    () => {
+      assert.fail("must not build a client after cancellation");
+    },
+    {
+      readSettings: () => ({ apiKey: "sk-aaaaaaaaaaaaaaaaaaaaaaaa", subscriptionPlan: "default" }),
+      checkSubscription: async () => {
+        controller.abort();
+        return "unknown";
+      },
+    }
+  );
+  const manager = new SessionManager({
+    projectRoot: workspace,
+    createOpenAIClient: factory,
+    getResolvedSettings: () => ({ model: "test" }),
+    renderMarkdown: (text) => text,
+    onAssistantMessage: () => {},
+  });
+  try {
+    await assert.rejects(manager.createSession({ text: "hello" }, controller), { name: "AbortError" });
+    assert.equal(manager.listSessions().length, 0);
+  } finally {
+    manager.dispose();
+  }
+});
+
+test("global history records user submissions once and ignores replay, system and tool messages", async () => {
+  const workspace = createTempDir("deepcode-history-session-workspace-");
+  const home = createTempDir("deepcode-history-session-home-");
+  setHomeDir(home);
+  const manager = createSessionManager(workspace, "history-test");
+  (manager as any).runSessionIterations = async () => {};
+  const sessionId = await manager.createSession({ text: "original user prompt" });
+  await manager.replySession(sessionId, { text: "answer text", isAnswers: true });
+  manager.addSessionSystemMessage(sessionId, "system notice", true);
+  const injected = (manager as any).buildFollowUpMessage(sessionId, {
+    role: "user",
+    content: "injected",
+    visible: true,
+  });
+  (manager as any).appendSessionMessage(sessionId, injected);
+  manager.listSessionMessages(sessionId);
+  manager.setActiveSessionId(sessionId);
+  await manager.replySession(sessionId, { text: "/continue" });
+  const file = path.join(home, ".deepcode", "history.jsonl");
+  const entries = fs
+    .readFileSync(file, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.deepEqual(
+    entries.map((entry) => entry.text),
+    ["original user prompt", "answer text"]
+  );
+  assert.ok(entries.every((entry) => entry.session_id === sessionId));
+  assert.equal(injected.meta.isToolFollowUp, true);
+  manager.dispose();
 });

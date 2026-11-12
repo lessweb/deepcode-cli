@@ -30,7 +30,7 @@ export type PasteHandlingActions = {
    */
   handlePaste: (pastedText: string) => void;
   /** Expand a collapsed paste marker at the cursor, or collapse an expanded region. */
-  expandPasteMarkerAtCursor: () => void;
+  expandPasteMarkerAtCursor: (silent?: boolean) => boolean;
   /** Reset all paste-related state. */
   resetPastes: () => void;
 };
@@ -86,7 +86,7 @@ export function usePasteHandling(
     refreshDerivedFlags();
   }
 
-  function expandPasteMarkerAtCursor(): void {
+  function expandPasteMarkerAtCursor(silent = false): boolean {
     // Collapse an already-expanded region at the cursor.
     for (const [id, region] of expandedRegionsRef.current) {
       if (buffer.cursor >= region.start && buffer.cursor <= region.end) {
@@ -100,20 +100,20 @@ export function usePasteHandling(
           refreshDerivedFlags();
         }, 0);
         refreshDerivedFlags();
-        return;
+        return true;
       }
     }
 
     // Expand a paste marker.
     const marker = findPasteMarkerContaining(buffer);
     if (!marker) {
-      setStatusMessage("No paste marker at cursor");
-      return;
+      if (!silent) setStatusMessage("No paste marker at cursor");
+      return false;
     }
     const content = pastesRef.current.get(marker.id);
     if (!content) {
-      setStatusMessage("Paste content not found");
-      return;
+      if (!silent) setStatusMessage("Paste content not found");
+      return false;
     }
 
     const pasteId = marker.id;
@@ -135,6 +135,7 @@ export function usePasteHandling(
       refreshDerivedFlags();
     }, 0);
     refreshDerivedFlags();
+    return true;
   }
 
   function resetPastes(): void {

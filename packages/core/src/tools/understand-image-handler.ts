@@ -1,9 +1,9 @@
+import { resolvePlusHost } from "../common/plus-subscription";
 import { randomUUID } from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
 
-const DEFAULT_UNDERSTAND_IMAGE_API_URL = "https://deepcode.vegamo.cn/api/plugin/understand-image";
 const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 const MIME_TYPE_BY_EXTENSION = new Map([
   [".jpg", "image/jpeg"],
@@ -65,7 +65,7 @@ export async function handleUnderstandImageTool(
     const clientContext = context.createOpenAIClient?.();
     const machineId = clientContext?.machineId;
     const plusApiKey = clientContext?.plusApiKey;
-    const response = await fetch(DEFAULT_UNDERSTAND_IMAGE_API_URL, {
+    const response = await fetch(`${resolvePlusHost(plusApiKey)}/api/plugin/understand-image`, {
       method: "POST",
       signal: context.signal,
       headers:

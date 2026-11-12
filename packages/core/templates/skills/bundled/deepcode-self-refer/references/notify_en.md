@@ -1,20 +1,21 @@
-# Deep Code Task Completion Notification
+# Deep Code Task Status Notifications
 
-When the AI assistant finishes a round of tasks, Deep Code can automatically execute a notification script to send task results to your chosen channel (Slack, system notifications, etc.).
+When a session completes, fails, waits for user input, or waits for permission approval, Deep Code can automatically execute a notification script to send the session status to your chosen channel (Slack, system notifications, etc.).
 
 ## How It Works
 
-Configure the `notify` field in `settings.json` with the full path to an executable script. Every time the AI assistant completes a task response, Deep Code executes that script and injects context as environment variables.
+Configure the `notify` field in `settings.json` with the full path to an executable script. Each time a session enters one of these states, Deep Code executes that script and injects context as environment variables. After the session resumes, another notification is sent when it pauses or ends again.
 
 ## Injected Environment Variables
 
-| Variable      | Description                                     |
-| ------------- | ----------------------------------------------- |
-| `DURATION`    | Session duration in seconds (integer)           |
-| `STATUS`      | Session status: `"completed"` or `"failed"`     |
-| `FAIL_REASON` | Failure reason (only set on failure)            |
-| `BODY`        | The text content of the last AI assistant reply |
-| `TITLE`       | Session title (matches the resume list title)   |
+| Variable      | Description                                                                                                                                      |
+| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DURATION`    | Elapsed time from the start of the current execution until it pauses or ends, in whole seconds; resets when execution resumes                    |
+| `STATUS`      | Actual session status: `completed`, `failed`, `waiting_for_user` (waiting for user input), or `ask_permission` (waiting for permission approval) |
+| `FAIL_REASON` | Failure reason (only set on failure)                                                                                                             |
+| `BODY`        | The text content of the last AI assistant reply                                                                                                  |
+| `TITLE`       | Session title (matches the resume list title)                                                                                                    |
+| `SESSION_ID`  | ID of the session that triggered the notification                                                                                                |
 
 ## Configuration
 
@@ -68,7 +69,7 @@ BRANCH=$(git branch --show-current 2>/dev/null)
 curl -X POST "$SLACK_WEBHOOK_URL" \
   -H "Content-type: application/json" \
   --data "{
-      \"text\": \"✅ Deep Code task completed\n · cwd: $CURRENT_DIR\n · Branch: $BRANCH\n · Duration: $DURATION s\"
+      \"text\": \"Deep Code task status: ${STATUS}\n · cwd: $CURRENT_DIR\n · Branch: $BRANCH\n · Duration: $DURATION s\"
   }"
 ```
 

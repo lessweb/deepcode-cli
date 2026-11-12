@@ -69,23 +69,21 @@ npm install -g @vegamo/deepcode-cli
 
 默认情况下，图片会以base64内联发送给模型。启用`filesApiEnabled`后，Deep Code会使用DeepSeek Files API上传图片并在请求中复用`file_id`。详见 [docs/configuration.md](../../docs/configuration.md#deepseek-files-api)。
 
-### 怎样在任务完成后自动给Slack发消息？
+### 如何配置 Deep Code 任务完成后发送通知？
 
-编写一个调用Slack webhook的Shell通知脚本，然后在`~/.deepcode/settings.json`中将`notify`字段设为该脚本的完整路径即可。详细步骤可参考：https://binfer.net/share/jby5xnc-so6g
+在 `~/.deepcode/settings.json` 中，将 `notify` 字段设为可执行通知脚本的完整路径。AI 助手完成一轮任务后，Deep Code 会自动执行该脚本，向 Slack 等渠道发送消息或弹出系统通知。
+
+详细配置指南：https://binfer.net/share/jby5xnc-so6g
 
 ### 是否支持Coding Plan？
 
-支持。只要把`~/.deepcode/settings.json`的env.BASE_URL配置为OpenAI兼容的接口地址就行。以火山方舟的Coding Plan为例，`~/.deepcode/settings.json`这样配置：
+支持。只要把 `~/.deepcode/settings.json` 的 `env.BASE_URL` 配置为 OpenAI 兼容的接口地址就行。
 
-```json
-{
-  "env": {
-    "MODEL": "ark-code-latest",
-    "BASE_URL": "https://ark.cn-beijing.volces.com/api/coding/v3",
-    "API_KEY": "**************"
-  },
-  "thinkingEnabled": true
-}
+如果使用 [DeepCode Plus 订阅套餐](https://deepcode.vegamo.cn/plus/plan)，可直接运行`deepcode --plus`，在提示后粘贴你的 API Key 并回车，CLI 会自动写入配置，无需手动编辑文件：
+
+```bash
+$ deepcode --plus
+DeepCode Plus API Key: sk-···（粘贴后回车）
 ```
 
 ## 获取帮助

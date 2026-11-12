@@ -6,6 +6,7 @@ import {
   findExactSlashCommand,
   formatSlashCommandDescription,
   formatSlashCommandLabel,
+  resolveSlashSubmission,
 } from "../ui";
 import type { SkillInfo } from "@vegamo/deepcode-core";
 
@@ -22,17 +23,30 @@ test("buildSlashCommands prefixes skills before built-ins", () => {
   assert.deepEqual(builtinNames, [
     "skills",
     "model",
+    "experimental",
+    "permissions",
     "plan",
     "new",
     "init",
     "resume",
     "fork",
     "continue",
+    "compact",
+    "copy",
     "undo",
     "mcp",
     "raw",
     "exit",
   ]);
+});
+
+test("/copy is suggested, takes precedence over a skill and ignores trailing text", () => {
+  const items = buildSlashCommands([{ name: "copy", path: "/skills/copy/SKILL.md", description: "A skill" }]);
+  assert.ok(filterSlashCommands(items, "/cop").some((item) => item.kind === "copy"));
+  assert.equal(findExactSlashCommand(items, "/copy")?.kind, "copy");
+  const result = resolveSlashSubmission(items, "/copy extra text");
+  assert.equal(result?.kind, "command");
+  assert.equal(result?.kind === "command" ? result.item.kind : "", "copy");
 });
 
 test("filterSlashCommands matches partial prefixes", () => {
@@ -41,10 +55,54 @@ test("filterSlashCommands matches partial prefixes", () => {
   assert.deepEqual(matched, ["skill-writer", "skills"]);
 });
 
+test("filterSlashCommands ranks /model before /commondao for /mo", () => {
+  const items = buildSlashCommands([
+    { name: "commondao", path: "/skills/commondao/SKILL.md", description: "CommonDAO guide" },
+  ]);
+  assert.deepEqual(
+    filterSlashCommands(items, "/mo").map((item) => item.name),
+    ["model", "commondao"]
+  );
+});
+
+test("filterSlashCommands preserves order within match groups without mutating input", () => {
+  const items = buildSlashCommands(
+    ["commondao", "motion", "demo", "model-helper"].map((name) => ({
+      name,
+      path: `/skills/${name}/SKILL.md`,
+      description: name,
+    }))
+  );
+  const original = [...items];
+  assert.deepEqual(
+    filterSlashCommands(items, "/mo").map((item) => item.name),
+    ["motion", "model-helper", "model", "commondao", "demo"]
+  );
+  assert.deepEqual(items, original);
+});
+
+test("filterSlashCommands matches and prioritizes prefixes case-insensitively", () => {
+  const items = buildSlashCommands(
+    ["ComMonDAO", "Motion"].map((name) => ({
+      name,
+      path: `/skills/${name}/SKILL.md`,
+      description: name,
+    }))
+  );
+  assert.deepEqual(
+    filterSlashCommands(items, "/MO").map((item) => item.name),
+    ["Motion", "model", "ComMonDAO"]
+  );
+});
+
 test("filterSlashCommands returns all entries on bare slash", () => {
   const items = buildSlashCommands(skills);
   const matched = filterSlashCommands(items, "/");
-  assert.equal(matched.length, items.length);
+  assert.deepEqual(matched, items);
+});
+
+test("filterSlashCommands returns nothing when no names match", () => {
+  assert.deepEqual(filterSlashCommands(buildSlashCommands(skills), "/missing"), []);
 });
 
 test("filterSlashCommands returns nothing for non-slash tokens", () => {
@@ -86,6 +144,14 @@ test("findExactSlashCommand returns built-in /undo", () => {
   assert.equal(item?.kind, "undo");
 });
 
+test("/compact is suggested and the built-in takes precedence over a skill with the same name", () => {
+  const items = buildSlashCommands([{ name: "compact", path: "/skills/compact/SKILL.md", description: "A skill" }]);
+  assert.ok(filterSlashCommands(items, "/comp").some((item) => item.kind === "compact"));
+  const command = findExactSlashCommand(items, "/compact");
+  assert.equal(command?.kind, "compact");
+  assert.equal(command?.description, "Compact the current conversation");
+});
+
 test("findExactSlashCommand returns built-in /skills", () => {
   const items = buildSlashCommands(skills);
   const item = findExactSlashCommand(items, "/skills");
@@ -122,6 +188,61 @@ test("findExactSlashCommand returns the matching skill", () => {
   assert.equal(item?.skill?.name, "code-review");
 });
 
+test("resolveSlashSubmission treats a bare command as a command", () => {
+  const items = buildSlashCommands(skills);
+  assert.deepEqual(resolveSlashSubmission(items, "/plan"), {
+    kind: "command",
+    item: items.find((item) => item.kind === "plan"),
+  });
+});
+
+test("resolveSlashSubmission sends /plan arguments as a one-shot prompt", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/plan   重构权限模块，先梳理现状  ");
+  assert.equal(result?.kind, "plan");
+  assert.equal(result?.kind === "plan" ? result.text : "", "重构权限模块，先梳理现状");
+});
+
+test("resolveSlashSubmission keeps newlines inside a /plan prompt", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/plan\nline one\n  line two");
+  assert.equal(result?.kind, "plan");
+  assert.equal(result?.kind === "plan" ? result.text : "", "line one\n  line two");
+});
+
+test("resolveSlashSubmission applies a valid /raw argument", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/raw lite");
+  assert.equal(result?.kind, "raw");
+  assert.equal(result?.kind === "raw" ? result.mode : "", "lite");
+});
+
+test("resolveSlashSubmission rejects an unknown /raw argument", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/raw verbose");
+  assert.equal(result?.kind, "argument-error");
+  assert.equal(result?.kind === "argument-error" ? result.argument : "", "verbose");
+});
+
+test("resolveSlashSubmission keeps existing behavior for other commands", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/new keep this text");
+  assert.equal(result?.kind, "command");
+  assert.equal(result?.kind === "command" ? result.item.kind : "", "new");
+});
+
+test("resolveSlashSubmission does not block /compact arguments", () => {
+  const items = buildSlashCommands(skills);
+  const result = resolveSlashSubmission(items, "/compact extra text");
+  assert.equal(result?.kind, "command");
+  assert.equal(result?.kind === "command" ? result.item.kind : "", "compact");
+});
+
+test("resolveSlashSubmission leaves unknown slash text as a normal prompt", () => {
+  const items = buildSlashCommands(skills);
+  assert.equal(resolveSlashSubmission(items, "/planning is not a command"), null);
+});
+
 test("formatSlashCommandDescription keeps descriptions on one line", () => {
   assert.equal(formatSlashCommandDescription("Line one\n  line two"), "Line one line two");
 });
@@ -134,4 +255,14 @@ test("formatSlashCommandLabel marks loaded skills", () => {
 
   assert.equal(formatSlashCommandLabel(items[0]), "/loaded ✓");
   assert.equal(formatSlashCommandLabel(items[1]), "/fresh");
+});
+
+test("permissions command supports completion and takes precedence over a same-name skill", () => {
+  const items = buildSlashCommands([
+    { name: "permissions", path: "/skills/permissions/SKILL.md", description: "skill" },
+  ]);
+  assert.ok(filterSlashCommands(items, "/perm").some((item) => item.kind === "permissions"));
+  const submission = resolveSlashSubmission(items, "/permissions");
+  assert.equal(submission?.kind, "command");
+  assert.equal(submission?.item.kind, "permissions");
 });

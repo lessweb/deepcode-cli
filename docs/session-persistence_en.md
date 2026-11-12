@@ -33,7 +33,7 @@ The project storage directory contains these main files and directories:
 - Metadata for subprocesses still tracked by the session.
 - The direct source session ID and source head message ID for forked sessions.
 
-The default session title comes from the first 100 characters of the first user prompt. Renaming a session from the session list updates the title in the index.
+After the first message, Deep Code generates a session title in the background. While generation is pending or if it fails, the first 100 characters of the initial prompt remain as the title. A forked session receives a new title based on recent conversation after its first new message. You can also rename a session from the session list. The terminal tab displays the current session title.
 
 ### Message Files
 

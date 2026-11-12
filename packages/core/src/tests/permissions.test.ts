@@ -11,11 +11,98 @@ import {
   getPermissionScopesRequiringAsk,
   hasUserPermissionReplies,
   isPathInAnyDirectory,
+  normalizeAskPermissions,
   parseBashSideEffects,
 } from "../common/permissions";
 import type { PermissionScope, PermissionSettings } from "../settings";
+import { buildFileDiff } from "../common/file-utils";
 
 const tempDirs: string[] = [];
+
+test("permission previews cover write and edit without mutating files", () => {
+  const projectRoot = createTempDir("deepcode-permission-diff-");
+  const existing = path.join(projectRoot, "existing.txt");
+  const created = path.join(projectRoot, "new", "file.txt");
+  fs.writeFileSync(existing, "\ufeffbefore\r\n", "utf16le");
+  const inputs = [
+    {
+      name: "write",
+      args: { file_path: existing, content: "after\r\n" },
+      old: "\ufeffbefore\n",
+      next: "after\n",
+      filePath: existing,
+    },
+    { name: "Write", args: { file_path: created, content: "new\n" }, old: null, next: "new\n", filePath: created },
+    {
+      name: "write",
+      args: { file_path: path.join(projectRoot, "data.json"), content: { a: 1 } },
+      old: null,
+      next: '{\n  "a": 1\n}',
+      filePath: path.join(projectRoot, "data.json"),
+    },
+    ...[
+      ["old", "new"],
+      ["", "inserted"],
+      ["deleted", ""],
+    ].map(([old, next]) => ({
+      name: "edit",
+      args: { snippet_id: "snippet", old_string: old, new_string: next, replace_all: true },
+      old,
+      next,
+      filePath: existing,
+    })),
+  ];
+  const snapshot = fs.readFileSync(existing);
+  const plan = computeToolCallPermissions({
+    sessionId: "diff-session",
+    projectRoot,
+    settings: { allow: [], deny: [], ask: [], defaultMode: "askAll" },
+    resolveSnippetPath: () => existing,
+    toolCalls: inputs.map(({ name, args }, index) => ({
+      id: String(index),
+      type: "function",
+      function: { name, arguments: JSON.stringify(args) },
+    })),
+  });
+  assert.equal(plan.askPermissions.length, inputs.length);
+  inputs.forEach(({ filePath, old, next }, index) => {
+    assert.deepEqual(plan.askPermissions[index].diff, {
+      filePath,
+      details: buildFileDiff(filePath, old, next).details,
+    });
+  });
+  assert.deepEqual(fs.readFileSync(existing), snapshot);
+  assert.equal(fs.existsSync(path.dirname(created)), false);
+  assert.equal(fs.existsSync(path.join(projectRoot, "data.json")), false);
+  assert.deepEqual(normalizeAskPermissions(JSON.parse(JSON.stringify(plan.askPermissions))), plan.askPermissions);
+});
+
+test("missing permission previews do not affect approval decisions", () => {
+  const projectRoot = createTempDir("deepcode-permission-diff-fallback-");
+  const toolCalls = [
+    { name: "write", args: { file_path: projectRoot, content: "directory cannot be read" } },
+    { name: "write", args: { file_path: path.join(projectRoot, "file"), content: 123 } },
+    { name: "edit", args: { file_path: path.join(projectRoot, "file"), old_string: "same", new_string: "same" } },
+    { name: "edit", args: { file_path: path.join(projectRoot, "file"), new_string: "missing old_string" } },
+    { name: "bash", args: { command: "echo hello", sideEffects: ["network"] } },
+  ].map(({ name, args }, index) => ({
+    id: String(index),
+    type: "function",
+    function: { name, arguments: JSON.stringify(args) },
+  }));
+  const options = { sessionId: "diff-session", projectRoot, toolCalls };
+  const plan = computeToolCallPermissions({
+    ...options,
+    settings: { allow: [], deny: [], ask: [], defaultMode: "askAll" },
+  });
+  assert.equal(plan.askPermissions.length, toolCalls.length);
+  assert.ok(plan.askPermissions.every((request) => request.diff === undefined));
+  assert.equal(computeToolCallPermissions(options).askPermissions.length, 0);
+  const legacy = { toolCallId: "old", name: "write", command: "write file", scopes: [] };
+  for (const diff of [undefined, null, { filePath: "file", details: { lines: [] } }]) {
+    assert.equal(normalizeAskPermissions([{ ...legacy, diff }])?.[0].diff, undefined);
+  }
+});
 
 afterEach(() => {
   while (tempDirs.length > 0) {
@@ -671,3 +758,61 @@ function createTempDir(prefix: string, parentDir = os.tmpdir()): string {
   tempDirs.push(dir);
   return dir;
 }
+
+test("session grants override ask and Plan forced scopes, preserve deny, and leave other scopes pending", () => {
+  const settings: Required<PermissionSettings> = {
+    allow: [],
+    deny: ["write-out-cwd"],
+    ask: ["write-in-cwd"],
+    defaultMode: "askAll",
+    addWorkingDirs: [],
+  };
+  const before = structuredClone(settings);
+  const options = {
+    sessionId: "session-grants",
+    projectRoot: "/project",
+    settings,
+    sessionAllows: new Set<PermissionScope>(["write-in-cwd", "write-out-cwd"]),
+    forceAskScopes: ["write-in-cwd", "write-out-cwd"] as PermissionScope[],
+    toolCalls: [
+      {
+        id: "allowed",
+        type: "function",
+        function: { name: "Write", arguments: JSON.stringify({ file_path: "/project/a" }) },
+      },
+      {
+        id: "denied",
+        type: "function",
+        function: { name: "Write", arguments: JSON.stringify({ file_path: "/outside/a" }) },
+      },
+      {
+        id: "mixed",
+        type: "function",
+        function: {
+          name: "Bash",
+          arguments: JSON.stringify({ command: "example", sideEffects: ["write-in-cwd", "network"] }),
+        },
+      },
+      {
+        id: "unknown",
+        type: "function",
+        function: { name: "Bash", arguments: JSON.stringify({ command: "example" }) },
+      },
+    ],
+  };
+  const plan = computeToolCallPermissions(options);
+  assert.deepEqual(plan.permissions, [
+    { toolCallId: "allowed", permission: "allow" },
+    { toolCallId: "denied", permission: "deny" },
+    { toolCallId: "mixed", permission: "ask" },
+    { toolCallId: "unknown", permission: "ask" },
+  ]);
+  assert.deepEqual(
+    plan.askPermissions.map(({ scopes }) => scopes),
+    [["network"], ["unknown"]]
+  );
+  assert.deepEqual(settings, before);
+  assert.equal(computeToolCallPermissions({ ...options, sessionAllows: new Set() }).permissions[0]?.permission, "ask");
+  assert.equal(hasUserPermissionReplies({ sessionAllows: ["network"] }), true);
+  assert.equal(hasUserPermissionReplies({ sessionAllows: [] }), false);
+});

@@ -1,16 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import { BASH_TIMEOUT_DECREMENT_MS, BASH_TIMEOUT_INCREMENT_MS } from "@vegamo/deepcode-core";
-import type { BashTimeoutAdjustment, SessionEntry, SessionProcessEntry } from "@vegamo/deepcode-core";
+import type { BashTimeoutAdjustment } from "@vegamo/deepcode-core";
 import { useTerminalInput } from "../hooks";
+import { writeClipboardTextAsync } from "../core/clipboard";
 
-type RunningProcesses = SessionEntry["processes"];
+import {
+  wrapProcessOutputTitle,
+  moveProcessOutputSelection,
+  wrapProcessOutputLines,
+  type ProcessOutputItem,
+} from "../core/process-output";
 
 type ProcessStdoutViewProps = {
   processStdoutRef: React.RefObject<Map<number, string>>;
-  runningProcesses: RunningProcesses;
+  items: ProcessOutputItem[];
   onDismiss: () => void;
-  onAdjustTimeout: (deltaMs: number) => BashTimeoutAdjustment | null;
+  onAdjustTimeout: (deltaMs: number, processId: string) => BashTimeoutAdjustment | null;
   screenWidth: number;
   screenHeight: number;
 };
@@ -21,70 +27,76 @@ const MIN_PANEL_HEIGHT = 5;
 
 export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   processStdoutRef,
-  runningProcesses,
+  items,
   onDismiss,
   onAdjustTimeout,
   screenWidth,
   screenHeight,
 }: ProcessStdoutViewProps): React.ReactElement {
-  const [stdoutText, setStdoutText] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(() => items.at(-1)?.id ?? null);
+  const selected = items.find((item) => item.id === selectedId) ?? items.at(-1);
+  const [liveOutput, setLiveOutput] = useState({ id: "", text: "" });
+  const stdoutText = selected?.running
+    ? (liveOutput.id === selected.id ? liveOutput.text : "") || "(no output yet)"
+    : selected?.output || "(no output)";
   const [scrollOffset, setScrollOffset] = useState(0);
   const [statusMessage, setStatusMessage] = useState("");
   const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const copyRequestRef = useRef(0);
 
   const panelHeight = Math.max(MIN_PANEL_HEIGHT, Math.min(screenHeight - 1, MAX_PANEL_HEIGHT));
-  const reservedRows = statusMessage ? 2 : 1;
-  const visibleLineLimit = Math.max(1, panelHeight - reservedRows);
+  const titleLines = useMemo(
+    () => (selected ? wrapProcessOutputTitle(selected, screenWidth - 2) : ["(no process output)"]),
+    [selected, screenWidth]
+  );
+  const contentRows = Math.max(1, panelHeight - (statusMessage ? 3 : 2));
+  // Keep ordinary commands visible; include very long commands in the scrollable content.
+  const pinTitle = titleLines.length <= contentRows - 2;
+  const visibleLineLimit = contentRows - (pinTitle ? titleLines.length : 0);
+
+  const currentId = selected?.id;
+  useEffect(() => {
+    if (currentId) setSelectedId(currentId);
+  }, [currentId]);
 
   useEffect(() => {
-    const updateStdout = () => {
-      let text = "";
-      if (runningProcesses && runningProcesses.size > 0) {
-        for (const [pid, proc] of runningProcesses.entries()) {
-          const pidNum = Number(pid);
-          const stdout = processStdoutRef.current.get(pidNum) ?? "";
-          if (text) {
-            text += "\n";
-          }
-          if (runningProcesses.size > 1) {
-            text += `── Process ${pid} [${proc.command}] ──\n`;
-          }
-          text += stdout || "(no output yet)";
-        }
-      } else {
-        text = "(no running processes)";
-      }
-      setStdoutText(text);
+    setScrollOffset(0);
+    setStatusMessage("");
+    return () => {
+      copyRequestRef.current += 1;
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
     };
+  }, [selected?.id]);
 
+  useEffect(() => {
+    if (!selected?.running || !selected.pid) return;
+    const updateStdout = () =>
+      setLiveOutput({
+        id: selected.id,
+        text: processStdoutRef.current.get(Number(selected.pid)) ?? "",
+      });
     updateStdout();
     const interval = setInterval(updateStdout, REFRESH_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [processStdoutRef, runningProcesses]);
+  }, [processStdoutRef, selected?.id, selected?.running, selected?.pid]);
 
-  useEffect(() => {
-    return () => {
-      if (statusTimerRef.current) {
-        clearTimeout(statusTimerRef.current);
-      }
-    };
-  }, []);
-
-  const lines = useMemo(() => stdoutText.split("\n"), [stdoutText]);
-  const timeoutProcess = useMemo(() => getLatestTimeoutProcess(runningProcesses), [runningProcesses]);
+  const lines = useMemo(
+    () => [...(pinTitle ? [] : titleLines), ...(selected ? wrapProcessOutputLines(stdoutText, screenWidth - 2) : [])],
+    [pinTitle, titleLines, selected, stdoutText, screenWidth]
+  );
+  const canAdjustTimeout = selected?.running && !selected.background && typeof selected.timeoutMs === "number";
+  const showScrollHint = lines.length > visibleLineLimit && visibleLineLimit > 1;
+  const outputLineLimit = visibleLineLimit - (showScrollHint ? 1 : 0);
+  const maxScrollOffset = Math.max(0, lines.length - outputLineLimit);
 
   const visibleLines = useMemo(() => {
-    if (lines.length <= visibleLineLimit) {
-      return lines;
-    }
-    const outputLineLimit = Math.max(1, visibleLineLimit - 1);
-    const start = Math.max(0, lines.length - outputLineLimit - scrollOffset);
+    const start = Math.max(0, maxScrollOffset - scrollOffset);
     const slice = lines.slice(start, start + outputLineLimit);
-    if (lines.length > visibleLineLimit) {
+    if (showScrollHint) {
       slice.unshift(`... (${start} lines above · ↑/↓ to scroll · ${lines.length} total lines) ...`);
     }
     return slice;
-  }, [lines, scrollOffset, visibleLineLimit]);
+  }, [lines, scrollOffset, outputLineLimit, maxScrollOffset, showScrollHint]);
 
   const setTemporaryStatus = (message: string) => {
     setStatusMessage(message);
@@ -97,33 +109,53 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   useTerminalInput(
     (input, key) => {
       if ((key.ctrl && (input === "o" || input === "O")) || key.escape) {
+        copyRequestRef.current++;
         onDismiss();
         return;
       }
-      if (input === "+") {
-        const adjustment = onAdjustTimeout(BASH_TIMEOUT_INCREMENT_MS);
+      if (key.leftArrow || key.rightArrow) {
+        const nextId = moveProcessOutputSelection(items, selected?.id ?? null, key.leftArrow ? -1 : 1);
+        if (nextId !== selected?.id) copyRequestRef.current++;
+        setSelectedId(nextId);
+        return;
+      }
+      if (input === "y" && !key.ctrl && !key.meta && !key.paste) {
+        if (!selected?.command) return;
+        const request = ++copyRequestRef.current;
+        const reportCopy = (success: boolean) => {
+          if (request === copyRequestRef.current) {
+            setTemporaryStatus(success ? "Copied to clipboard" : "Failed to copy");
+          }
+        };
+        void writeClipboardTextAsync(selected.command)
+          .then(reportCopy)
+          .catch(() => reportCopy(false));
+        return;
+      }
+      if (input === "+" && canAdjustTimeout && selected?.pid) {
+        const adjustment = onAdjustTimeout(BASH_TIMEOUT_INCREMENT_MS, selected.pid);
         setTemporaryStatus(formatAdjustmentStatus(adjustment));
         return;
       }
-      if (input === "-") {
-        const adjustment = onAdjustTimeout(-BASH_TIMEOUT_DECREMENT_MS);
+      if (input === "-" && canAdjustTimeout && selected?.pid) {
+        const adjustment = onAdjustTimeout(-BASH_TIMEOUT_DECREMENT_MS, selected.pid);
         setTemporaryStatus(formatAdjustmentStatus(adjustment));
         return;
       }
       if (key.upArrow) {
-        setScrollOffset((s) => Math.min(s + 10, Math.max(0, lines.length - visibleLineLimit)));
+        setScrollOffset((s) => Math.min(s + Math.min(10, outputLineLimit), maxScrollOffset));
         return;
       }
       if (key.downArrow) {
-        setScrollOffset((s) => Math.max(s - 10, 0));
+        setScrollOffset((s) => Math.max(s - Math.min(10, outputLineLimit), 0));
         return;
       }
       if (key.pageUp) {
-        setScrollOffset((s) => Math.min(s + visibleLineLimit, Math.max(0, lines.length - visibleLineLimit)));
+        setScrollOffset((s) => Math.min(s + outputLineLimit, maxScrollOffset));
         return;
       }
       if (key.pageDown) {
-        setScrollOffset((s) => Math.max(s - visibleLineLimit, 0));
+        setScrollOffset((s) => Math.max(s - outputLineLimit, 0));
         return;
       }
     },
@@ -131,16 +163,29 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
   );
 
   return (
-    <Box flexDirection="column" width={screenWidth} minWidth={80} height={panelHeight} overflow="hidden">
-      <Box borderStyle="single" borderBottom={true} borderLeft={false} borderRight={false} borderTop={false}>
-        <Text bold>📟 Process Output</Text>
-        <Text dimColor>{` (${formatTimeoutHint(
-          timeoutProcess?.entry
-        )} · +/- adjust · Ctrl+O or Esc to close · ↑↓ PageUp/PageDown to scroll)`}</Text>
+    <Box flexDirection="column" width={screenWidth} height={panelHeight} overflow="hidden">
+      <Box
+        flexShrink={0}
+        borderStyle="single"
+        borderBottom={true}
+        borderLeft={false}
+        borderRight={false}
+        borderTop={false}
+      >
+        <Box flexShrink={0}>
+          <Text bold>📟 Process Output</Text>
+        </Box>
+        <Text
+          dimColor
+          wrap="truncate-end"
+        >{` (${canAdjustTimeout ? `timeout ${formatDuration(selected.timeoutMs!)} · +/- adjust · ` : ""}←→ history · Ctrl+O or Esc close · ↑↓ PgUp/PgDn scroll · y copy command)`}</Text>
       </Box>
-      <Box flexDirection="column" paddingX={1} overflow="hidden">
+      <Box flexDirection="column" flexShrink={0} paddingX={1} overflow="hidden">
+        {pinTitle && <Text wrap="hard">{titleLines.join("\n")}</Text>}
         {visibleLines.map((line, index) => (
-          <Text key={`${index}`}>{line}</Text>
+          <Text key={`${index}`} wrap="truncate-end">
+            {line || " "}
+          </Text>
         ))}
       </Box>
       {statusMessage ? (
@@ -151,29 +196,6 @@ export const ProcessStdoutView = React.memo(function ProcessStdoutView({
     </Box>
   );
 });
-
-function getLatestTimeoutProcess(
-  runningProcesses: RunningProcesses
-): { pid: string; entry: SessionProcessEntry } | null {
-  if (!runningProcesses) {
-    return null;
-  }
-  let latest: { pid: string; entry: SessionProcessEntry } | null = null;
-  for (const [pid, entry] of runningProcesses.entries()) {
-    if (typeof entry.timeoutMs !== "number") {
-      continue;
-    }
-    latest = { pid, entry };
-  }
-  return latest;
-}
-
-function formatTimeoutHint(entry?: SessionProcessEntry): string {
-  if (!entry || typeof entry.timeoutMs !== "number") {
-    return "timeout unavailable";
-  }
-  return `timeout ${formatDuration(entry.timeoutMs)}`;
-}
 
 function formatAdjustmentStatus(adjustment: BashTimeoutAdjustment | null): string {
   if (!adjustment) {

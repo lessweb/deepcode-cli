@@ -379,6 +379,16 @@ function rebuildWriteResult(sessionId: string, metadata: Record<string, unknown>
   }
 
   refreshRebuiltFileState(sessionId, metadata.file_path, { incrementVersion: true });
+  const snippet = asRecord(metadata.snippet);
+  if (snippet) {
+    restoreSnippetFromRecord(sessionId, snippet, {
+      idKey: "id",
+      filePathKey: "filePath",
+      startLineKey: "startLine",
+      endLineKey: "endLine",
+      scopeType: "full",
+    });
+  }
 }
 
 function rebuildCandidateSnippets(
