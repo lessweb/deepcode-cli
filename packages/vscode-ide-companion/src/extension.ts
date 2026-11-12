@@ -4,7 +4,7 @@ import * as path from "path";
 import * as os from "os";
 import OpenAI from "openai";
 import MarkdownIt from "markdown-it";
-import type { SessionMessage } from "@vegamo/deepcode-core";
+import type { SessionMessage, SessionMessageTab } from "@vegamo/deepcode-core";
 import {
   SessionManager,
   type LlmRetryEvent,
@@ -165,7 +165,13 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
           html: this.md.render(record.content),
           imageUrls: record.images,
         }));
-        this.postToWebview(webview, { type: "trajectorySnapshot", ...snapshot, records, progress });
+        this.postToWebview(webview, {
+          type: "trajectorySnapshot",
+          ...snapshot,
+          records,
+          progress,
+          running: Boolean(snapshot.sessionId && this.sessionManager.isSessionRunning(snapshot.sessionId)),
+        });
       },
     });
     this.unsubscribeRuntime = this.sessionManager.subscribeRuntime(() => {
@@ -403,7 +409,55 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
     panel.webview.onDidReceiveMessage((message: unknown) => {
       if (!message || typeof message !== "object") return;
       const msg = message as Record<string, unknown>;
-      if (msg.type === "trajectoryCopy" && typeof msg.text === "string") void vscode.env.clipboard.writeText(msg.text);
+      if (msg.type === "trajectoryEdit" || msg.type === "trajectoryDelete") {
+        try {
+          const sessionId = this.sessionManager.getActiveSessionId();
+          if (!sessionId || msg.sessionId !== sessionId) throw new Error("This session is no longer active.");
+          const snapshot = buildTrajectory(
+            this.sessionManager.getSession(sessionId),
+            this.sessionManager.listSessionMessages(sessionId)
+          );
+          const record = snapshot.records.find((item) => item.id === msg.recordId);
+          if (!record) throw new Error("Message was not found.");
+          if (msg.type === "trajectoryDelete") this.sessionManager.deleteSessionMessage(sessionId, record.source);
+          else {
+            if (
+              typeof msg.text !== "string" ||
+              !["Content", "Thinking", "Parameters", "Result", "Raw"].includes(String(msg.tab))
+            )
+              throw new Error("Invalid message edit.");
+            this.sessionManager.editSessionMessage(sessionId, record.source, msg.tab as SessionMessageTab, msg.text);
+          }
+          this.loadSession(sessionId);
+          postUndoState(this.sessionManager, (message) => this.sendMessage(message));
+          this.trajectory.invalidate();
+          void panel.webview.postMessage({
+            type: "trajectoryMutationResult",
+            requestId: msg.requestId,
+            sessionId,
+            recordId: msg.recordId,
+            tab: msg.tab,
+          });
+        } catch (error) {
+          void panel.webview.postMessage({
+            type: "trajectoryMutationResult",
+            requestId: msg.requestId,
+            sessionId: msg.sessionId,
+            recordId: msg.recordId,
+            tab: msg.tab,
+            error: error instanceof Error ? error.message : "Could not update message.",
+          });
+        }
+      }
+      if (msg.type === "trajectoryCopy" && typeof msg.text === "string") {
+        const respond = (success: boolean) => {
+          void panel.webview.postMessage({ type: "trajectoryCopyResult", context: msg.context, success });
+        };
+        void vscode.env.clipboard.writeText(msg.text).then(
+          () => respond(true),
+          () => respond(false)
+        );
+      }
       if (msg.type === "openExternal" && isAllowedExternalUrl(msg.url))
         void vscode.env.openExternal(vscode.Uri.parse(msg.url));
     });

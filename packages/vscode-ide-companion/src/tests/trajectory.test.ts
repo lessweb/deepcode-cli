@@ -226,3 +226,23 @@ test("updates follow the active session and stream updates reuse the history sna
   assert.equal(sent.at(-1)?.progress, null);
   controller.dispose();
 });
+
+test("trajectory exposes source identities and uses original roles for edit permissions", () => {
+  const snapshot = buildTrajectory(session, [
+    message("u", "user"),
+    message("context", "user", { visible: false }),
+    message("summary", "user", { meta: { isSummary: true } }),
+    message("a", "assistant", {
+      messageParams: { tool_calls: [{ id: "c", function: { name: "bash", arguments: "{}" } }] },
+    }),
+    message("r", "tool", { messageParams: { tool_call_id: "c" } }),
+    message("system", "system"),
+  ]);
+  assert.deepEqual(
+    snapshot.records.map((record) => record.editable),
+    [false, false, false, true, true, true]
+  );
+  assert.deepEqual(snapshot.records[3].source, { messageId: "a" });
+  assert.deepEqual(snapshot.records[4].source, { messageId: "a", toolCallIndex: 0 });
+  assert.deepEqual(snapshot.records[5].source, { messageId: "system" });
+});

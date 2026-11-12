@@ -38,14 +38,52 @@
       <aside id="details" aria-label="Event details" hidden>
         <div class="details-heading">
           <h2 id="detailTitle"></h2>
-          <button id="closeDetails" aria-label="Close details" title="Close details">×</button>
+          <div class="detail-buttons">
+            <button
+              id="fullscreen"
+              class="icon-button"
+              aria-label="Full screen"
+              data-tooltip="Full screen"
+              aria-pressed="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path id="fullscreenIcon" d="M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5" />
+              </svg>
+            </button>
+            <button id="closeDetails" aria-label="Close details" title="Close details">×</button>
+          </div>
         </div>
         <div id="detailMeta" class="muted"></div>
-        <div id="tabs" role="tablist" aria-label="Event content"></div>
+        <div class="tabs-heading">
+          <div id="tabs" role="tablist" aria-label="Event content"></div>
+          <button id="delete" class="icon-button" aria-label="Delete" data-tooltip="Delete">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7" />
+            </svg>
+          </button>
+        </div>
         <div class="detail-actions">
-          <label><input id="wrap" type="checkbox" checked /> Wrap lines</label><button id="copy">Copy</button>
+          <label><input id="wrap" type="checkbox" checked /> Wrap lines</label>
+          <div class="detail-buttons">
+            <button id="copy" class="icon-button" aria-label="Copy" data-tooltip="Copy">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <g id="copyIcon">
+                  <rect x="8" y="8" width="12" height="13" rx="2" />
+                  <path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3" />
+                </g>
+                <path id="copyDone" d="m5 12 4 4L19 6" hidden />
+              </svg>
+            </button>
+            <button id="edit" class="icon-button" aria-label="Edit" data-tooltip="Edit">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="m15 5 4 4M4 16l12-12a2.8 2.8 0 0 1 4 4L8 20l-5 1z" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div id="detailBody" role="tabpanel" tabindex="0"></div>
+        <div id="editError" role="alert" hidden></div>
+        <div id="editActions" hidden><button id="save">Save</button><button id="cancel">Cancel</button></div>
       </aside>
     </main>
     <script nonce="{{nonce}}" src="{{jsUri}}"></script>

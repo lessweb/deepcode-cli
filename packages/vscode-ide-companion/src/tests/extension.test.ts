@@ -1055,3 +1055,21 @@ test("messages submitted while busy remain pending until core prepares them", as
   assert.equal(state.preparing, undefined);
   assert.equal(state.queued.length, 1);
 });
+
+test("blocked /continue displays the reason and settles loading without changing the wait", async () => {
+  for (const status of ["permission_denied", "ask_permission", "waiting_for_user"]) {
+    const deps = createDeps({ sessions: [{ id: "session-1", summary: "test", status }] });
+    const reason = `Cannot continue: ${status}`;
+    deps.sessionManager.handleUserPrompt = async () => {
+      throw new Error(reason);
+    };
+    await handleWebviewMessage({ type: "slashCommand", command: "continue" }, deps);
+    assert.ok(deps.messages.some((message: any) => message.type === "commandNotice" && message.text === reason));
+    assert.ok(
+      deps.messages.some(
+        (message: any) => message.type === "loading" && message.value === false && message.status === status
+      )
+    );
+    assert.equal(deps.sessionManager.getSession("session-1")?.status, status);
+  }
+});

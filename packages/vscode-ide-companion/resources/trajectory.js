@@ -8,15 +8,24 @@
     collapsed: new Set(),
     collapseAll: false,
     selected: null,
-    tab: "Preview",
+    tab: "Content",
     limit: 100,
     query: "",
     imagePreviews: {},
     detailKey: "",
+    drafts: new Map(),
+    running: false,
+    pending: null,
+    error: "",
+    fullscreen: false,
   };
   let currentCopyText = "";
   let snapshotKey = "";
   let rowElements = new Map();
+  let nextRequestId = 0;
+  let copyFeedbackTimer;
+  let copyContext = "";
+  let fullscreenScroll = null;
 
   function element(tag, className, text) {
     const node = document.createElement(tag);
@@ -51,6 +60,7 @@
   }
 
   function select(id, locate = false) {
+    if (state.selected !== id) resetEditor();
     state.selected = id;
     const index = state.records.findIndex((record) => record.id === id);
     if (index < 0) return;
@@ -117,7 +127,7 @@
           timestamp.title = time(record.time, true);
           row.append(
             timestamp,
-            element("span", `label ${record.kind}`, record.label),
+            element("span", `label ${record.kind}`, record.kind === "tool" ? `${record.label} tool` : record.label),
             element("span", "preview", preview(record))
           );
           row.title = [record.label, record.status, record.compacted ? "Compacted" : "", preview(record)]
@@ -173,7 +183,15 @@
       state.detailKey = "";
       return;
     }
-    const key = JSON.stringify([record, state.tab, state.imagePreviews]);
+    const key = JSON.stringify([
+      record,
+      state.tab,
+      state.imagePreviews,
+      [...state.drafts.keys()],
+      state.running,
+      state.pending,
+      state.error,
+    ]);
     if (key === state.detailKey) return;
     state.detailKey = key;
     $("detailTitle").textContent = record.label;
@@ -181,13 +199,17 @@
       .filter(Boolean)
       .join(" · ");
     const tabs = [];
-    if (record.content || record.images.length) tabs.push(["Preview", record.content]);
-    if (record.thinking) tabs.push(["Thinking", record.thinking]);
-    if (record.parameters !== undefined) tabs.push(["Parameters", record.parameters || "No parameters"]);
-    if (record.kind === "tool")
-      tabs.push(["Result", record.result === undefined ? "No result recorded." : record.result]);
+    if (record.kind === "assistant" || record.content || record.images.length) tabs.push(["Content", record.content]);
+    if (record.thinking || state.drafts.has("Thinking")) tabs.push(["Thinking", record.thinking]);
+    if (record.parameters !== undefined) tabs.push(["Parameters", record.parameters]);
+    if (record.kind === "tool") tabs.push(["Result", record.result ?? ""]);
     tabs.push(["Raw", record.raw]);
     if (!tabs.some(([label]) => label === state.tab)) state.tab = tabs[0][0];
+    const nextCopyContext = JSON.stringify([state.sessionId, record.id, state.tab]);
+    if (copyContext !== nextCopyContext) {
+      resetCopyFeedback();
+      copyContext = nextCopyContext;
+    }
     const fragment = document.createDocumentFragment();
     for (const [label] of tabs) {
       const button = element("button", "", label);
@@ -223,10 +245,33 @@
     body.classList.toggle("wrap", $("wrap").checked);
     currentCopyText = tabs.find(([label]) => label === state.tab)[1];
     body.replaceChildren();
-    if (state.tab === "Preview") {
+    const editing = state.drafts.has(state.tab);
+    body.classList.toggle("editing", editing);
+    $("details").classList.toggle("editing", editing);
+    $("edit").hidden = !record.editable || editing;
+    $("edit").disabled = state.running || Boolean(state.pending);
+    $("delete").disabled = state.running || Boolean(state.pending);
+    $("save").disabled = state.running || Boolean(state.pending);
+    $("cancel").disabled = Boolean(state.pending);
+    $("editActions").hidden = !editing;
+    $("editError").hidden = !state.error;
+    $("editError").textContent = state.error;
+    if (editing) {
+      const input = element("textarea");
+      input.id = "detailEditor";
+      input.setAttribute("aria-label", `Edit ${state.tab}`);
+      input.wrap = $("wrap").checked ? "soft" : "off";
+      input.value = state.drafts.get(state.tab);
+      input.readOnly = Boolean(state.pending);
+      input.addEventListener("input", () => state.drafts.set(state.tab, input.value));
+      body.append(input);
+      return;
+    }
+    if (state.tab === "Content") {
       const markdown = element("div", "markdown");
       // Only extension-rendered Markdown (HTML disabled) enters this container.
       markdown.innerHTML = record.html || "";
+      if (!record.content) markdown.textContent = "(empty)";
       body.append(markdown);
       for (const url of record.images) {
         const resolved =
@@ -237,7 +282,14 @@
         img.alt = "Attached image";
         body.append(img);
       }
-    } else body.append(element("pre", "", currentCopyText));
+    } else
+      body.append(
+        element(
+          "pre",
+          "",
+          currentCopyText || (state.tab === "Result" && record.result === undefined ? "No result recorded." : "(empty)")
+        )
+      );
   }
 
   $("search").addEventListener("input", () => {
@@ -270,17 +322,108 @@
   function closeDetails() {
     const previous = state.selected;
     state.selected = null;
+    resetEditor();
     renderLedger();
     renderTimeline();
     renderDetails();
     (rowElements.get(previous) || $("ledger")).focus({ preventScroll: true });
   }
+  function setFullscreen(enabled) {
+    if (state.fullscreen === enabled) return;
+    const positions = [$("detailBody"), $("detailEditor")].filter(Boolean).map((node) => ({
+      node,
+      top: node.scrollTop,
+      left: node.scrollLeft,
+    }));
+    if (enabled) fullscreenScroll = { ledgerTop: $("ledger").scrollTop, positions };
+    state.fullscreen = enabled;
+    document.body.classList.toggle("details-fullscreen", enabled);
+    const label = enabled ? "Exit full screen" : "Full screen";
+    $("fullscreen").setAttribute("aria-label", label);
+    $("fullscreen").setAttribute("aria-pressed", String(enabled));
+    $("fullscreen").dataset.tooltip = label;
+    $("fullscreenIcon").setAttribute(
+      "d",
+      enabled ? "M3 8h5V3M16 3v5h5M21 16h-5v5M8 21v-5H3" : "M8 3H3v5M16 3h5v5M21 16v5h-5M8 21H3v-5"
+    );
+    for (const position of positions) {
+      const previous = fullscreenScroll?.positions.find((item) => item.node === position.node);
+      // Restore offsets clamped by the larger viewport unless the user has scrolled since.
+      position.node.scrollTop = !enabled && previous?.clampedTop === position.top ? previous.top : position.top;
+      position.node.scrollLeft = !enabled && previous?.clampedLeft === position.left ? previous.left : position.left;
+      if (enabled) {
+        position.clampedTop = position.node.scrollTop;
+        position.clampedLeft = position.node.scrollLeft;
+      }
+    }
+    if (!enabled && fullscreenScroll) {
+      $("ledger").scrollTop = fullscreenScroll.ledgerTop;
+      fullscreenScroll = null;
+    }
+  }
+  $("fullscreen").addEventListener("click", () => setFullscreen(!state.fullscreen));
   $("closeDetails").addEventListener("click", closeDetails);
   document.addEventListener("keydown", (event) => {
-    if (event.key === "Escape" && state.selected) closeDetails();
+    if (event.key !== "Escape" || !state.selected) return;
+    event.preventDefault();
+    if (state.fullscreen) setFullscreen(false);
+    else closeDetails();
   });
-  $("wrap").addEventListener("change", () => $("detailBody").classList.toggle("wrap", $("wrap").checked));
-  $("copy").addEventListener("click", () => vscode.postMessage({ type: "trajectoryCopy", text: currentCopyText }));
+  $("wrap").addEventListener("change", () => {
+    $("detailBody").classList.toggle("wrap", $("wrap").checked);
+    if ($("detailEditor")) $("detailEditor").wrap = $("wrap").checked ? "soft" : "off";
+  });
+  function resetCopyFeedback() {
+    window.clearTimeout(copyFeedbackTimer);
+    $("copy").dataset.tooltip = "Copy";
+    $("copy").setAttribute("aria-label", "Copy");
+    $("copy").removeAttribute("data-feedback");
+    $("copyIcon").removeAttribute("hidden");
+    $("copyDone").setAttribute("hidden", "");
+  }
+  $("copy").addEventListener("click", () => {
+    resetCopyFeedback();
+    vscode.postMessage({
+      type: "trajectoryCopy",
+      text: state.drafts.get(state.tab) ?? currentCopyText,
+      context: copyContext,
+    });
+  });
+  function resetEditor() {
+    resetCopyFeedback();
+    copyContext = "";
+    setFullscreen(false);
+    state.drafts.clear();
+    state.pending = null;
+    state.error = "";
+    state.detailKey = "";
+  }
+  function mutate(type) {
+    if (state.running || state.pending) return;
+    state.error = "";
+    state.pending = { requestId: ++nextRequestId, type, tab: state.tab };
+    vscode.postMessage({
+      ...state.pending,
+      sessionId: state.sessionId,
+      recordId: state.selected,
+      text: type === "trajectoryEdit" ? state.drafts.get(state.tab) : undefined,
+    });
+    renderDetails();
+  }
+  $("edit").addEventListener("click", () => {
+    state.drafts.set(state.tab, currentCopyText);
+    state.error = "";
+    renderDetails();
+    $("detailEditor").focus();
+  });
+  $("save").addEventListener("click", () => mutate("trajectoryEdit"));
+  $("cancel").addEventListener("click", () => {
+    state.drafts.delete(state.tab);
+    state.error = "";
+    renderDetails();
+    $("edit").focus();
+  });
+  $("delete").addEventListener("click", () => mutate("trajectoryDelete"));
   $("detailBody").addEventListener("click", (event) => {
     const anchor = event.target.closest("a");
     if (anchor) {
@@ -289,6 +432,38 @@
     }
   });
   window.addEventListener("message", ({ data }) => {
+    if (data?.type === "trajectoryCopyResult") {
+      if (!state.selected || data.context !== copyContext) return;
+      resetCopyFeedback();
+      const label = data.success ? "Copied" : "Copy failed";
+      $("copy").dataset.tooltip = label;
+      $("copy").setAttribute("aria-label", label);
+      $("copy").setAttribute("data-feedback", "");
+      $("copyIcon").toggleAttribute("hidden", data.success);
+      $("copyDone").toggleAttribute("hidden", !data.success);
+      copyFeedbackTimer = window.setTimeout(resetCopyFeedback, 1800);
+      return;
+    }
+    if (data?.type === "trajectoryMutationResult") {
+      if (
+        data.sessionId !== state.sessionId ||
+        data.recordId !== state.selected ||
+        data.requestId !== state.pending?.requestId
+      )
+        return;
+      const pending = state.pending;
+      state.pending = null;
+      state.error = data.error || "";
+      if (!data.error) {
+        if (pending.type === "trajectoryDelete") {
+          closeDetails();
+          return;
+        }
+        state.drafts.delete(pending.tab);
+      }
+      renderDetails();
+      return;
+    }
     if (data?.type === "trajectoryProgress") {
       if (data.sessionId !== state.sessionId) return;
       updateProgress(data.progress);
@@ -300,9 +475,10 @@
     const changed = state.sessionId !== data.sessionId;
     const oldTurns = new Set(state.records.map((record) => record.turnId));
     if (changed) {
+      resetEditor();
       state.sessionId = data.sessionId;
       state.selected = null;
-      state.tab = "Preview";
+      state.tab = "Content";
       state.collapsed.clear();
       state.collapseAll = false;
       state.limit = 100;
@@ -317,6 +493,11 @@
     }
     const key = JSON.stringify(data.records);
     state.records = data.records;
+    state.running = Boolean(data.running);
+    if (state.selected && !state.records.some((record) => record.id === state.selected)) {
+      state.selected = null;
+      resetEditor();
+    }
     if (state.collapseAll)
       for (const record of state.records) if (!oldTurns.has(record.turnId)) state.collapsed.add(record.turnId);
     state.imagePreviews = data.imagePreviews || {};

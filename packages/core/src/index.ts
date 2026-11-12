@@ -215,3 +215,5 @@ export type {
 } from "./common/message-history";
 
 export type { PromptContent, QueuedMessage, QueuePausedReason } from "./prompt-queue";
+
+export type { SessionMessageTarget, SessionMessageTab } from "./session-message-edit";

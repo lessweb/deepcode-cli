@@ -1,8 +1,10 @@
-import type { LlmStreamProgress, SessionEntry, SessionMessage } from "@vegamo/deepcode-core";
+import type { LlmStreamProgress, SessionEntry, SessionMessage, SessionMessageTarget } from "@vegamo/deepcode-core";
 import { collectPromptImageUrls } from "./utils.js";
 
 export interface TrajectoryRecord {
   id: string;
+  source: SessionMessageTarget;
+  editable: boolean;
   turnId: string;
   kind: "user" | "assistant" | "tool" | "system" | "context" | "compacted";
   label: string;
@@ -73,6 +75,8 @@ export function buildTrajectory(session: SessionEntry | null, messages: SessionM
     const images = collectPromptImageUrls(message);
     const record: TrajectoryRecord = {
       id: message.id,
+      source: { messageId: message.id },
+      editable: message.role !== "user",
       turnId,
       kind,
       label: kind === "compacted" ? "Context compacted" : kind[0].toUpperCase() + kind.slice(1),
@@ -108,6 +112,8 @@ export function buildTrajectory(session: SessionEntry | null, messages: SessionM
       const callId = string(call.id);
       const tool: TrajectoryRecord = {
         id: `${message.id}:tool:${callId || index}`,
+        source: { messageId: message.id, toolCallIndex: index },
+        editable: true,
         turnId,
         kind: "tool",
         label: string(fn.name) || "Tool",

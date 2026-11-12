@@ -102,6 +102,13 @@ import {
   MAX_LLM_RETRIES,
   waitForLlmRetry,
 } from "./common/llm-retry";
+import { getSessionWaitReason, reconcileSessionWaitState } from "./session-wait-state";
+import {
+  editSessionMessageHistory,
+  deleteSessionMessageHistory,
+  type SessionMessageTarget,
+  type SessionMessageTab,
+} from "./session-message-edit";
 
 export type { PermissionScope } from "./settings";
 export type {
@@ -1820,8 +1827,9 @@ ${agentInstructions}
         this.isContinuePrompt(userPrompt) &&
         !hasUserPermissionReplies(userPrompt) &&
         this.getQueuePausedReason(sessionId) === "awaiting_user"
-      )
-        return;
+      ) {
+        throw new Error(`Cannot continue: ${getSessionWaitReason(this.getSession(sessionId)?.status)}`);
+      }
       await this.waitForSessionIdle(sessionId);
       this.resumeSession(sessionId);
       await this.activateSession(sessionId, controller, userPrompt);
@@ -2931,6 +2939,45 @@ ${agentInstructions}
     return messages;
   }
 
+  editSessionMessage(sessionId: string, target: SessionMessageTarget, tab: SessionMessageTab, text: string): void {
+    this.updateSessionMessageHistory(sessionId, (messages) => editSessionMessageHistory(messages, target, tab, text));
+  }
+
+  deleteSessionMessage(sessionId: string, target: SessionMessageTarget): void {
+    this.updateSessionMessageHistory(sessionId, (messages) => deleteSessionMessageHistory(messages, target));
+  }
+
+  private updateSessionMessageHistory(
+    sessionId: string,
+    update: (messages: SessionMessage[]) => SessionMessage[]
+  ): void {
+    if (!this.getSession(sessionId)) throw new Error("Session was not found.");
+    if (this.isSessionRunning(sessionId)) throw new Error("Wait for the session to finish before editing messages.");
+    this.replaceSessionHistory(sessionId, update(this.listSessionMessages(sessionId)));
+  }
+
+  private replaceSessionHistory(
+    sessionId: string,
+    messages: SessionMessage[],
+    state?: Pick<SessionEntry, "status" | "failReason" | "askPermissions" | "toolCalls" | "processes">
+  ): void {
+    const normalized = messages.map((message) => this.normalizeSessionMessage(message));
+    this.saveSessionMessages(sessionId, normalized);
+    this.requestUsageAnchors.delete(sessionId);
+    clearSessionState(sessionId);
+    rebuildSessionStateFromHistory(sessionId, normalized);
+    const latestAssistant = [...normalized].reverse().find((message) => message.role === "assistant");
+    const params = latestAssistant?.messageParams as { reasoning_content?: string } | null | undefined;
+    this.updateSessionEntry(sessionId, (entry) => ({
+      ...entry,
+      ...(state ?? reconcileSessionWaitState(entry, normalized)),
+      assistantReply: latestAssistant?.content ?? null,
+      assistantThinking: typeof params?.reasoning_content === "string" ? params.reasoning_content : null,
+      assistantRefusal: null,
+      updateTime: new Date().toISOString(),
+    }));
+  }
+
   listUndoTargets(sessionId: string): UndoTarget[] {
     const checkpoints = new Map<string, boolean>();
     return this.listSessionMessages(sessionId)
@@ -2960,26 +3007,13 @@ ${agentInstructions}
           .filter((message) => !message.meta?.isSummary)
           .map((message) => (message.compacted ? { ...message, compacted: false, updateTime: now } : message))
       : precedingMessages;
-    this.saveSessionMessages(sessionId, keptMessages);
-    this.requestUsageAnchors.delete(sessionId);
-    const latestAssistant = [...keptMessages].reverse().find((message) => message.role === "assistant");
-    const latestAssistantParams = latestAssistant?.messageParams as
-      | { tool_calls?: unknown[]; reasoning_content?: string }
-      | null
-      | undefined;
-
-    this.updateSessionEntry(sessionId, (entry) => ({
-      ...entry,
-      assistantReply: latestAssistant?.content ?? null,
-      assistantThinking:
-        typeof latestAssistantParams?.reasoning_content === "string" ? latestAssistantParams.reasoning_content : null,
-      assistantRefusal: null,
+    this.replaceSessionHistory(sessionId, keptMessages, {
       toolCalls: null,
       status: "completed",
       failReason: null,
+      askPermissions: undefined,
       processes: null,
-      updateTime: now,
-    }));
+    });
     return keptMessages;
   }
 

@@ -462,10 +462,12 @@ async function handlePrompt(
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    postMessage({
-      type: "assistant",
-      html: renderMarkdown(`Request failed: ${message}`),
-    });
+    if (prompt === "/continue") postMessage({ type: "commandNotice", text: message });
+    else
+      postMessage({
+        type: "assistant",
+        html: renderMarkdown(`Request failed: ${message}`),
+      });
   } finally {
     if (direct) directSubmissions.delete(sessionManager);
     const sessionId = sessionManager.getActiveSessionId();

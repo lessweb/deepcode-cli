@@ -257,6 +257,10 @@ main {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
 }
+.event[aria-pressed="true"] time,
+.event[aria-pressed="true"] .label {
+  color: inherit;
+}
 .empty {
   text-align: center;
   color: var(--muted);
@@ -300,8 +304,8 @@ aside {
   display: flex;
   flex-wrap: wrap;
   gap: 2px;
-  border-bottom: 1px solid var(--border);
-  margin-top: 12px;
+  flex: 1;
+  min-width: 0;
 }
 #tabs button {
   border-radius: 0;
@@ -382,4 +386,117 @@ aside {
     grid-template-columns: 60px 80px minmax(0, 1fr);
     gap: 6px;
   }
+}
+
+.tabs-heading {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid var(--border);
+  margin-top: 12px;
+}
+.detail-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.icon-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 5px;
+}
+.icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.icon-button::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  padding: 4px 8px;
+  border: 1px solid var(--vscode-editorHoverWidget-border, #454545);
+  border-radius: 3px;
+  background: var(--vscode-editorHoverWidget-background, #252526);
+  color: var(--vscode-editorHoverWidget-foreground, #ddd);
+  font-size: 12px;
+  white-space: nowrap;
+  pointer-events: none;
+  visibility: hidden;
+}
+.icon-button:hover::after,
+.icon-button:focus-visible::after,
+.icon-button[data-feedback]::after {
+  visibility: visible;
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+#detailBody.editing {
+  display: flex;
+}
+#detailEditor {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  resize: none;
+  padding: 8px;
+  color: var(--vscode-input-foreground, #ddd);
+  background: var(--vscode-input-background, #313131);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: 12px/1.65 var(--vscode-editor-font-family, monospace);
+}
+#detailEditor:focus {
+  border-color: var(--vscode-focusBorder, #007fd4);
+  outline: 1px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: -1px;
+}
+#editActions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+#save {
+  background: var(--vscode-button-background, #007fd4);
+  color: var(--vscode-button-foreground, #fff);
+}
+#cancel {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #fff);
+}
+#editError {
+  color: var(--vscode-errorForeground, #f48771);
+  margin-top: 8px;
+}
+
+@media (max-width: 760px) {
+  aside.editing {
+    height: 70%;
+    flex-shrink: 0;
+  }
+}
+
+body.details-fullscreen > header,
+body.details-fullscreen #ledger {
+  display: none;
+}
+body.details-fullscreen #details {
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  border: 0;
 }
