@@ -17,59 +17,44 @@ function ensureLogDir(): void {
  * or response bodies.
  */
 function maskSensitive(text: string): string {
-  return (
-    text
-      // Mask Bearer tokens in Authorization headers
-      .replace(/(Authorization:\s*Bearer\s+)[^\s\r\n]+/gi, "$1***MASKED***")
-      // Mask "apiKey" or "api_key" values in JSON-like strings
-      .replace(/((?:api[Kk]ey|api_key|secret)\s*[:=]\s*"?)[^",}\s]+/gi, "$1***MASKED***")
-  );
+  return text
+    .replace(/(Authorization:\s*(?:Bearer\s+)?)[^\s\r\n]+/gi, "$1***MASKED***")
+    .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, "sk-***MASKED***")
+    .replace(/((?:api[Kk]ey|api_key|secret|token|authorization)\s*[:=]\s*"?)[^",}\s]+/gi, "$1***MASKED***");
 }
 
-const CONTENT_TRUNCATE_PREVIEW = 100;
+const MAX_STRING_LENGTH = 500;
+const MAX_LOG_LINE_CHARS = 32_000;
+const MAX_ENTRIES = 50;
+
+function truncateString(value: string): string {
+  const masked = maskSensitive(value);
+  if (masked.length <= MAX_STRING_LENGTH) {
+    return masked;
+  }
+  return `${masked.slice(0, MAX_STRING_LENGTH)}...(total ${masked.length} chars)`;
+}
 
 /**
- * Truncate a content string for logging: keep a short prefix and append the
- * total length so the payload structure is preserved while content bloat is
- * avoided.
+ * Deep-clone a payload, masking and truncating every string value. This keeps
+ * the structure for debugging without logging full prompts, tool arguments, or
+ * response bodies.
  */
-function truncateContent(value: string): string {
-  if (value.length <= CONTENT_TRUNCATE_PREVIEW) {
+function sanitizePayload(value: unknown): unknown {
+  if (typeof value === "string") {
+    return truncateString(value);
+  }
+  if (!value || typeof value !== "object") {
     return value;
   }
-  return `${value.slice(0, CONTENT_TRUNCATE_PREVIEW)}...(total ${value.length} chars)`;
-}
-
-/**
- * Deep-clone a request payload, only truncating `content` fields whose value
- * is a string.  Every other field is kept exactly as-is so the logged request
- * mirrors the original API payload (no fields added or removed).
- */
-function sanitizeRequestPayload(request: Record<string, unknown>): Record<string, unknown> {
-  function walk(value: unknown): unknown {
-    if (!value || typeof value !== "object") {
-      return value;
-    }
-
-    if (Array.isArray(value)) {
-      return value.map(walk);
-    }
-
-    const record = value as Record<string, unknown>;
-    const result: Record<string, unknown> = {};
-
-    for (const [key, val] of Object.entries(record)) {
-      if (key === "content" && typeof val === "string") {
-        result[key] = truncateContent(val);
-      } else {
-        result[key] = walk(val);
-      }
-    }
-
-    return result;
+  if (Array.isArray(value)) {
+    return value.map(sanitizePayload);
   }
-
-  return walk(request) as Record<string, unknown>;
+  const result: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(value)) {
+    result[key] = sanitizePayload(val);
+  }
+  return result;
 }
 
 export type ApiErrorLogEntry = {
@@ -99,18 +84,30 @@ export function logApiError(entry: ApiErrorLogEntry): void {
       model: entry.model,
       baseURL: entry.baseURL,
       error: sanitizeError(entry.error),
-      request: sanitizeRequestPayload(entry.request),
+      request: sanitizePayload(entry.request),
     };
 
     if (entry.response !== undefined) {
-      logLine.response = typeof entry.response === "string" ? maskSensitive(entry.response) : entry.response;
+      logLine.response = sanitizePayload(entry.response);
     }
 
-    const newLine = JSON.stringify(logLine) + "\n";
-    fs.appendFileSync(ERROR_LOG_PATH, newLine, "utf8");
+    let newLine = JSON.stringify(logLine);
+    if (newLine.length > MAX_LOG_LINE_CHARS) {
+      newLine = JSON.stringify({
+        timestamp: entry.timestamp,
+        location: entry.location,
+        requestId: entry.requestId,
+        sessionId: entry.sessionId,
+        model: entry.model,
+        baseURL: entry.baseURL,
+        error: sanitizeError(entry.error),
+        truncated: true,
+        note: `entry exceeded ${MAX_LOG_LINE_CHARS} chars`,
+      });
+    }
+    fs.appendFileSync(ERROR_LOG_PATH, `${newLine}\n`, "utf8");
 
     // Keep only the last N entries
-    const MAX_ENTRIES = 20;
     const raw = fs.readFileSync(ERROR_LOG_PATH, "utf8");
     const lines = raw.split("\n").filter((line) => line.trim().length > 0);
     if (lines.length > MAX_ENTRIES) {
@@ -124,8 +121,8 @@ export function logApiError(entry: ApiErrorLogEntry): void {
 function sanitizeError(error: LlmErrorDetails): LlmErrorDetails {
   return {
     ...error,
-    message: maskSensitive(error.message),
-    stack: error.stack ? maskSensitive(error.stack) : undefined,
+    message: truncateString(error.message),
+    stack: error.stack ? truncateString(error.stack) : undefined,
     causes: error.causes?.map(sanitizeError),
   };
 }
