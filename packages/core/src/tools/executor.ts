@@ -100,6 +100,28 @@ export class ToolExecutor {
     this.toolHandlers.set("UpdatePlan", handleUpdatePlanTool);
     this.toolHandlers.set("UnderstandImage", handleUnderstandImageTool);
     this.toolHandlers.set("WebSearch", handleWebSearchTool);
+    this.toolHandlers.set("SearchMcpTools", async (args) => {
+      const query = typeof args.query === "string" ? args.query : "";
+      if (!query.trim()) {
+        return { ok: false, name: "SearchMcpTools", error: "query is required" };
+      }
+      const requestedLimit = typeof args.limit === "number" ? Math.trunc(args.limit) : 8;
+      const limit = Math.min(Math.max(1, requestedLimit), 25);
+      const matches = this.mcpManager?.searchMcpTools(query, limit) ?? [];
+      return {
+        ok: true,
+        name: "SearchMcpTools",
+        output: JSON.stringify(
+          {
+            count: matches.length,
+            catalog_size: this.mcpManager?.listMcpToolNames().length ?? 0,
+            tools: matches,
+          },
+          null,
+          2
+        ),
+      };
+    });
   }
 
   private parseToolCall(toolCall: unknown): ToolCall | null {

@@ -330,6 +330,47 @@ export class McpManager {
     return name.startsWith("mcp__");
   }
 
+  /** Names only — the compact catalog used when deferred MCP loading is on. */
+  listMcpToolNames(): string[] {
+    return this.tools.map((tool) => tool.namespacedName);
+  }
+
+  /**
+   * Search the MCP tool catalog and return full schemas for the best matches.
+   *
+   * Deferred loading exists so a large MCP fleet does not spend the whole
+   * context window on tool definitions up front: the model gets names first and
+   * pulls the schema for the few tools it actually needs. Execution is
+   * unaffected — `executeMcpTool` resolves by name, not by what was advertised.
+   */
+  searchMcpTools(
+    query: string,
+    limit = 8
+  ): Array<{ name: string; description: string; parameters: Record<string, unknown> }> {
+    const terms = query.toLowerCase().split(/\s+/).filter(Boolean);
+    const scored = this.tools
+      .map((tool) => {
+        const haystack =
+          `${tool.namespacedName} ${tool.serverName} ${tool.originalName} ${tool.definition.description ?? ""}`.toLowerCase();
+        const score = terms.reduce((total, term) => total + (haystack.includes(term) ? 1 : 0), 0);
+        return { tool, score };
+      })
+      .filter((entry) => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(1, limit));
+
+    return scored.map(({ tool }) => ({
+      name: tool.namespacedName,
+      description: this.buildMcpToolDescription(tool),
+      parameters: {
+        type: "object",
+        properties: tool.definition.inputSchema.properties,
+        required: tool.definition.inputSchema.required,
+        additionalProperties: false,
+      },
+    }));
+  }
+
   async executeMcpTool(
     name: string,
     args: Record<string, unknown>,

@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 import { test } from "node:test";
-import { getCompletedProposedPlan, PLAN_IMPLEMENTATION_CHOICES } from "../common/plan-implementation";
+import {
+  getCompletedProposedPlan,
+  persistProposedPlan,
+  PLAN_IMPLEMENTATION_CHOICES,
+} from "../common/plan-implementation";
 
 test("plan choices have a shared order and labels", () => {
   assert.deepEqual(PLAN_IMPLEMENTATION_CHOICES, [
@@ -21,4 +28,24 @@ test("only a completed Plan request with a complete non-empty plan triggers the 
   for (const text of [null, "", "No plan", "<proposed_plan>Partial", "<proposed_plan>\n </proposed_plan>"]) {
     assert.equal(getCompletedProposedPlan(true, "completed", text), null);
   }
+});
+
+test("a finished plan is persisted under .deepcode/plans so it outlives the turn", () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-plan-"));
+  try {
+    const relative = persistProposedPlan(root, "# Plan\n\n- Verify the change\n");
+    assert.ok(relative, "expected a relative path back");
+    assert.match(relative, /^\.deepcode\/plans\/.+\.md$/);
+
+    const written = fs.readFileSync(path.join(root, relative), "utf8");
+    assert.equal(written, "# Plan\n\n- Verify the change\n");
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("plan persistence is best-effort and never throws", () => {
+  // No project root, or an empty plan, is a no-op rather than an error.
+  assert.equal(persistProposedPlan("", "# Plan"), null);
+  assert.equal(persistProposedPlan("/tmp", "   "), null);
 });

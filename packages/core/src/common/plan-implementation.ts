@@ -1,3 +1,6 @@
+import * as fs from "fs";
+import * as path from "path";
+
 export type PlanImplementationChoice = "implement" | "clear-context" | "stay" | "default";
 
 export const PLAN_IMPLEMENTATION_CHOICES: Array<{ value: PlanImplementationChoice; label: string }> = [
@@ -37,4 +40,32 @@ export function getCompletedProposedPlan(
   reply: string | null
 ): string | null {
   return planMode && status === "completed" ? extractProposedPlan(reply) : null;
+}
+
+/**
+ * Persist a finished plan so it survives the turn that produced it.
+ *
+ * Plan content otherwise exists only in the assistant message: a compaction,
+ * an `/undo`, or a resume in a new session loses it, and the user cannot hand
+ * it to another engineer. Writing it to `.deepcode/plans/` makes the plan a
+ * real artifact without changing how approval works (the `<proposed_plan>`
+ * block still drives the chooser).
+ *
+ * Best-effort by design: persistence must never fail a turn, so every error is
+ * swallowed and reported as `null`.
+ */
+export function persistProposedPlan(projectRoot: string, plan: string): string | null {
+  if (!projectRoot || !plan.trim()) {
+    return null;
+  }
+  try {
+    const plansDir = path.join(projectRoot, ".deepcode", "plans");
+    fs.mkdirSync(plansDir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const fileName = `${stamp}-plan.md`;
+    fs.writeFileSync(path.join(plansDir, fileName), `${plan.trim()}\n`, "utf8");
+    return path.posix.join(".deepcode", "plans", fileName);
+  } catch {
+    return null;
+  }
 }
