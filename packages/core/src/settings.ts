@@ -4,6 +4,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { compactBudget, validateCompactRetention } from "./common/compaction";
+import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from "./common/llm-retry";
 import { normalizePlusApiKey } from "./common/plus-subscription";
 
 export type DeepcodingEnv = Record<string, string | undefined> & {
@@ -103,6 +104,7 @@ export type DeepcodingSettings = {
   env?: DeepcodingEnv;
   contextWindow?: number | string;
   autoCompactWindow?: number | string;
+  streamIdleTimeoutMs?: number;
   retainRatio?: number;
   retainTokens?: number;
   model?: string;
@@ -136,6 +138,7 @@ export type ResolvedDeepcodingSettings = {
   model: string;
   contextWindow: number;
   autoCompactWindow: number;
+  streamIdleTimeoutMs: number;
   retainRatio?: number;
   retainTokens?: number;
   temperature?: number;
@@ -177,6 +180,8 @@ export const DEFAULT_FILE_REFRESH_MARGIN_SECONDS = 60 * 60;
 export const DEFAULT_FILE_QUOTA_CLEANUP_BATCH = 100;
 export const DEFAULT_MAX_REQUEST_FILES_BYTES = 128 * 1024 * 1024;
 export const MAX_FILES_API_TIMEOUT_MS = 10 * 60 * 1000;
+export const MIN_STREAM_IDLE_TIMEOUT_MS = 30_000;
+export const MAX_STREAM_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 
 export function getDefaultContextWindow(model: string): number {
   return DEEPSEEK_V4_MODELS.has(model) ? DEEPSEEK_V4_CONTEXT_WINDOW : DEFAULT_CONTEXT_WINDOW;
@@ -799,6 +804,24 @@ export function resolveSettingsSources(
   const retainTokens = retention?.retainTokens;
   const retainRatio = retainTokens === undefined ? (retention?.retainRatio ?? 0.16) : undefined;
   compactBudget(contextWindow, autoCompactWindow, { retainRatio, retainTokens });
+  const streamIdleTimeoutMs = choose(
+    "streamIdleTimeoutMs",
+    [
+      [
+        "project.streamIdleTimeoutMs",
+        parseIntegerInRange(
+          projectSettings?.streamIdleTimeoutMs,
+          MIN_STREAM_IDLE_TIMEOUT_MS,
+          MAX_STREAM_IDLE_TIMEOUT_MS
+        ),
+      ],
+      [
+        "user.streamIdleTimeoutMs",
+        parseIntegerInRange(userSettings?.streamIdleTimeoutMs, MIN_STREAM_IDLE_TIMEOUT_MS, MAX_STREAM_IDLE_TIMEOUT_MS),
+      ],
+    ],
+    DEFAULT_STREAM_IDLE_TIMEOUT_MS
+  );
 
   const thinkingEnabled = choose(
     "thinkingEnabled",
@@ -1039,6 +1062,7 @@ export function resolveSettingsSources(
     model,
     contextWindow,
     autoCompactWindow,
+    streamIdleTimeoutMs,
     retainRatio,
     retainTokens,
     temperature,

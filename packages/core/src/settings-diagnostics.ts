@@ -154,6 +154,7 @@ export function inspectSettings(options: {
       "env",
       "contextWindow",
       "autoCompactWindow",
+      "streamIdleTimeoutMs",
       "retainRatio",
       "retainTokens",
       "model",

@@ -4062,7 +4062,7 @@ test("SessionManager treats a clean EOF without a terminal chunk as a disconnect
   assert.equal(retryError, "Model stream disconnected before completion.");
 });
 
-test("SessionManager retries a stream after sixty seconds without data", async (t) => {
+test("SessionManager retries a stream after the configured idle timeout", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const controller = new AbortController();
   let retryError = "";
@@ -4083,7 +4083,7 @@ test("SessionManager retries a stream after sixty seconds without data", async (
   const manager = new SessionManager({
     projectRoot: process.cwd(),
     createOpenAIClient: () => ({ client: client as any, model: "test-model", thinkingEnabled: false }),
-    getResolvedSettings: () => ({ model: "test-model" }),
+    getResolvedSettings: () => ({ model: "test-model", streamIdleTimeoutMs: 90_000 }),
     renderMarkdown: (text) => text,
     onAssistantMessage: () => {},
     onLlmRetry: (event) => {
@@ -4098,10 +4098,10 @@ test("SessionManager retries a stream after sixty seconds without data", async (
     { signal: controller.signal }
   );
   await Promise.resolve();
-  t.mock.timers.tick(60_000);
+  t.mock.timers.tick(90_000);
 
   await assert.rejects(responsePromise, (error: Error) => error.name === "AbortError");
-  assert.equal(retryError, "Model stream was idle for 60 seconds.");
+  assert.equal(retryError, "Model stream was idle for 90 seconds.");
 });
 
 test("SessionManager retains an uncommitted prompt in the queue when skill matching is cancelled", async () => {

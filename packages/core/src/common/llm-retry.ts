@@ -1,7 +1,9 @@
 import { getLlmErrorDetails } from "./llm-error";
 
 export const MAX_LLM_RETRIES = 5;
-export const LLM_STREAM_IDLE_TIMEOUT_MS = 60_000;
+// Thinking models can stay silent for minutes; 60s caused false-positive retries.
+export const DEFAULT_STREAM_IDLE_TIMEOUT_MS = 180_000;
+export const LLM_STREAM_IDLE_TIMEOUT_MS = DEFAULT_STREAM_IDLE_TIMEOUT_MS;
 
 const BASE_RETRY_DELAY_MS = 800;
 const RETRYABLE_NETWORK_CODES = new Set([
@@ -18,8 +20,8 @@ const RETRYABLE_NETWORK_CODES = new Set([
 ]);
 
 export class LlmStreamIdleTimeoutError extends Error {
-  constructor() {
-    super(`Model stream was idle for ${LLM_STREAM_IDLE_TIMEOUT_MS / 1000} seconds.`);
+  constructor(timeoutMs: number = LLM_STREAM_IDLE_TIMEOUT_MS) {
+    super(`Model stream was idle for ${Math.round(timeoutMs / 1000)} seconds.`);
     this.name = "LlmStreamIdleTimeoutError";
   }
 }

@@ -31,6 +31,7 @@ function createSettings(
     model: "test-model",
     contextWindow: 256 * 1024,
     autoCompactWindow: 128 * 1024,
+    streamIdleTimeoutMs: 180_000,
     thinkingEnabled: false,
     reasoningEffort: "high",
     debugLogEnabled: false,
