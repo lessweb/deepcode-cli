@@ -105,3 +105,36 @@ test("PromptInput uses the same Chinese wrapping in highlighted history previews
   await h.send("\r");
   assert.equal(submissions[0]?.text, text);
 });
+
+for (const incrementalRendering of [false, true]) {
+  for (const lines of [12, 21, 60]) {
+    test(`PromptInput keeps the cursor on the input after expanding and clearing ${lines} lines (incremental=${incrementalRendering})`, async (t) => {
+      const props = { ...inputProps([]), screenWidth: 160 };
+      const h = await terminal(t, React.createElement(PromptInput, props), props.screenWidth, {
+        rows: 24,
+        incrementalRendering,
+      });
+      const screen = h.screen!;
+      function assertCursorAtInput(column: number) {
+        const buffer = screen.buffer.active;
+        const row = Array.from({ length: screen.rows }, (_, y) =>
+          buffer.getLine(buffer.viewportY + y)?.translateToString(true)
+        ).findIndex((line) => line === ">" || line?.startsWith("> "));
+        assert.ok(row >= 0, "prompt must be visible");
+        assert.equal(buffer.cursorY, row, "cursor must stay on the prompt row");
+        assert.equal(buffer.cursorX, column);
+      }
+
+      assertCursorAtInput(2);
+      const text = Array.from({ length: lines }, (_, i) => `pasted line ${i + 1}`).join("\n");
+      await h.send(`\x1b[200~${text}\x1b[201~`);
+      await h.send("\x0f"); // Ctrl+O: expand past the terminal height.
+      await h.send("\x15"); // Ctrl+U: return to an empty, single-line prompt.
+      assertCursorAtInput(2);
+      await h.send("hello");
+      assertCursorAtInput(7);
+      await h.send("\x1b[D");
+      assertCursorAtInput(6);
+    });
+  }
+}

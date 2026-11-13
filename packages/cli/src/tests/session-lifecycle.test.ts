@@ -19,7 +19,8 @@ function deferred() {
 
 async function harness(
   t: TestContext,
-  respond: (messages: SessionMessage[], signal: AbortSignal) => unknown | Promise<unknown>
+  respond: (messages: SessionMessage[], signal: AbortSignal) => unknown | Promise<unknown>,
+  options?: { rows: number; incrementalRendering?: boolean }
 ) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "deepcode-session-lifecycle-"));
   const originalEnv = process.env;
@@ -44,7 +45,7 @@ async function harness(
     });
   });
   t.mock.method(SessionManager.prototype, "listSkills", async () => []);
-  const h = await terminal(t, React.createElement(App, { projectRoot: root }), 100);
+  const h = await terminal(t, React.createElement(App, { projectRoot: root }), 100, options);
   const manager = ref.current!;
   t.after(async () => {
     const id = manager.getActiveSessionId();
@@ -124,6 +125,50 @@ for (const next of ["Use the default settings.", "/continue"]) {
 }
 
 for (const action of ["/exit", "Ctrl+D twice"] as const) {
+  for (const { incrementalRendering, running } of [false, true].flatMap((incrementalRendering) =>
+    [false, true].map((running) => ({ incrementalRendering, running }))
+  )) {
+    test(`${action} removes the exit notice (incremental=${incrementalRendering}, running=${running})`, async (t) => {
+      const cleanup = deferred();
+      t.after(() => cleanup.resolve());
+      const h = await harness(
+        t,
+        async (_messages, signal) => {
+          await cleanup.promise;
+          signal.throwIfAborted();
+        },
+        { rows: 40, incrementalRendering }
+      );
+      const screen = h.screen!;
+      const contents = () =>
+        Array.from({ length: screen.buffer.active.length }, (_, y) =>
+          screen.buffer.active.getLine(y)?.translateToString(true)
+        ).join("\n");
+      // Include direct process output in the same terminal, as in the real CLI.
+      t.mock.method(process.stdout, "write", (chunk: string | Uint8Array) => {
+        screen.write(chunk);
+        return true;
+      });
+      if (running) await h.submit("keep working");
+      if (action === "/exit") await h.submit("/exit");
+      else {
+        await h.send("\x04");
+        await h.send("\x04");
+      }
+      if (running) assert.match(contents(), /Exiting…/);
+      cleanup.resolve();
+      await h.waitUntilExit();
+      await new Promise<void>((resolve) => screen.write("", resolve));
+      assert.doesNotMatch(contents(), /Exiting…/);
+      if (action === "/exit") assert.match(contents(), /Goodbye!/);
+      if (running) {
+        assert.match(contents(), /keep working/);
+        assert.match(contents(), /deepcode --resume/);
+      }
+      assert.equal(h.rawMode(), false);
+    });
+  }
+
   test(`${action} aborts the running session and waits for cleanup before exiting`, { timeout: 10000 }, async (t) => {
     const entered = deferred();
     const cleanup = deferred();

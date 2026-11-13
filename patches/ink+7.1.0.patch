@@ -1,0 +1,14 @@
+diff --git a/node_modules/ink/build/ink.js b/node_modules/ink/build/ink.js
+--- a/node_modules/ink/build/ink.js
++++ b/node_modules/ink/build/ink.js
+@@ -765,7 +765,9 @@
+             if (sync) {
+                 this.options.stdout.write(bsu);
+             }
+-            this.options.stdout.write(ansiEscapes.clearTerminal + this.fullStaticOutput + output);
++            // Match log.sync's trailing newline when shrinking below fullscreen,
++            // so its cursor suffix starts from the actual bottom of the output.
++            this.options.stdout.write(ansiEscapes.clearTerminal + this.fullStaticOutput + outputToRender);
+             this.lastOutput = output;
+             this.lastOutputToRender = outputToRender;
+             this.lastOutputHeight = outputHeight;

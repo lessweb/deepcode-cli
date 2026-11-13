@@ -31,7 +31,8 @@
     "release:version": "node scripts/version.js",
     "prepare:package": "node scripts/prepare-package.js",
     "prepare:vscode": "node scripts/prepare-vscode.js",
-    "prepare": "husky && npm run build && npm run bundle"
+    "prepare": "husky && npm run build && npm run bundle",
+    "postinstall": "patch-package --error-on-fail"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.4",
@@ -39,6 +40,7 @@
     "@types/node": "^25.6.0",
     "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.2.14",
+    "@xterm/headless": "^6.0.0",
     "esbuild": "^0.28.0",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
@@ -46,6 +48,7 @@
     "glob": "^13.0.6",
     "husky": "^9.1.7",
     "lint-staged": "^17.0.4",
+    "patch-package": "^8.0.1",
     "prettier": "^3.8.3",
     "react-devtools-core": "^7.0.1",
     "tsx": "^4.21.0",

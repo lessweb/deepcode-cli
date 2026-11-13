@@ -89,7 +89,7 @@ function App({
   forkSessionId,
   onRestart,
 }: AppProps): React.ReactElement {
-  const { exit } = useApp();
+  const { exit, waitUntilRenderFlush } = useApp();
   const { stdout, write } = useStdout();
   const terminalTitle = useMemo(() => createTerminalTitle(stdout), [stdout]);
   const { columns, rows } = useWindowSize();
@@ -131,6 +131,7 @@ function App({
   } | null>(null);
   const [dismissedQuestionIds, setDismissedQuestionIds] = useState<Set<string>>(() => new Set());
   const [isExiting, setIsExiting] = useState(false);
+  const [exitSummary, setExitSummary] = useState<{ showCommand: boolean; showSummary: boolean } | null>(null);
   const exitingRef = useRef(false);
   const [showWelcome, setShowWelcome] = useState(true);
   const [welcomeNonce, setWelcomeNonce] = useState(0);
@@ -438,44 +439,52 @@ function App({
       } finally {
         clearTimeout(timer);
       }
-      setTimeout(() => {
-        try {
-          const activeSessionId = sessionManager.getActiveSessionId();
-          const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
-          const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
-          const rateLimitHint = buildPluginRateLimitHintText(session);
-
-          writeStdoutLine("\n");
-          if (showCommand) {
-            writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
-            writeStdoutLine("\n");
-          }
-          if (showSummary) {
-            const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
-            writeStdoutLine(summary);
-            writeStdoutLine("\n");
-          }
-          if (resumeHint) {
-            writeStdoutLine(resumeHint);
-            if (rateLimitHint) {
-              writeStdoutLine(rateLimitHint);
-            }
-            writeStdoutLine("\n");
-          }
-        } catch {
-          // Printing the summary is best effort during shutdown.
-        }
-        try {
-          sessionManager.dispose();
-        } catch {
-          // Remaining handles are closed when the CLI process exits.
-        } finally {
-          exit();
-        }
-      }, 0);
+      setExitSummary({ showCommand, showSummary });
     },
-    [exit, sessionManager]
+    [sessionManager]
   );
+
+  useEffect(() => {
+    if (!exitSummary) return;
+    const { showCommand, showSummary } = exitSummary;
+    void (async () => {
+      try {
+        // Remove the transient notice before writing permanent output outside Ink.
+        await waitUntilRenderFlush();
+        const activeSessionId = sessionManager.getActiveSessionId();
+        const session = activeSessionId ? sessionManager.getSession(activeSessionId) : null;
+        const resumeHint = buildResumeHintText(activeSessionId ?? undefined);
+        const rateLimitHint = buildPluginRateLimitHintText(session);
+
+        writeStdoutLine("\n");
+        if (showCommand) {
+          writeStdoutLine(chalk.rgb(34, 154, 195)(" > /exit "));
+          writeStdoutLine("\n");
+        }
+        if (showSummary) {
+          const summary = buildExitSummaryText({ session, sessionId: activeSessionId ?? undefined });
+          writeStdoutLine(summary);
+          writeStdoutLine("\n");
+        }
+        if (resumeHint) {
+          writeStdoutLine(resumeHint);
+          if (rateLimitHint) {
+            writeStdoutLine(rateLimitHint);
+          }
+          writeStdoutLine("\n");
+        }
+      } catch {
+        // Printing the summary is best effort during shutdown.
+      }
+      try {
+        sessionManager.dispose();
+      } catch {
+        // Remaining handles are closed when the CLI process exits.
+      } finally {
+        exit();
+      }
+    })();
+  }, [exitSummary, exit, sessionManager, waitUntilRenderFlush]);
 
   const handlePrompt = useCallback(
     async (submission: PromptSubmission) => {
@@ -1364,7 +1373,9 @@ function App({
         </Box>
       ) : null}
       {isExiting ? (
-        <Text dimColor>Exiting…</Text>
+        exitSummary ? null : (
+          <Text dimColor>Exiting…</Text>
+        )
       ) : showProcessStdout ? (
         <ProcessStdoutView
           key={activeSessionId}

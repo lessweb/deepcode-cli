@@ -38,7 +38,7 @@
     "chalk": "^5.6.2",
     "gradient-string": "^3.0.0",
     "ignore": "^7.0.5",
-    "ink": "^7.0.4",
+    "ink": "7.1.0",
     "ink-gradient": "^4.0.1",
     "react": "^19.2.5",
     "read-package-up": "^12.0.0",
