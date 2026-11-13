@@ -66,6 +66,8 @@ export type PromptToolOptions = {
   multimodal?: MultimodalMode;
   webSearchEnabled?: boolean;
   nonInteractive?: boolean;
+  /** Advertise SearchMcpTools instead of every MCP tool schema (token savings). */
+  deferredMcpTools?: boolean;
 };
 
 const DEFAULT_SKILL_RESOURCE_FILE_LIMIT = 50;
@@ -103,6 +105,7 @@ function readToolDocs(extensionRoot: string, options: PromptToolOptions = {}): s
   const docs = entries
     .filter((entry) => entry.endsWith(".md") || entry.endsWith(".md.ejs"))
     .filter((entry) => options.nonInteractive !== true || entry !== "ask-user-question.md")
+    .filter((entry) => options.deferredMcpTools === true || entry !== "search-mcp-tools.md")
     .sort()
     .map((entry) => {
       const fullPath = path.join(toolsDir, entry);
@@ -662,6 +665,32 @@ export function getTools(_options: PromptToolOptions = {}, externalTools: ToolDe
       },
     },
   });
+
+  if (_options.deferredMcpTools === true) {
+    tools.push({
+      type: "function",
+      function: {
+        name: "SearchMcpTools",
+        description:
+          "Look up an MCP tool's full schema before calling it. MCP tool names are listed in a system message but their schemas are not loaded up front, so call this with a natural-language description or tool name, then call the returned `name` exactly as given.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "What you want to do, or part of the tool name (e.g. 'weather forecast', 'fetch_sports').",
+            },
+            limit: {
+              type: "number",
+              description: "Maximum number of tools to return (default 8).",
+            },
+          },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+    });
+  }
 
   if (supportsMultimodal(_options.model ?? "", _options.multimodal)) {
     tools.push({

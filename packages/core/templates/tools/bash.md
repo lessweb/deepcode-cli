@@ -1,6 +1,6 @@
 ## Bash
 
-Executes a given bash command. Working directory persists between commands; shell state (everything else) does not. The shell environment is initialized from the user's profile (bash or zsh).
+Executes a given bash command. Working directory persists between commands; shell state (everything else) does not. The shell environment is initialized from the user's profile (bash or zsh). Prefer absolute paths — `cd` in a compound command can trigger a permission prompt. Command output is shown to you, not reliably to the user: if something matters to the user, say it in your reply.
 
 On Windows, Bash runs through Git Bash. Use POSIX commands and quote Windows paths carefully.
 
@@ -35,6 +35,8 @@ Usage notes:
 - When using `run_in_background`, do NOT add `&` to the command. Output is written to a log file.
 - Before your final response, stop background tasks that has not reported a completed state, unless the user explicitly asks to keep it running.
 - To stop a background command, use the `stopCommand` returned in the tool result metadata.
+- Coverage — silence is not success. When you wait on a background job, whatever you watch or grep for must match every terminal state, not just the happy path. A check that looks only for the success marker stays silent through a crash, a hang, or an unexpected exit, and silence is indistinguishable from "still running". Before starting the wait, ask: if this process failed right now, would anything tell me? If not, widen the filter to cover the failure signatures too.
+- Prefer a command that exits when the condition is met (e.g. `until grep -q "Ready in" dev.log; do sleep 0.5; done`) over polling in a loop; one exit gives you one completion notification.
 - Use `sideEffects: []` only for commands that do not read, write, delete, query Git history, mutate Git history, or access the network, such as `date` or `node --version`.
 - Use `*-out-cwd` when the command accesses paths outside the current workspace and additional working dirs. For example, `cat /etc/hosts` requires `["read-out-cwd"]`.
 - Treat the root path and additional working dirs from the runtime context as `*-cwd`.
@@ -60,6 +62,13 @@ Usage notes:
   <bad-example>
   cd /foo/bar && pytest tests
   </bad-example>
+
+# Git
+
+- Interactive flags (`-i`, e.g. `git rebase -i`, `git add -i`) are not supported in this environment.
+- Use the `gh` CLI for GitHub operations (PRs, issues, API) when it is installed.
+- GitHub notifies the owner of any `@name` written in a PR, issue, or comment. Write a bare `@name` only for a real login you mean to notify. Put roles, placeholders, and code (`@human`, `@reviewer`, `@types/node`) in backticks or drop the `@`, even when copied from project files.
+- Commit or push only when the user asks. If on the default branch, branch first.
 
 ```json
 {

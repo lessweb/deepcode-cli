@@ -1,5 +1,5 @@
 import { isBusyCommandAllowed } from "../core/slash-commands";
-import { getCompletedProposedPlan } from "@vegamo/deepcode-core/common/plan-implementation";
+import { getCompletedProposedPlan, persistProposedPlan } from "@vegamo/deepcode-core/common/plan-implementation";
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useApp, useStdout, useWindowSize } from "ink";
 import chalk from "chalk";
@@ -707,6 +707,11 @@ function App({
           completedSession?.status,
           completedSession?.assistantReply ?? null
         );
+        if (proposedPlan) {
+          // Persist before opening the chooser so the plan survives a compaction,
+          // an undo, or a later session. Best-effort: never fails the turn.
+          persistProposedPlan(projectRoot, proposedPlan);
+        }
         setPendingPlanImplementation(proposedPlan);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);

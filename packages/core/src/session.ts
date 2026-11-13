@@ -534,14 +534,31 @@ export class SessionManager {
 
   async initMcpServers(servers?: Record<string, McpServerConfig>): Promise<void> {
     this.mcpManager.setOnToolsListChanged(() => {
-      this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
+      this.refreshMcpToolDefinitions();
     });
     // 设置状态变更回调，通知 UI 更新
     this.mcpManager.setOnStatusChanged(() => {
       this.onMcpStatusChanged?.();
     });
     await this.mcpManager.initialize(servers);
-    this.mcpToolDefinitions = this.mcpManager.getMcpToolDefinitions();
+    this.refreshMcpToolDefinitions();
+  }
+
+  /**
+   * Deferred MCP tool loading: advertise names only, schemas on demand.
+   *
+   * A large MCP fleet spends a lot of the context window on tool definitions
+   * before the conversation even starts. When this is on, `mcpToolDefinitions`
+   * stays empty and the model uses `SearchMcpTools` to pull the schema for the
+   * few tools it needs. Execution is unaffected — tools resolve by name.
+   */
+  private isDeferredMcpToolsEnabled(): boolean {
+    const raw = process.env.DEEPCODE_DEFERRED_MCP_TOOLS;
+    return raw === "1" || raw === "true";
+  }
+
+  private refreshMcpToolDefinitions(): void {
+    this.mcpToolDefinitions = this.isDeferredMcpToolsEnabled() ? [] : this.mcpManager.getMcpToolDefinitions();
   }
 
   getMcpStatus() {
@@ -1792,7 +1809,7 @@ ${agentInstructions}
     }
 
     const promptToolOptions = this.getPromptToolOptions();
-    const systemPrompt = getSystemPrompt(this.projectRoot, promptToolOptions);
+    const systemPrompt = this.buildSystemPromptWithToolCatalog();
     const systemMessage = this.buildSystemMessage(sessionId, systemPrompt);
     this.appendSessionMessage(sessionId, systemMessage);
 
@@ -2616,13 +2633,41 @@ ${agentInstructions}
     multimodal?: MultimodalMode;
     webSearchEnabled: boolean;
     nonInteractive: boolean;
+    deferredMcpTools: boolean;
   } {
     return {
       model: this.getResolvedSettings().model,
       multimodal: this.getResolvedSettings().multimodal,
       webSearchEnabled: true,
       nonInteractive: this.nonInteractive,
+      deferredMcpTools: this.isDeferredMcpToolsEnabled(),
     };
+  }
+
+  /**
+   * System prompt plus, when deferred MCP loading is on, a names-only catalog.
+   *
+   * Without the names the model has no way to know which MCP servers are
+   * connected, since their schemas were withheld from the tool list.
+   */
+  private buildSystemPromptWithToolCatalog(): string {
+    const options = this.getPromptToolOptions();
+    const base = getSystemPrompt(this.projectRoot, options);
+    if (!options.deferredMcpTools) {
+      return base;
+    }
+    const names = this.mcpManager.listMcpToolNames();
+    if (names.length === 0) {
+      return base;
+    }
+    const catalog = names.map((name) => `- \`${name}\``).join("\n");
+    return `${base}
+
+# MCP tools (schemas not loaded)
+
+${names.length} MCP tools are connected, but their parameter schemas are not loaded up front. Call \`SearchMcpTools\` with what you want to do (or part of a tool name) to fetch a schema, then call the returned tool name exactly as given. Do not guess parameter names.
+
+${catalog}`;
   }
 
   private prepareSessionMessagesForRequest(messages: SessionMessage[]): SessionMessage[] {
@@ -2640,7 +2685,7 @@ ${agentInstructions}
     const prepared = messages.slice();
     prepared[systemPromptIndex] = {
       ...prepared[systemPromptIndex],
-      content: getSystemPrompt(this.projectRoot, this.getPromptToolOptions()),
+      content: this.buildSystemPromptWithToolCatalog(),
     };
     return prepared;
   }
