@@ -84,6 +84,43 @@ MCP 工具在 Deep Code 中的命名格式为 `mcp__<服务名>__<工具名>`，
 }
 ```
 
+### You.com 联网搜索与研究
+
+通过 You.com MCP 服务器接入实时联网搜索、网页内容读取、可引用的多源研究和财经研究工具。`@youdotcom-oss/mcp` 是一个轻量 STDIO 桥接，把本地 MCP 请求转发到托管在 `https://api.you.com/mcp` 的远程服务器；首轮对话后，模型即可看到 `mcp__ydc__you-search` 等工具。
+
+```json
+{
+  "mcpServers": {
+    "ydc": {
+      "command": "npx",
+      "args": ["-y", "@youdotcom-oss/mcp"],
+      "env": {
+        "YDC_API_KEY": "ydc-...",
+        "YDC_ALLOWED_TOOLS": "you-search,you-contents,you-research,you-finance"
+      }
+    }
+  }
+}
+```
+
+如果想先体验联网搜索、不立刻注册账号，可以把 `YDC_PROFILE` 设为 `free`（免账号、免 Key，仅暴露 `you-search`，每天 100 次查询上限）：
+
+```json
+{
+  "mcpServers": {
+    "ydc": {
+      "command": "npx",
+      "args": ["-y", "@youdotcom-oss/mcp"],
+      "env": {
+        "YDC_PROFILE": "free"
+      }
+    }
+  }
+}
+```
+
+> API Key 在 https://you.com/platform 申请；可用工具集与计费规则见 https://you.com/docs/build-with-agents/mcp-server。
+
 ### 文件系统
 
 让 Deep Code 在指定目录中读写文件：
