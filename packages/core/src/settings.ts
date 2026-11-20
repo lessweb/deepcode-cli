@@ -556,7 +556,9 @@ function mergeMcpServers(
   for (const name of serverNames) {
     const userConfig = userServers[name];
     const projectConfig = projectServers[name];
-    const command = projectConfig?.command ?? userConfig?.command;
+    const projectCommand = projectConfig?.command;
+    const userCommand = userConfig?.command;
+    const command = projectCommand ?? userCommand;
     if (!command) {
       continue;
     }
@@ -571,9 +573,18 @@ function mergeMcpServers(
       ...systemEnv,
       ...systemMcpEnv,
     };
+    // `command` and `args` describe one executable: a layer that names its own
+    // command owns its argument list. Inheriting `args` from a layer that names
+    // a *different* command silently produces a pair neither layer wrote (a
+    // project-level `.cmd` shim receiving user-level `["@playwright/mcp@latest"]`
+    // -> the host starts it, it exits on the unknown argument, and the server's
+    // tools disappear without an error). Only borrow `args` across layers when
+    // both name the same command.
+    const sameCommand = projectCommand !== undefined && projectCommand === userCommand;
+    const args = projectConfig?.args ?? (projectCommand === undefined || sameCommand ? userConfig?.args : undefined);
     const config: McpServerConfig = {
       command,
-      args: projectConfig?.args ?? userConfig?.args,
+      args,
     };
     if (Object.keys(env).length > 0) {
       config.env = env;
