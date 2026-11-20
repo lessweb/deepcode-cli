@@ -558,13 +558,56 @@ test("resolveSettingsSources merges MCP env with documented priority", () => {
   );
 
   assert.equal(resolved.mcpServers?.github?.command, "python");
-  assert.deepEqual(resolved.mcpServers?.github?.args, ["user-server.js"]);
+  // `command` and `args` describe one executable, so the project-level command
+  // does not inherit the user-level args of a different binary.
+  assert.equal(resolved.mcpServers?.github?.args, undefined);
   assert.deepEqual(resolved.mcpServers?.github?.env, {
     MCP_GITHUB_PERSONAL_ACCESS_TOKEN: "system-global",
     GITHUB_PERSONAL_ACCESS_TOKEN: "system-global",
     USER_ONLY: "1",
     PROJECT_ONLY: "1",
   });
+});
+
+test("resolveSettingsSources keeps command and its args in the same layer", () => {
+  const resolved = resolveSettingsSources(
+    {
+      mcpServers: {
+        playwright: {
+          command: "npx",
+          args: ["@playwright/mcp@latest"],
+        },
+        shared: {
+          command: "npx",
+          args: ["--user-level"],
+        },
+      },
+    },
+    {
+      mcpServers: {
+        playwright: {
+          command: "/usr/local/bin/playwright-mcp",
+        },
+        shared: {
+          command: "npx",
+        },
+      },
+    },
+    {
+      model: "default-model",
+      baseURL: "https://default.example.com",
+    },
+    TEST_PROCESS_ENV
+  );
+
+  // A layer that names its own command owns the argument list: borrowing the
+  // user-level args would hand `@playwright/mcp@latest` to a different binary.
+  assert.equal(resolved.mcpServers?.playwright?.command, "/usr/local/bin/playwright-mcp");
+  assert.equal(resolved.mcpServers?.playwright?.args, undefined);
+
+  // Same command on both layers: the user-level args still apply.
+  assert.equal(resolved.mcpServers?.shared?.command, "npx");
+  assert.deepEqual(resolved.mcpServers?.shared?.args, ["--user-level"]);
 });
 
 test("resolveSettings defaults DeepSeek v4 models to thinking mode", () => {
