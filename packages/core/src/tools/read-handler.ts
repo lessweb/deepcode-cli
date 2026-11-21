@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { spawnSync } from "child_process";
 import ignore from "ignore";
 import type { ToolExecutionContext, ToolExecutionResult } from "./executor";
 import { readTextFileWithMetadata } from "../common/file-utils";
@@ -14,6 +15,8 @@ import {
 const DEFAULT_LINE_LIMIT = 2000;
 const MAX_LINE_LENGTH = 2000;
 const LINE_NUMBER_WIDTH = 6;
+// Cap for text extracted from PDFs via pdftotext (#236).
+const MAX_PDF_TEXT_CHARS = 30000;
 const DEFAULT_GITIGNORE = [
   "node_modules/",
   ".git/",
@@ -109,6 +112,21 @@ export async function handleReadTool(
         timestamp: Math.floor(stat.mtimeMs),
         isPartialView: true,
       });
+      const extracted = extractPdfText(filePath);
+      if (extracted) {
+        return {
+          ok: true,
+          name: "read",
+          output: extracted,
+          metadata: {
+            mime: "application/pdf",
+            encoding: "text",
+            bytes: buffer.length,
+            pageCount,
+            truncated: extracted.length >= MAX_PDF_TEXT_CHARS,
+          },
+        };
+      }
       return {
         ok: true,
         name: "read",
@@ -419,6 +437,26 @@ function countPdfPages(buffer: Buffer): number | null {
     const content = buffer.toString("latin1");
     const matches = content.match(/\/Type\s*\/Page\b(?!s)/g);
     return matches ? matches.length : 0;
+  } catch {
+    return null;
+  }
+}
+
+/** Extract PDF text via the external `pdftotext` binary; returns null when unavailable or empty. (#236) */
+function extractPdfText(filePath: string): string | null {
+  try {
+    const result = spawnSync("pdftotext", ["-layout", filePath, "-"], {
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+      timeout: 10000,
+    });
+    const text = result.stdout?.trim();
+    if (result.status !== 0 || !text) {
+      return null;
+    }
+    return text.length > MAX_PDF_TEXT_CHARS
+      ? `${text.slice(0, MAX_PDF_TEXT_CHARS)}\n\n[truncated: PDF text exceeds ${MAX_PDF_TEXT_CHARS} characters]`
+      : text;
   } catch {
     return null;
   }
