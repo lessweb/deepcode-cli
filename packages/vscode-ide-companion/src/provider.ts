@@ -10,7 +10,13 @@ import {
   PLAN_IMPLEMENTATION_CHOICES,
 } from "@vegamo/deepcode-core/common/plan-implementation";
 import type { SessionManager } from "@vegamo/deepcode-core";
-import type { PermissionScope, SessionMessage, SkillInfo, UserToolPermission } from "@vegamo/deepcode-core";
+import type {
+  PermissionScope,
+  SessionHistoryCursor,
+  SessionMessage,
+  SkillInfo,
+  UserToolPermission,
+} from "@vegamo/deepcode-core";
 import { prepareToolDiffContent } from "./tool-diff.js";
 import { parseUserToolPermissions, parsePermissionScopes } from "./utils.js";
 
@@ -26,6 +32,7 @@ export interface ProviderDeps {
     | "getActiveSessionId"
     | "setActiveSessionId"
     | "listSessionMessages"
+    | "readSessionHistoryPage"
     | "handleUserPrompt"
     | "interruptActiveSession"
     | "denySessionPermission"
@@ -52,6 +59,9 @@ export interface ProviderDeps {
 const compactions = new WeakMap<ProviderDeps["sessionManager"], AbortController>();
 type PendingPlan = { id: string; sessionId: string; plan: string };
 const pendingPlans = new WeakMap<ProviderDeps["sessionManager"], PendingPlan>();
+const openUndoSessions = new WeakMap<ProviderDeps["sessionManager"], string>();
+type HistoryReader = Pick<SessionManager, "readSessionHistoryPage">;
+const historyPages = new WeakMap<HistoryReader, { sessionId: string; token: string; cursor: SessionHistoryCursor }>();
 
 function sendPendingPlan(manager: ProviderDeps["sessionManager"], postMessage: PostMessageFn): void {
   const pending = pendingPlans.get(manager);
@@ -144,8 +154,15 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
   }
 
   if (msg.type === "slashCommand" && msg.command === "undo") {
+    const sessionId = sessionManager.getActiveSessionId();
+    if (sessionId) openUndoSessions.set(sessionManager, sessionId);
     postUndoState(sessionManager, postMessage);
-    postMessage({ type: "openUndo", sessionId: sessionManager.getActiveSessionId() });
+    postMessage({ type: "openUndo", sessionId });
+    return true;
+  }
+
+  if (msg.type === "closeUndo") {
+    if (openUndoSessions.get(sessionManager) === msg.sessionId) openUndoSessions.delete(sessionManager);
     return true;
   }
 
@@ -236,6 +253,31 @@ export async function handleWebviewMessage(message: unknown, deps: ProviderDeps)
     return true;
   }
 
+  if (msg.type === "loadOlderHistory") {
+    const page = historyPages.get(sessionManager);
+    if (
+      !page ||
+      page.sessionId !== msg.sessionId ||
+      page.token !== msg.token ||
+      page.sessionId !== sessionManager.getActiveSessionId()
+    )
+      return true;
+    try {
+      const older = sessionManager.readSessionHistoryPage(page.sessionId, page.cursor);
+      if (!older) {
+        refreshSessionHistory(page.sessionId, sessionManager, postMessage, renderMarkdown);
+      } else {
+        const messages = serializeSessionMessages(older.messages, renderMarkdown);
+        const historyToken = setHistoryCursor(sessionManager, page.sessionId, older.cursor);
+        postMessage({ type: "olderHistory", sessionId: page.sessionId, token: page.token, historyToken, messages });
+      }
+    } catch (error) {
+      console.error("Could not load older session history", error);
+      postMessage({ type: "olderHistory", sessionId: page.sessionId, token: page.token, failed: true });
+    }
+    return true;
+  }
+
   if (msg.type === "backToList") {
     showSessionsList(sessionManager, postMessage);
     return true;
@@ -291,9 +333,9 @@ export function loadSession(
 
   if (pendingPlans.get(sessionManager)?.sessionId !== sessionId) pendingPlans.delete(sessionManager);
   const changedSession = sessionManager.getActiveSessionId() !== sessionId;
+  openUndoSessions.delete(sessionManager);
   sessionManager.setActiveSessionId(sessionId);
   if (changedSession) releaseQueueEdit(sessionManager);
-  const messages = sessionManager.listSessionMessages(sessionId);
   const sessions = sessionManager.listSessions();
 
   postMessage({
@@ -306,9 +348,25 @@ export function loadSession(
     askPermissions: session.askPermissions,
     processes: serializeProcesses(session.processes),
     sessions: toSessionList(sessions),
-    messages: serializeSessionMessages(messages, renderMarkdown),
+    ...readLatestHistory(sessionManager, sessionId, renderMarkdown),
   });
   postUndoState(sessionManager, postMessage);
+}
+
+function setHistoryCursor(manager: HistoryReader, sessionId: string, cursor: SessionHistoryCursor | null) {
+  if (!cursor) {
+    historyPages.delete(manager);
+    return null;
+  }
+  const token = randomUUID();
+  historyPages.set(manager, { sessionId, token, cursor });
+  return token;
+}
+
+function readLatestHistory(manager: HistoryReader, sessionId: string, renderMarkdown: (text: string) => string) {
+  const page = manager.readSessionHistoryPage(sessionId);
+  const messages = serializeSessionMessages(page?.messages ?? [], renderMarkdown);
+  return { messages, historyToken: setHistoryCursor(manager, sessionId, page?.cursor ?? null) };
 }
 
 function serializeSessionMessages(messages: SessionMessage[], renderMarkdown: (text: string) => string) {
@@ -333,7 +391,7 @@ function serializeSessionMessages(messages: SessionMessage[], renderMarkdown: (t
 /** Refresh persisted history without switching sessions or releasing a composer/queue draft. */
 export function refreshSessionHistory(
   sessionId: string,
-  manager: Pick<SessionManager, "getSession" | "listSessionMessages" | "listSessions">,
+  manager: Pick<SessionManager, "getSession" | "readSessionHistoryPage" | "listSessions">,
   postMessage: PostMessageFn,
   renderMarkdown: (text: string) => string
 ): void {
@@ -346,7 +404,7 @@ export function refreshSessionHistory(
     status: session.status,
     askPermissions: session.askPermissions,
     pluginRateLimitedTool: session.pluginRateLimitedTool ?? null,
-    messages: serializeSessionMessages(manager.listSessionMessages(sessionId), renderMarkdown),
+    ...readLatestHistory(manager, sessionId, renderMarkdown),
     sessions: toSessionList(manager.listSessions()),
   });
 }
@@ -365,6 +423,8 @@ async function createNewSession(
   fresh = true
 ): Promise<void> {
   pendingPlans.delete(sessionManager);
+  historyPages.delete(sessionManager);
+  openUndoSessions.delete(sessionManager);
   sessionManager.setActiveSessionId(null);
   releaseQueueEdit(sessionManager);
   const sessions = sessionManager.listSessions();
@@ -672,15 +732,16 @@ export function postUndoState(manager: ProviderDeps["sessionManager"], postMessa
     type: "undoState",
     sessionId,
     busy: isBusy(manager) || Boolean(sessionId && manager.isSessionRunning(sessionId)),
-    targets: sessionId
-      ? manager.listUndoTargets(sessionId).map(({ message, canRestoreCode }) => ({
-          id: message.id,
-          text: message.content,
-          createTime: message.createTime,
-          imageUrls: promptImages(message),
-          canRestoreCode,
-        }))
-      : [],
+    targets:
+      sessionId && openUndoSessions.get(manager) === sessionId
+        ? manager.listUndoTargets(sessionId).map(({ message, canRestoreCode }) => ({
+            id: message.id,
+            text: message.content,
+            createTime: message.createTime,
+            imageUrls: promptImages(message),
+            canRestoreCode,
+          }))
+        : [],
     queued,
     preparing,
     pausedReason,

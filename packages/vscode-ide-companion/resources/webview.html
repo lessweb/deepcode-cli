@@ -161,7 +161,7 @@
 
       <!-- 聊天视图 -->
       <div class="chat-container" id="chatContainer">
-        <div class="messages" id="messages"></div>
+        <div class="messages" id="messages" tabindex="0"></div>
         <div class="composer">
           <div class="plugin-rate-limit-notice" id="pluginRateLimitNotice" role="status" hidden>
             <div class="plugin-rate-limit-text">
@@ -252,6 +252,51 @@
       const userHome = {{userHome}};
       const app = document.querySelector(".app");
       const messages = document.getElementById("messages");
+      let historyToken = null;
+      let loadingOlderHistory = false;
+      let previousScrollTop = 0;
+      let programmaticScrollTop = null;
+
+      function requestOlderHistory() {
+        if (!currentSessionId || !historyToken || loadingOlderHistory) return;
+        loadingOlderHistory = true;
+        vscode.postMessage({ type: "loadOlderHistory", sessionId: currentSessionId, token: historyToken });
+      }
+
+      function scrollMessages(top) {
+        messages.scrollTop = top;
+        programmaticScrollTop = messages.scrollTop;
+        previousScrollTop = programmaticScrollTop;
+      }
+
+      function isAtMessageBottom() {
+        return messages.scrollHeight - messages.clientHeight - messages.scrollTop <= 2;
+      }
+
+      messages.addEventListener("scroll", () => {
+        const top = messages.scrollTop;
+        if (top !== programmaticScrollTop && top <= 1 && previousScrollTop > 1) requestOlderHistory();
+        previousScrollTop = top;
+        programmaticScrollTop = null;
+      });
+      messages.addEventListener("wheel", (event) => {
+        if (event.deltaY < 0 && messages.scrollTop <= 1) requestOlderHistory();
+      }, { passive: true });
+      messages.addEventListener("keydown", (event) => {
+        if (event.target === messages && messages.scrollTop <= 1 && ["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+          requestOlderHistory();
+        }
+      });
+      let touchStartY = null;
+      messages.addEventListener("touchstart", (event) => {
+        touchStartY = messages.scrollTop <= 1 ? event.touches[0]?.clientY : null;
+      }, { passive: true });
+      messages.addEventListener("touchend", (event) => {
+        if (touchStartY != null && event.changedTouches[0]?.clientY - touchStartY > 16 && messages.scrollTop <= 1) {
+          requestOlderHistory();
+        }
+        touchStartY = null;
+      }, { passive: true });
       const inputWrap = document.querySelector(".input-wrap");
       const toolsLine = document.querySelector(".tools-line");
       const promptInput = document.getElementById("prompt");
@@ -436,12 +481,16 @@
         renderUndo();
       }
       function closeUndo() {
+        if (undoDialog.open) vscode.postMessage({ type: "closeUndo", sessionId: currentSessionId });
         undoDialog.close();
         undoSelected = null;
         promptInput.focus();
       }
       function openUndo() {
-        if (editingQueue || undoRequest) return;
+        if (editingQueue || undoRequest) {
+          vscode.postMessage({ type: "closeUndo", sessionId: currentSessionId });
+          return;
+        }
         undoError = "";
         undoSelected = null;
         if (!undoDialog.open) undoDialog.showModal();
@@ -1179,7 +1228,7 @@
         return false;
       }
 
-      function addBubble(content, role, meta, shouldConnectToPrev = false, copySource = "") {
+      function addBubble(content, role, meta, shouldConnectToPrev = false, copySource = "", fragment = null) {
 
         const bubble = document.createElement("div");
         bubble.className = "bubble " + role;
@@ -1419,8 +1468,13 @@
           }
         }
 
+        if (fragment) {
+          fragment.appendChild(bubble);
+          return bubble;
+        }
+        const follow = isAtMessageBottom();
         messages.appendChild(bubble);
-        messages.scrollTop = messages.scrollHeight;
+        if (follow) scrollMessages(messages.scrollHeight);
         lastMessageRole = role;
 
         // 如果需要连接线，动态计算并设置连接线高度
@@ -2190,6 +2244,7 @@
       }
 
       function createThinkingBubble(shouldConnectToPrev) {
+        const follow = isAtMessageBottom();
         removeThinkingBubble();
 
         const bubble = document.createElement("div");
@@ -2210,7 +2265,7 @@
 
         bubble.appendChild(header);
         messages.appendChild(bubble);
-        messages.scrollTop = messages.scrollHeight;
+        if (follow) scrollMessages(messages.scrollHeight);
 
         currentThinkingBubbleElement = bubble;
         thinkingResizeObserver.observe(bubble);
@@ -2285,18 +2340,57 @@
         lastMessageRole = null;
       }
 
+      function setHistoryToken(token) {
+        historyToken = token || null;
+        loadingOlderHistory = false;
+      }
+
+      function historyPrompts(history) {
+        return history
+          .filter((msg) => msg.role === "user" && typeof msg.content === "string" && msg.content.trim())
+          .map((msg) => msg.content);
+      }
+
+      function buildHistoryFragment(history) {
+        const fragment = document.createDocumentFragment();
+        let previousRole = null;
+        for (const msg of history) {
+          addMessageBubble(msg, previousRole !== null && previousRole !== "user" && msg.role !== "user", fragment);
+          previousRole = msg.role;
+        }
+        return fragment;
+      }
+
+      function prependSessionHistory(history) {
+        if (!history.length) return;
+        const first = messages.firstElementChild;
+        const previousTop = messages.scrollTop;
+        const previousOffset = first?.getBoundingClientRect().top;
+        const fragment = buildHistoryFragment(history);
+        const bubbles = Array.from(fragment.children);
+        messages.prepend(fragment);
+
+        if (first && first.dataset.messageRole !== "user" && history.at(-1).role !== "user") {
+          first.querySelector(".bubble-dot")?.classList.add("connect-to-prev");
+        }
+        if (first) {
+          scrollMessages(messages.scrollTop + first.getBoundingClientRect().top - previousOffset);
+          bubbles.push(first);
+        } else {
+          lastMessageRole = history.at(-1).role;
+          scrollMessages(previousTop);
+        }
+        requestAnimationFrame(() => bubbles.forEach(updateConnectionLine));
+
+        const olderPrompts = historyPrompts(history);
+        inputHistory = olderPrompts.concat(inputHistory);
+        if (historyCursor >= 0) historyCursor += olderPrompts.length;
+      }
+
       function renderSessionHistory(history) {
         clearMessages();
         currentThinkingBubble = null;
-        history.forEach((msg, index) => {
-          // 判断是否需要连接到上一个消息
-          let shouldConnect = false;
-          if (index > 0) {
-            const prevMsg = history[index - 1];
-            shouldConnect = prevMsg.role !== "user" && msg.role !== "user";
-          }
-          addMessageBubble(msg, shouldConnect);
-        });
+        messages.appendChild(buildHistoryFragment(history));
 
         // 更新 lastMessageRole 为最后一条消息的role
         if (history.length > 0) {
@@ -2318,6 +2412,7 @@
           setThinkingBubbleExpanded(lastThinkingBubble, true);
           currentThinkingBubble = lastThinkingBubble;
         }
+        scrollMessages(messages.scrollHeight);
       }
 
       function updateSessionDropdown(sessions) {
@@ -2817,14 +2912,14 @@
         }
       });
 
-      function addMessageBubble(msg, shouldConnect) {
-        const existing = msg.id && Array.from(messages.children).find((bubble) => bubble.dataset.messageId === msg.id);
+      function addMessageBubble(msg, shouldConnect, fragment = null) {
+        const existing = !fragment && msg.id && Array.from(messages.children).find((bubble) => bubble.dataset.messageId === msg.id);
         if (existing && (!existing.dataset.preparing || msg.preparing)) return;
+        let bubble;
         if (msg.role === "system") {
-          addBubble(msg.content, "system", msg.meta, shouldConnect);
+          bubble = addBubble(msg.content, "system", msg.meta, shouldConnect, "", fragment);
         } else if (msg.role === "user") {
-          const bubble = addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false);
-          if (msg.id) bubble.dataset.messageId = msg.id;
+          bubble = addBubble(msg.meta?.isAnswers ? msg.html || msg.content : msg.content, "user", msg.meta, false, "", fragment);
           if (msg.preparing) bubble.dataset.preparing = "true";
           const images = msg.meta?.userPrompt?.imageUrls || (Array.isArray(msg.contentParams) ? msg.contentParams : [msg.contentParams]).filter((part) => part?.type === "image_url").map((part) => part.image_url?.url).filter(Boolean);
           for (const url of images) {
@@ -2836,9 +2931,13 @@
           }
           if (existing) existing.replaceWith(bubble);
         } else if (msg.role === "assistant") {
-          addBubble(msg.html || msg.content, "assistant", msg.meta, shouldConnect, msg.content || "");
+          bubble = addBubble(msg.html || msg.content, "assistant", msg.meta, shouldConnect, msg.content || "", fragment);
         } else if (msg.role === "tool") {
-          addBubble(msg.content, "tool", msg.meta, shouldConnect);
+          bubble = addBubble(msg.content, "tool", msg.meta, shouldConnect, "", fragment);
+        }
+        if (bubble) {
+          bubble.dataset.messageRole = msg.role;
+          if (msg.id) bubble.dataset.messageId = msg.id;
         }
       }
 
@@ -2926,6 +3025,15 @@
           if (!sessionDropdown.classList.contains("show")) toggleSessionDropdown();
           return;
         }
+        if (message.type === "olderHistory") {
+          if (message.sessionId !== currentSessionId || message.token !== historyToken || !loadingOlderHistory) return;
+          loadingOlderHistory = false;
+          if (!message.failed) {
+            setHistoryToken(message.historyToken);
+            prependSessionHistory(message.messages);
+          }
+          return;
+        }
         if (message.type === "refreshSessionHistory") {
           if (message.sessionId !== currentSessionId) return;
           const previousTop = messages.scrollTop;
@@ -2937,14 +3045,19 @@
           currentAskPermissions = requests;
           currentPluginRateLimitedTool = normalizePluginRateLimitedTool(message.pluginRateLimitedTool);
           if (sessionSelectorTitleText) sessionSelectorTitleText.textContent = message.summary;
-          renderSessionHistory(message.messages || []);
-          messages.scrollTop = previousTop;
+          setHistoryToken(message.historyToken);
+          const history = message.messages || [];
+          inputHistory = historyPrompts(history);
+          historyCursor = -1;
+          renderSessionHistory(history);
+          scrollMessages(previousTop);
           setLoading(commandBusy || isBusyStatus(message.status), message.status);
           renderPluginRateLimitNotice();
           if (Array.isArray(message.sessions)) updateSessionDropdown(message.sessions);
           return;
         }
         if (message.type === "initializeEmpty" || message.type === "loadSession") {
+          setHistoryToken(message.historyToken);
           // Carry forward drafts saved before per-session draft storage was introduced.
           if (!hasLoadedSession && !savedState.drafts && savedState.promptText) {
             composerState.sessionId = message.sessionId || null;
@@ -3018,10 +3131,7 @@
           // 加载历史消息
           if (message.messages && Array.isArray(message.messages)) {
             // Rebuild user input history from session messages
-            inputHistory = message.messages
-              .filter((m) => m && m.role === "user" && typeof m.content === "string")
-              .map((m) => m.content)
-              .filter((t) => t && t.trim());
+            inputHistory = historyPrompts(message.messages);
             historyCursor = -1;
             draftBeforeHistory = null;
             pendingUserPrompt = null;

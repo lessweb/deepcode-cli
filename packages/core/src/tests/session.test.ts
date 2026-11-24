@@ -5010,6 +5010,60 @@ function createSessionAndMessages(manager: SessionManager, sessionId: string, su
   return sessionId;
 }
 
+test("history pages read complete UTF-8 records backwards and keep their boundaries after appends", () => {
+  const workspace = createTempDir("deepcode-history-workspace-");
+  setHomeDir(createTempDir("deepcode-history-home-"));
+  const manager = createSessionManager(workspace, "history-pages");
+  const id = createSessionAndMessages(manager, "history-pages", "Short history");
+  const filename = path.join((manager as any).getProjectStorage().projectDir, `${id}.jsonl`);
+  assert.deepEqual(manager.readSessionHistoryPage("absent"), { messages: [], cursor: null });
+  assert.deepEqual(manager.readSessionHistoryPage(id), { messages: manager.listSessionMessages(id), cursor: null });
+
+  const record = (messageId: string, content: string, visible = true) =>
+    JSON.stringify({ id: messageId, sessionId: id, role: "user", content, visible });
+  const ids = ["oldest", "long", "middle", "later", "hidden", "latest"];
+  const long = "消息😀".repeat(540_000);
+  const ordinary = "旧记录".repeat(420_000);
+  fs.writeFileSync(
+    filename,
+    [
+      record(ids[0], "first"),
+      record(ids[1], long),
+      record(ids[2], ordinary),
+      "bad json",
+      record(ids[3], ordinary),
+      record(ids[4], "", false),
+      record(ids[5], ordinary),
+    ].join("\r\n")
+  );
+  assert.ok(fs.statSync(filename).size > 15 * 1024 * 1024);
+
+  const latest = manager.readSessionHistoryPage(id);
+  assert.ok(latest?.cursor);
+  assert.deepEqual(
+    latest.messages.map((message) => message.id),
+    ids.slice(-2)
+  );
+  fs.appendFileSync(filename, `\n${record("appended", "new live message")}\n`);
+
+  const recovered = [latest.messages];
+  let cursor: typeof latest.cursor | null = latest.cursor;
+  while (cursor) {
+    const page = manager.readSessionHistoryPage(id, cursor);
+    assert.ok(page);
+    assert.ok(!page.cursor || page.cursor.before < cursor.before);
+    if (page.messages.some((message) => message.id === "long")) assert.equal(page.messages.length, 1);
+    recovered.unshift(page.messages);
+    cursor = page.cursor;
+  }
+  assert.deepEqual(recovered.flat(), manager.listSessionMessages(id).slice(0, -1));
+  const replacement = `${filename}.replacement`;
+  fs.writeFileSync(replacement, "");
+  fs.renameSync(replacement, filename);
+  assert.equal(manager.readSessionHistoryPage(id, latest.cursor), null);
+  assert.deepEqual(manager.readSessionHistoryPage(id), { messages: [], cursor: null });
+});
+
 function hasGit(): boolean {
   try {
     execFileSync("git", ["--version"], { stdio: "ignore" });

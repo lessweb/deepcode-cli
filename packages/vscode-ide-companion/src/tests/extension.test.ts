@@ -55,6 +55,7 @@ function createMockSessionManager(options?: { sessions?: any[]; messages?: any[]
       activeSessionId = id;
     },
     listSessionMessages: (_sessionId: string) => messages,
+    readSessionHistoryPage: () => ({ messages, cursor: null }),
     handleUserPrompt: () => Promise.resolve(),
     interruptActiveSession: () => {},
     denySessionPermission: (_sessionId: string) => {},
@@ -83,6 +84,42 @@ function createDeps(options?: Parameters<typeof createMockSessionManager>[0]): P
 }
 
 // --- handleWebviewMessage routing ---
+
+test("selecting a session reads one page and older requests advance only the current cursor", async () => {
+  const deps = createDeps();
+  const reads: unknown[] = [];
+  const before = { before: 20, device: 1, inode: 2, size: 40 };
+  deps.sessionManager.listSessionMessages = () => assert.fail("unexpected full history read");
+  deps.sessionManager.listUndoTargets = () => assert.fail("unexpected scan for undo targets");
+  deps.sessionManager.readSessionHistoryPage = (id, cursor) => {
+    reads.push({ id, cursor });
+    return { messages: [], cursor: cursor ? null : before };
+  };
+
+  await handleWebviewMessage({ type: "selectSession", sessionId: "session-1" }, deps);
+  const loaded = deps.messages.find((message: any) => message.type === "loadSession") as any;
+  assert.equal(typeof loaded.historyToken, "string");
+  assert.deepEqual(reads, [{ id: "session-1", cursor: undefined }]);
+
+  const request = { type: "loadOlderHistory", sessionId: "session-1", token: loaded.historyToken };
+  await handleWebviewMessage({ ...request, token: "stale" }, deps);
+  await handleWebviewMessage(request, deps);
+  await handleWebviewMessage(request, deps);
+  const older = deps.messages.filter((message: any) => message.type === "olderHistory");
+  assert.deepEqual(older, [
+    {
+      type: "olderHistory",
+      sessionId: "session-1",
+      token: loaded.historyToken,
+      historyToken: null,
+      messages: [],
+    },
+  ]);
+  assert.deepEqual(reads, [
+    { id: "session-1", cursor: undefined },
+    { id: "session-1", cursor: before },
+  ]);
+});
 
 test("handleWebviewMessage returns false for null message", async () => {
   const deps = createDeps();
@@ -986,6 +1023,7 @@ test("question replies associate their temporary bubble with the committed messa
   const committed = deps.messages.find((message: any) => message.type === "userMessageCommitted") as any;
   assert.equal(committed.optimisticId, optimistic.id);
   assert.equal(committed.message.id, "answer-id");
+  await handleWebviewMessage({ type: "slashCommand", command: "undo" }, deps);
   const state = deps.messages.filter((message: any) => message.type === "undoState").at(-1) as any;
   assert.equal(state.targets[0].id, "answer-id");
 });

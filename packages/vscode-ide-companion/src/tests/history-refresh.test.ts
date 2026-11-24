@@ -46,7 +46,15 @@ function setup(editing: boolean) {
     commandBusy: false,
     currentThinkingBubble: null,
     lastMessageRole: "user",
-    messages: { innerHTML: "old history", scrollTop: 48, querySelectorAll: () => [] },
+    historyToken: null,
+    loadingOlderHistory: false,
+    inputHistory: [],
+    historyCursor: -1,
+    messages: { innerHTML: "old history", scrollTop: 48, querySelectorAll: () => [], appendChild: () => {} },
+    document: { createDocumentFragment: () => ({}) },
+    scrollMessages: (top: number) => {
+      context.messages.scrollTop = top;
+    },
     sessionSelectorTitleText: { textContent: "Old title" },
     normalizeAskPermissions: (value: unknown) => value,
     normalizePluginRateLimitedTool: () => null,

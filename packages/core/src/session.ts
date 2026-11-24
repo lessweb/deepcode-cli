@@ -339,6 +339,15 @@ export type SessionsIndex = {
 
 export type SessionMessageRole = "system" | "user" | "assistant" | "tool";
 
+export type SessionHistoryCursor = {
+  before: number;
+  device: number;
+  inode: number;
+  size: number;
+};
+
+const SESSION_HISTORY_PAGE_BYTES = 5 * 1024 * 1024;
+
 export type MessageMeta = {
   function?: unknown;
   paramsMd?: string;
@@ -2965,7 +2974,74 @@ ${agentInstructions}
       return [];
     }
 
-    const raw = fs.readFileSync(messagePath, "utf8");
+    return this.parseSessionMessages(fs.readFileSync(messagePath, "utf8"));
+  }
+
+  /** A null page means the file was replaced or shortened since the cursor was issued. */
+  readSessionHistoryPage(
+    sessionId: string,
+    cursor?: SessionHistoryCursor
+  ): { messages: SessionMessage[]; cursor: SessionHistoryCursor | null } | null {
+    let fd: number;
+    try {
+      fd = fs.openSync(this.getSessionMessagesPath(sessionId), "r");
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        return cursor ? null : { messages: [], cursor: null };
+      }
+      throw error;
+    }
+
+    try {
+      const { size, dev, ino } = fs.fstatSync(fd);
+      if (cursor && (cursor.device !== dev || cursor.inode !== ino || cursor.size > size)) return null;
+      const end = cursor?.before ?? size;
+      if (!end) return { messages: [], cursor: null };
+
+      const read = (start: number, length: number): Buffer => {
+        const buffer = Buffer.allocUnsafe(length);
+        let offset = 0;
+        while (offset < length) {
+          const count = fs.readSync(fd, buffer, offset, length - offset, start + offset);
+          if (!count) throw new Error("Session history changed while reading");
+          offset += count;
+        }
+        return buffer;
+      };
+
+      let start = Math.max(0, end - SESSION_HISTORY_PAGE_BYTES);
+      const tail = read(start, end - start);
+      let chunks = [tail];
+      if (start > 0 && read(start - 1, 1)[0] !== 10) {
+        // The final newline terminates a record and cannot start a nonempty page.
+        const newline = tail.subarray(0, tail.length - 1).indexOf(10);
+        if (newline >= 0) {
+          start += newline + 1;
+          chunks = [tail.subarray(newline + 1)];
+        } else {
+          // The newest record alone exceeds the budget. Find its beginning in bounded reads.
+          while (start > 0) {
+            const previous = Math.max(0, start - SESSION_HISTORY_PAGE_BYTES);
+            const block = read(previous, start - previous);
+            const boundary = block.lastIndexOf(10) + 1;
+            chunks.push(block.subarray(boundary));
+            start = previous + boundary;
+            if (boundary > 0) break;
+          }
+          chunks.reverse();
+        }
+      }
+      const data = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks);
+      return {
+        messages: this.parseSessionMessages(data.toString("utf8")),
+        cursor: start > 0 ? { before: start, device: dev, inode: ino, size } : null,
+      };
+    } finally {
+      fs.closeSync(fd);
+    }
+  }
+
+  private parseSessionMessages(raw: string): SessionMessage[] {
     const lines = raw.split(/\r?\n/).filter((line) => line.trim().length > 0);
     const messages: SessionMessage[] = [];
     for (const line of lines) {

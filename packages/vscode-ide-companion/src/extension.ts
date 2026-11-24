@@ -22,7 +22,8 @@ import {
   type ResolvedDeepcodingSettings,
   setShellIfWindows,
 } from "@vegamo/deepcode-core";
-import { collectPromptImageUrls, getNonce, isAllowedExternalUrl } from "./utils.js";
+import { getNonce, isAllowedExternalUrl } from "./utils.js";
+import { AttachmentPreviews } from "./attachment-previews.js";
 import { handleWebviewMessage, postUndoState, releaseQueueEdit, refreshSessionHistory } from "./provider.js";
 import { createSharpLoader } from "./sharp-loader.js";
 import { prepareToolDiffContent } from "./tool-diff.js";
@@ -41,6 +42,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   private readonly context: vscode.ExtensionContext;
   private webviewView: vscode.WebviewView | undefined;
   private readonly md: MarkdownIt;
+  private readonly attachmentPreviews = new AttachmentPreviews();
   private readonly sessionManager: SessionManager;
   private unsubscribeRuntime?: () => void;
   private readonly trajectory: TrajectoryController;
@@ -182,6 +184,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   }
 
   dispose(): void {
+    this.attachmentPreviews.dispose();
     this.unsubscribeRuntime?.();
     this.trajectory.dispose();
     releaseQueueEdit(this.sessionManager);
@@ -200,7 +203,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
 
     webviewView.webview.options = {
       enableScripts: true,
-      localResourceRoots: [this.context.extensionUri],
+      localResourceRoots: [this.context.extensionUri, this.attachmentPreviews.root],
     };
 
     webviewView.webview.html = this.getWebviewHtml(webviewView.webview);
@@ -240,81 +243,6 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       if (!handled) {
         // unrecognized message type — no-op
       }
-    });
-  }
-
-  private async loadInitialSession(): Promise<void> {
-    const sessions = this.sessionManager.listSessions();
-    const sessionsList = sessions.map((s) => ({
-      id: s.id,
-      summary: s.summary || "Untitled",
-      createTime: s.createTime,
-      updateTime: s.updateTime,
-      status: s.status,
-    }));
-
-    if (sessions.length === 0) {
-      // 没有历史会话，显示新对话界面
-      this.sendMessage({
-        type: "initializeEmpty",
-        sessions: sessionsList,
-        status: null,
-        tokenTelemetry: this.buildTokenTelemetry(null),
-      });
-      return;
-    }
-
-    // 显示最新的对话
-    const latestSession = sessions[0];
-    this.loadSession(latestSession.id);
-  }
-
-  private loadSession(sessionId: string): void {
-    const session = this.sessionManager.getSession(sessionId);
-    if (!session) {
-      return;
-    }
-
-    // 设置为活动会话
-    this.sessionManager.setActiveSessionId(sessionId);
-
-    const messages = this.sessionManager.listSessionMessages(sessionId);
-
-    // 获取所有会话列表
-    const sessions = this.sessionManager.listSessions();
-    const sessionsList = sessions.map((s) => ({
-      id: s.id,
-      summary: s.summary || "Untitled",
-      createTime: s.createTime,
-      updateTime: s.updateTime,
-      status: s.status,
-    }));
-
-    // 发送对话信息到 webview
-    this.sendMessage({
-      type: "loadSession",
-      sessionId,
-      summary: session.summary || "Untitled",
-      status: session.status,
-      pluginRateLimitedTool: session.pluginRateLimitedTool ?? null,
-      askPermissions: session.askPermissions,
-      processes: this.serializeProcesses(session.processes),
-      tokenTelemetry: this.buildTokenTelemetry(session),
-      sessions: sessionsList,
-      messages: messages
-        .filter((m) => m.visible)
-        .map((m) => ({
-          id: m.id,
-          createTime: m.createTime,
-          contentParams: m.contentParams,
-          role: m.role,
-          content: prepareToolDiffContent(m.role, m.content),
-          html:
-            m.role !== "tool"
-              ? this.md.render(m.content || (m.messageParams as ReasoningMessageParams | null)?.reasoning_content || "")
-              : undefined,
-          meta: m.meta,
-        })),
     });
   }
 
@@ -365,22 +293,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
   }
 
   private postToWebview(webview: vscode.Webview, message: unknown): void {
-    const imagePreviews: Record<string, string> = {};
-    const roots = [...(webview.options.localResourceRoots ?? [])];
-    for (const url of collectPromptImageUrls(message)) {
-      try {
-        const uri = vscode.Uri.parse(url);
-        if (uri.scheme !== "file") continue;
-        const parent = vscode.Uri.file(path.dirname(uri.fsPath));
-        if (!roots.some((root) => root.toString() === parent.toString())) roots.push(parent);
-        imagePreviews[url] = webview.asWebviewUri(uri).toString();
-      } catch {
-        /* Ignore malformed legacy attachment URLs. */
-      }
-    }
-    if (roots.length !== webview.options.localResourceRoots?.length) {
-      webview.options = { ...webview.options, localResourceRoots: roots };
-    }
+    const imagePreviews = this.attachmentPreviews.forMessage(webview, message);
     webview.postMessage(message && typeof message === "object" ? { ...message, imagePreviews } : message);
   }
 
@@ -391,7 +304,7 @@ export class DeepCodeViewProvider implements vscode.WebviewViewProvider {
       vscode.ViewColumn.Active,
       {
         enableScripts: true,
-        localResourceRoots: [this.context.extensionUri],
+        localResourceRoots: [this.context.extensionUri, this.attachmentPreviews.root],
         retainContextWhenHidden: true,
       }
     );

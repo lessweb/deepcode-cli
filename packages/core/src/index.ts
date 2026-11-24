@@ -68,6 +68,7 @@ export { SessionManager, getProjectCode, getCompactPromptTokenThreshold } from "
 export { isValidSessionId } from "./common/session-id";
 export type {
   SessionMessage,
+  SessionHistoryCursor,
   SessionEntry,
   SessionStatus,
   SessionsIndex,
