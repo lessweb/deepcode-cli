@@ -738,6 +738,10 @@ export function resolveSettingsSources(
     ...projectEnv,
     ...systemEnv,
   };
+  const explicitApiKey = trimString(env.API_KEY);
+  const atlasCloudApiKey = trimString(processEnv.ATLASCLOUD_API_KEY);
+  const useAtlasCloudDefaults = !explicitApiKey && Boolean(atlasCloudApiKey);
+
   // Select before normalizing so invalid configured values cannot silently fall back.
   const plusKey =
     systemEnv.PLUS_API_KEY !== undefined
@@ -766,9 +770,9 @@ export function resolveSettingsSources(
       ["user.model", trimString(userSettings?.model) || undefined],
       ["user.env.MODEL", trimString(userEnv.MODEL) || undefined],
     ],
-    defaults.model
+    (useAtlasCloudDefaults ? ATLASCLOUD_DEFAULT_MODEL : "") || defaults.model
   );
-  const baseURL = trimString(env.BASE_URL) || defaults.baseURL;
+  const baseURL = trimString(env.BASE_URL) || (useAtlasCloudDefaults ? ATLASCLOUD_BASE_URL : "") || defaults.baseURL;
 
   const contextWindow = choose(
     "contextWindow",
@@ -1034,7 +1038,7 @@ export function resolveSettingsSources(
   return {
     env,
     experimental: { reasoningSummary, reasoningSummaryModel },
-    apiKey: trimString(env.API_KEY) || undefined,
+    apiKey: explicitApiKey || atlasCloudApiKey || undefined,
     baseURL,
     model,
     contextWindow,
@@ -1124,6 +1128,8 @@ export function applyModelConfigSelection(
 
 export const DEFAULT_MODEL = "deepseek-flash";
 export const DEFAULT_BASE_URL = "https://api.deepseek.com";
+export const ATLASCLOUD_DEFAULT_MODEL = "deepseek-ai/deepseek-v4-pro";
+export const ATLASCLOUD_BASE_URL = "https://api.atlascloud.ai/v1";
 
 // ---------------------------------------------------------------------------
 // Settings file I/O
