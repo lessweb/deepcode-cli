@@ -55,7 +55,7 @@ async function harness(t: TestContext, compact: (signal: AbortSignal) => Promise
   t.mock.method(SessionManager.prototype, "getActiveSessionId", () => (active ? entry.id : null));
   t.mock.method(SessionManager.prototype, "getSession", () => (active ? entry : null));
   const list = t.mock.method(SessionManager.prototype, "listSessions", () => (active ? [entry] : []));
-  t.mock.method(SessionManager.prototype, "listSessionMessages", () => history);
+  t.mock.method(SessionManager.prototype, "readSessionHistoryPage", () => ({ messages: history, cursor: null }));
   const prompt = t.mock.method(SessionManager.prototype, "handleUserPrompt", async () => {});
   const interrupt = t.mock.method(SessionManager.prototype, "interruptActiveSession", () => {});
   const compaction = t.mock.method(

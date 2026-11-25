@@ -2980,8 +2980,13 @@ ${agentInstructions}
   /** A null page means the file was replaced or shortened since the cursor was issued. */
   readSessionHistoryPage(
     sessionId: string,
-    cursor?: SessionHistoryCursor
+    cursor?: SessionHistoryCursor,
+    pageBytes = SESSION_HISTORY_PAGE_BYTES
   ): { messages: SessionMessage[]; cursor: SessionHistoryCursor | null } | null {
+    if (!Number.isSafeInteger(pageBytes) || pageBytes <= 0) {
+      throw new RangeError("Session history page size must be a positive integer");
+    }
+
     let fd: number;
     try {
       fd = fs.openSync(this.getSessionMessagesPath(sessionId), "r");
@@ -3009,7 +3014,7 @@ ${agentInstructions}
         return buffer;
       };
 
-      let start = Math.max(0, end - SESSION_HISTORY_PAGE_BYTES);
+      let start = Math.max(0, end - pageBytes);
       const tail = read(start, end - start);
       let chunks = [tail];
       if (start > 0 && read(start - 1, 1)[0] !== 10) {
@@ -3021,7 +3026,7 @@ ${agentInstructions}
         } else {
           // The newest record alone exceeds the budget. Find its beginning in bounded reads.
           while (start > 0) {
-            const previous = Math.max(0, start - SESSION_HISTORY_PAGE_BYTES);
+            const previous = Math.max(0, start - pageBytes);
             const block = read(previous, start - previous);
             const boundary = block.lastIndexOf(10) + 1;
             chunks.push(block.subarray(boundary));

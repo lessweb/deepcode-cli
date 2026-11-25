@@ -67,6 +67,12 @@ export async function terminal(
     rawFrame: () => rawFrame,
     rawMode: () => rawMode,
     screen,
+    async resize(columns: number, rows: number) {
+      screen?.resize(columns, rows);
+      Object.assign(stdout, { columns, rows });
+      stdout.emit("resize");
+      await flush();
+    },
     rerender: app.rerender,
     waitUntilExit: app.waitUntilExit,
     async send(input: string) {

@@ -5038,6 +5038,14 @@ test("history pages read complete UTF-8 records backwards and keep their boundar
   );
   assert.ok(fs.statSync(filename).size > 15 * 1024 * 1024);
 
+  const oversized = manager.readSessionHistoryPage(id, undefined, 1024 * 1024);
+  assert.ok(oversized?.cursor);
+  assert.deepEqual(
+    oversized.messages.map((message) => message.id),
+    ["latest"]
+  );
+  assert.equal(oversized.messages[0].content, ordinary);
+
   const latest = manager.readSessionHistoryPage(id);
   assert.ok(latest?.cursor);
   assert.deepEqual(

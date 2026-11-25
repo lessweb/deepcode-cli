@@ -561,7 +561,7 @@ for (const protocol of ["kitty", "iTerm.app", "unknown"]) {
     t.mock.method(SessionManager.prototype, "listSkills", async () => []);
     t.mock.method(SessionManager.prototype, "listSessions", () => [session]);
     t.mock.method(SessionManager.prototype, "getSession", () => session);
-    t.mock.method(SessionManager.prototype, "listSessionMessages", () => [message]);
+    t.mock.method(SessionManager.prototype, "readSessionHistoryPage", () => ({ messages: [message], cursor: null }));
     let release!: () => void;
     const preparation = new Promise<void>((resolve) => {
       release = resolve;

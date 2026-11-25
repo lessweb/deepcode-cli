@@ -69,6 +69,7 @@ import { writeStdoutLine } from "../../utils/stdio-helpers";
 import { createTerminalTitle, terminalTitleState } from "../../utils/terminal-title";
 import { writeRawMode } from "../../common/cli-config";
 import { StaticMessageHistory } from "../components/StaticMessageHistory";
+import { isSshSession } from "../../utils/ssh";
 
 type View = "chat" | "session-list" | "undo" | "mcp-status";
 
@@ -111,6 +112,7 @@ function App({
   const [commandNotice, setCommandNotice] = useState<string | null>(null);
   const [skills, setSkills] = useState<SkillInfo[]>([]);
   const [messages, setMessages] = useState<SessionMessage[]>([]);
+  const [truncatedSessionId, setTruncatedSessionId] = useState<string | null>(null);
   const [historyRenderRevision, setHistoryRenderRevision] = useState(0);
   const handleHistoryRendered = useCallback(() => setHistoryRenderRevision((value) => value + 1), []);
   const [sessions, setSessions] = useState<SessionEntry[]>([]);
@@ -334,9 +336,15 @@ function App({
     return () => clearInterval(id);
   }, [busy]);
 
-  function loadVisibleMessages(manager: SessionManager, sessionId: string): SessionMessage[] {
-    return manager.listSessionMessages(sessionId).filter((m) => m.visible);
-  }
+  const loadVisibleMessages = useCallback(
+    (sessionId: string): SessionMessage[] => {
+      const pageBytes = (isSshSession() ? 5 : 50) * 1024 * 1024;
+      const page = sessionManager.readSessionHistoryPage(sessionId, undefined, pageBytes);
+      setTruncatedSessionId(page?.cursor ? sessionId : null);
+      return page?.messages.filter((message) => message.visible) ?? [];
+    },
+    [sessionManager]
+  );
 
   const refreshSessionsList = useCallback((): void => {
     setSessions(sessionManager.listSessions());
@@ -582,7 +590,7 @@ function App({
         try {
           const sessionId = sessionManager.forkSession(sourceSessionId);
           sessionManager.setActiveSessionId(sessionId);
-          await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+          await resetStaticView(loadVisibleMessages(sessionId), { clearScreen: true });
           const session = sessionManager.getSession(sessionId);
           setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot, settingsFile)) : "");
           setRunningProcesses(null);
@@ -731,6 +739,7 @@ function App({
       onRestart,
       refreshSkills,
       refreshSessionsList,
+      loadVisibleMessages,
       navigateToSubView,
       resetToWelcome,
       resetStaticView,
@@ -874,9 +883,9 @@ function App({
 
   const reloadActiveSessionView = useCallback(
     (sessionId: string): void => {
-      resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+      resetStaticView(loadVisibleMessages(sessionId), { clearScreen: true });
     },
-    [resetStaticView, sessionManager]
+    [resetStaticView, loadVisibleMessages]
   );
 
   const handleSelectSession = useCallback(
@@ -884,7 +893,7 @@ function App({
       setCommandNotice(null);
       sessionManager.setActiveSessionId(sessionId);
       // Replace Static and its replay resources before restoring the selected history.
-      await resetStaticView(loadVisibleMessages(sessionManager, sessionId), { clearScreen: true });
+      await resetStaticView(loadVisibleMessages(sessionId), { clearScreen: true });
       const session = sessionManager.getSession(sessionId);
       setStatusLine(session ? buildStatusLine(session, resolveCurrentSettings(projectRoot, settingsFile)) : "");
       setRunningProcesses(session?.processes ?? null);
@@ -897,7 +906,15 @@ function App({
       }
       await refreshSkills(sessionId);
     },
-    [sessionManager, resetStaticView, pendingPermissionReply, projectRoot, settingsFile, refreshSkills]
+    [
+      sessionManager,
+      loadVisibleMessages,
+      resetStaticView,
+      pendingPermissionReply,
+      projectRoot,
+      settingsFile,
+      refreshSkills,
+    ]
   );
 
   /**
@@ -1062,12 +1079,11 @@ function App({
 
       setTimeout(() => {
         if (nextMode === RawMode.Raw) {
-          // Write all messages directly to stdout for raw scrollback mode.
-          const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
-          renderRawModeMessages(allMessages, nextMode);
+          const recentMessages = activeSessionId ? loadVisibleMessages(activeSessionId) : [];
+          renderRawModeMessages(recentMessages, nextMode);
         } else if (activeSessionId) {
           // Switch to chat view to render messages.
-          void resetStaticView(loadVisibleMessages(sessionManager, activeSessionId), { clearScreen: true });
+          void resetStaticView(loadVisibleMessages(activeSessionId), { clearScreen: true });
         } else {
           // No active session: just show the welcome screen once.
           setWelcomeNonce((n) => n + 1);
@@ -1075,7 +1091,7 @@ function App({
         }
       }, 200);
     },
-    [editingQueue, resetStaticView, sessionManager, setMode, stdout]
+    [editingQueue, loadVisibleMessages, resetStaticView, sessionManager, setMode, stdout]
   );
 
   useEffect(() => {
@@ -1095,12 +1111,12 @@ function App({
     lastRenderedColumnsRef.current = columns;
 
     if (mode === RawMode.Raw) {
-      // In raw mode, re-render all messages directly to stdout at the new width.
+      // In raw mode, re-render recent messages directly to stdout at the new width.
       // Use direct stdout instead of writeRef to avoid Ink interference.
       stdout.write(ANSI_CLEAR_SCREEN);
       const activeSessionId = sessionManager.getActiveSessionId();
-      const allMessages = activeSessionId ? loadVisibleMessages(sessionManager, activeSessionId) : [];
-      renderRawModeMessages(allMessages, mode);
+      const recentMessages = activeSessionId ? loadVisibleMessages(activeSessionId) : [];
+      renderRawModeMessages(recentMessages, mode);
       return;
     }
 
@@ -1112,13 +1128,12 @@ function App({
     setWelcomeNonce((n) => n + 1);
 
     const activeSessionId = sessionManager.getActiveSessionId();
-    const nextMessages =
-      activeSessionId && !busy ? loadVisibleMessages(sessionManager, activeSessionId) : messagesRef.current;
+    const nextMessages = activeSessionId && !busy ? loadVisibleMessages(activeSessionId) : messagesRef.current;
     setTimeout(() => {
       setMessages(nextMessages);
       setShowWelcome(true);
     }, 0);
-  }, [busy, mode, sessionManager, columns, stdout]);
+  }, [busy, mode, sessionManager, columns, stdout, loadVisibleMessages]);
 
   const screenWidth = useMemo(() => columns ?? stdout?.columns ?? 80, [columns, stdout]);
   const screenHeight = useMemo(() => rows ?? stdout?.rows ?? 24, [rows, stdout]);
@@ -1178,8 +1193,20 @@ function App({
   }, [sessionManager, projectRoot, settingsFile]);
   const statusLineSegments = useStatusLine(resolvedSettings.statusline, projectRoot, getSessionInfo);
   const promptHistory = useMemo(() => buildPromptHistory(messages), [messages]);
+  const getPromptHistory = useMemo(() => {
+    if (!activeSessionId || truncatedSessionId !== activeSessionId) return () => promptHistory;
+    // Recall and search can reach prompts outside the terminal replay window.
+    let history: string[] | undefined;
+    return () => (history ??= buildPromptHistory(sessionManager.listSessionMessages(activeSessionId)));
+  }, [activeSessionId, truncatedSessionId, promptHistory, sessionManager]);
   const expandedThinkingId = findExpandedThinkingId(messages);
-  const pendingQuestion = useMemo(() => findPendingAskUserQuestion(messages, activeStatus), [activeStatus, messages]);
+  const pendingQuestion = useMemo(() => {
+    const question = findPendingAskUserQuestion(messages, activeStatus);
+    if (question || activeStatus !== "waiting_for_user" || !activeSessionId || truncatedSessionId !== activeSessionId) {
+      return question;
+    }
+    return findPendingAskUserQuestion(sessionManager.listSessionMessages(activeSessionId), activeStatus);
+  }, [activeStatus, messages, activeSessionId, truncatedSessionId, sessionManager]);
   const shouldShowQuestionPrompt = Boolean(pendingQuestion && !dismissedQuestionIds.has(pendingQuestion.messageId));
   const pendingPromptDialog =
     !busy &&
@@ -1454,6 +1481,7 @@ function App({
           modelConfig={resolvedSettings}
           reasoningSummary={resolvedSettings.experimental.reasoningSummary}
           promptHistory={promptHistory}
+          getPromptHistory={getPromptHistory}
           busy={busy}
           pendingMessageCount={queuedTargets.filter(({ message }) => message.id !== preparingPromptId).length}
           cursorLayoutKey={promptCursorLayoutKey}

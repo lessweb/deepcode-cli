@@ -21,7 +21,7 @@ export type HistoryNavigationActions = {
 export function useHistoryNavigation(
   buffer: PromptBufferState,
   setBuffer: React.Dispatch<React.SetStateAction<PromptBufferState>>,
-  promptHistory: string[]
+  history: string[] | (() => string[])
 ): HistoryNavigationState & HistoryNavigationActions {
   const [historyCursor, setHistoryCursor] = useState(-1);
   const [draftBeforeHistory, setDraftBeforeHistory] = useState<string | null>(null);
@@ -32,6 +32,7 @@ export function useHistoryNavigation(
   }, []);
 
   function navigateHistory(direction: -1 | 1): void {
+    const promptHistory = typeof history === "function" ? history() : history;
     if (promptHistory.length === 0) {
       return;
     }

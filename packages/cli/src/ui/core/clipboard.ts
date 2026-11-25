@@ -2,6 +2,7 @@ import { execFile, spawn, spawnSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { isSshSession } from "../../utils/ssh";
 
 export type ClipboardImage = {
   dataUrl: string;
@@ -55,7 +56,7 @@ function writeClipboardOsc52(text: string): Promise<boolean> {
 export async function writeClipboardTextAsync(text: string): Promise<boolean> {
   if (text.length === 0) return false;
 
-  if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) {
+  if (isSshSession()) {
     return writeClipboardOsc52(text);
   }
 

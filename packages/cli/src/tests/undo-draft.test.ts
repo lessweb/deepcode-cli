@@ -76,6 +76,7 @@ async function harness(t: TestContext, imageUrls: string[] = []) {
   t.mock.method(SessionManager.prototype, "getSession", () => entry);
   t.mock.method(SessionManager.prototype, "listSessions", () => [entry]);
   t.mock.method(SessionManager.prototype, "listSessionMessages", () => history);
+  t.mock.method(SessionManager.prototype, "readSessionHistoryPage", () => ({ messages: history, cursor: null }));
   t.mock.method(SessionManager.prototype, "restoreSessionConversation", (_sessionId: string, messageId: string) => {
     const index = history.findIndex((item) => item.id === messageId);
     assert.ok(index >= 0);

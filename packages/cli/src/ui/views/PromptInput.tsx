@@ -114,6 +114,7 @@ type Props = {
   reasoningSummary: ReasoningSummaryMode;
   screenWidth: number;
   promptHistory: string[];
+  getPromptHistory?: () => string[];
   busy: boolean;
   pendingMessageCount?: number;
   cursorLayoutKey?: string;
@@ -162,6 +163,7 @@ export const PromptInput = React.memo(function PromptInput({
   reasoningSummary,
   screenWidth,
   promptHistory,
+  getPromptHistory = () => promptHistory,
   busy,
   pendingMessageCount = 0,
   cursorLayoutKey,
@@ -225,7 +227,7 @@ export const PromptInput = React.memo(function PromptInput({
   const { historyCursor, navigateHistory, exitHistoryBrowsing } = useHistoryNavigation(
     buffer,
     setBuffer,
-    promptHistory
+    getPromptHistory
   );
 
   const {
@@ -495,7 +497,7 @@ export const PromptInput = React.memo(function PromptInput({
         exitHistoryBrowsing();
         setPendingExit(false);
         setStatusMessage(null);
-        historySearch.begin(promptHistory);
+        historySearch.begin(getPromptHistory());
         return;
       }
 
@@ -696,7 +698,7 @@ export const PromptInput = React.memo(function PromptInput({
       }
 
       if (key.upArrow) {
-        if (noModifier && (historyCursor !== -1 || buffer.cursor === 0) && promptHistory.length > 0) {
+        if (noModifier && (historyCursor !== -1 || buffer.cursor === 0) && getPromptHistory().length > 0) {
           navigateHistory(-1);
           return;
         }
