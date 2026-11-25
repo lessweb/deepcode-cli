@@ -67,6 +67,14 @@ export async function terminal(
     rawFrame: () => rawFrame,
     rawMode: () => rawMode,
     screen,
+    async setWindowFocused(focused: boolean) {
+      if (!screen) throw new Error("Window focus changes require a terminal screen");
+      if (!screen.modes.sendFocusMode) return;
+      stdin.write("\x1b");
+      await setTimeout(50);
+      stdin.write(focused ? "[I" : "[O");
+      await flush();
+    },
     async resize(columns: number, rows: number) {
       screen?.resize(columns, rows);
       Object.assign(stdout, { columns, rows });

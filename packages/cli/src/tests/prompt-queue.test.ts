@@ -134,10 +134,28 @@ async function input(t: TestContext, editing = false) {
         events.push("cancel edit");
       },
     }),
-    100
+    100,
+    { rows: 40 }
   );
   return { ...h, submissions, events };
 }
+
+test("switching away and back preserves the draft and lets the active task continue", async (t) => {
+  const h = await input(t);
+  const draft = "Draw three green circles.";
+  await h.send(draft);
+  await h.setWindowFocused(false);
+  await h.setWindowFocused(true);
+  assert.deepEqual(h.events, []);
+  await h.send("\r");
+  assert.equal(h.submissions[0]?.text, draft);
+});
+
+test("pressing Escape interrupts the active task once", async (t) => {
+  const h = await input(t);
+  await h.send("\x1b");
+  assert.deepEqual(h.events, ["interrupt"]);
+});
 
 test("busy input submits ordinary prompts and clears the input for another message", async (t) => {
   const h = await input(t);

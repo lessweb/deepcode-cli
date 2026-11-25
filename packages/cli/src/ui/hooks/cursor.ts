@@ -25,14 +25,6 @@ function hideCursor(): string {
   return "\u001B[?25l";
 }
 
-function enableTerminalFocusReporting(): string {
-  return "\u001B[?1004h";
-}
-
-function disableTerminalFocusReporting(): string {
-  return "\u001B[?1004l";
-}
-
 function enableBracketedPaste(): string {
   return "\u001B[?2004h";
 }
@@ -199,19 +191,6 @@ export function useHiddenTerminalCursor(stdout: NodeJS.WriteStream | undefined, 
     stdout.write(hideCursor());
     return () => {
       stdout.write(showCursor());
-    };
-  }, [isActive, stdout]);
-}
-
-export function useTerminalFocusReporting(stdout: NodeJS.WriteStream | undefined, isActive: boolean): void {
-  useLayoutEffect(() => {
-    if (!isActive || !stdout?.isTTY) {
-      return;
-    }
-
-    stdout.write(enableTerminalFocusReporting());
-    return () => {
-      stdout.write(disableTerminalFocusReporting());
     };
   }, [isActive, stdout]);
 }

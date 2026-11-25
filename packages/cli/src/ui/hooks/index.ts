@@ -6,7 +6,6 @@ export {
   useTerminalExtendedKeys,
   useBracketedPaste,
   usePromptTerminalCursor,
-  useTerminalFocusReporting,
   getPromptCursorPlacement,
   isPromptCursorAtWrapBoundary,
   resolvePromptTerminalCursorPosition,
