@@ -122,6 +122,7 @@ async function harness(t: TestContext, busy = false, tty = true) {
 
 test("Ctrl+G edits busy input, suspends terminal output, restores modes and supports undo", async (t) => {
   const h = await harness(t, true);
+  assert.doesNotMatch(h.writes.join(""), /\x1b\[\?1004h/);
   await h.send("draft");
   await h.send("\x07\x07");
   assert.equal(h.edits.length, 1);
@@ -138,7 +139,7 @@ test("Ctrl+G edits busy input, suspends terminal output, restores modes and supp
   assert.match(h.latest(), /编辑/);
   assert.match(h.writes.slice(count).join(""), /\x1b\[\?2004h/);
   assert.match(h.writes.slice(count).join(""), /\x1b\[>4;1m/);
-  assert.match(h.writes.slice(count).join(""), /\x1b\[\?1004h/);
+  assert.doesNotMatch(h.writes.slice(count).join(""), /\x1b\[\?1004h/);
   await h.send("!");
   assert.match(h.latest(), /next!/);
   await h.send("\x1b[45;5u");

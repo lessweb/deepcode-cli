@@ -66,12 +66,7 @@ import {
   usePromptTerminalCursor,
 } from "../hooks";
 import type { InputKey } from "../hooks";
-import {
-  useHiddenTerminalCursor,
-  useTerminalExtendedKeys,
-  useBracketedPaste,
-  useTerminalFocusReporting,
-} from "../hooks";
+import { useHiddenTerminalCursor, useTerminalExtendedKeys, useBracketedPaste } from "../hooks";
 import SlashCommandMenu, { isSkillSelected } from "./SlashCommandMenu";
 import {
   readPermissionSettingsEdit,
@@ -216,7 +211,6 @@ export const PromptInput = React.memo(function PromptInput({
   const [permissionEdit, setPermissionEdit] = useState<PermissionSettingsEdit | null>(null);
   const [fileMentionItems, setFileMentionItems] = useState<FileMentionItem[]>(() => scanFileMentionItems(projectRoot));
   const [dismissedFileMentionKey, setDismissedFileMentionKey] = useState<string | null>(null);
-  const [hasTerminalFocus, setHasTerminalFocus] = useState(true);
   const lastCtrlDAt = React.useRef<number>(0);
   const undoRedoRef = React.useRef(createPromptUndoRedoState());
   const wasBusyRef = React.useRef(busy);
@@ -332,7 +326,7 @@ export const PromptInput = React.memo(function PromptInput({
     [buffer, inputContentWidth]
   );
   const useInlineCursor = isPromptCursorAtWrapBoundary(buffer, inputContentWidth);
-  const usePositionedCursor = terminalActive && hasTerminalFocus && !showFooterText && stdout.isTTY && !useInlineCursor;
+  const usePositionedCursor = terminalActive && !showFooterText && stdout.isTTY && !useInlineCursor;
   const promptCursorLayoutKey = useMemo(
     () =>
       [
@@ -356,13 +350,12 @@ export const PromptInput = React.memo(function PromptInput({
       selectedSkills,
     ]
   );
-  useTerminalFocusReporting(stdout, terminalActive);
   useTerminalExtendedKeys(stdout, terminalActive);
   useBracketedPaste(stdout, terminalActive);
   const terminalCursorActive = usePromptTerminalCursor(
     search ? searchTextRef : inputTextRef,
     search ? { row: 0, column: searchFooter.column } : cursorPlacement,
-    !busy && (search ? terminalActive && hasTerminalFocus && Boolean(stdout.isTTY) : usePositionedCursor),
+    !busy && (search ? terminalActive && Boolean(stdout.isTTY) : usePositionedCursor),
     `${promptCursorLayoutKey}:${search ? "search" : "input"}`
   );
   useHiddenTerminalCursor(stdout, terminalActive && !terminalCursorActive);
@@ -438,18 +431,7 @@ export const PromptInput = React.memo(function PromptInput({
 
   useTerminalInput(
     (input, key) => {
-      if (externalEditorRunningRef.current) return;
-
-      if (key.focusIn) {
-        setHasTerminalFocus(true);
-        return;
-      }
-      if (key.focusOut) {
-        setHasTerminalFocus(false);
-        return;
-      }
-
-      if (disabled) {
+      if (externalEditorRunningRef.current || disabled || key.focusIn || key.focusOut) {
         return;
       }
 
@@ -830,7 +812,6 @@ export const PromptInput = React.memo(function PromptInput({
           : "Could not edit in vim"
       );
     } finally {
-      setHasTerminalFocus(true);
       setEditingExternally(false);
       externalEditorChangeRef.current?.(false, {
         nonce: Date.now(),
@@ -1135,7 +1116,7 @@ export const PromptInput = React.memo(function PromptInput({
             ) : (
               renderBufferWithCursor(
                 buffer,
-                terminalActive && hasTerminalFocus && !search,
+                terminalActive && !search,
                 placeholder,
                 pastesRef.current,
                 !terminalCursorActive && !search
@@ -1205,7 +1186,7 @@ export const PromptInput = React.memo(function PromptInput({
             <Text wrap="truncate-end">
               <Text dimColor>{searchFooter.prefix}</Text>
               <Text color="cyan">{searchFooter.query}</Text>
-              <Text inverse={terminalActive && hasTerminalFocus && !terminalCursorActive}> </Text>
+              <Text inverse={terminalActive && !terminalCursorActive}> </Text>
             </Text>
           </Box>
           {screenWidth > searchFooter.column + 1 && (
