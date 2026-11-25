@@ -330,19 +330,21 @@ test("cancelling a pending edit keeps the original queue content", async (t) => 
 });
 
 for (const action of ["allow", "cancel"] as const) {
-  test(`vim draft survives a permission request arriving during editing (${action})`, async (t) => {
+  test(`vim draft survives a permission request arriving during editing (${action})`, { timeout: 5000 }, async (t) => {
     const h = await harness(t);
-    let editor: { file: string; child: EventEmitter } | undefined;
-    t.mock.method(childProcess, "spawn", (command: string, args: string[]) => {
-      assert.equal(command, "vim");
-      editor = { file: args[0], child: new EventEmitter() };
-      return editor.child;
+    const started = new Promise<{ file: string; child: EventEmitter }>((resolve) => {
+      t.mock.method(childProcess, "spawn", (command: string, args: string[]) => {
+        assert.equal(command, "vim");
+        const child = new EventEmitter();
+        resolve({ file: args[0], child });
+        return child;
+      });
     });
     syncBuiltinESMExports();
     await h.setBusy(true);
     await h.send("draft before vim");
     await h.send("\x07");
-    assert.ok(editor);
+    const editor = await started;
     assert.equal(fs.readFileSync(editor.file, "utf8"), "draft before vim");
     await h.requestPermission();
     assert.doesNotMatch(h.latest(), /touch example/);
