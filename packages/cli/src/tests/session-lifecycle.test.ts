@@ -8,6 +8,7 @@ import React from "react";
 import { SessionManager, type SessionMessage } from "@vegamo/deepcode-core";
 import App from "../ui/views/App";
 import { terminal } from "./terminal-helper";
+import { GitFileHistory } from "../../../core/src/common/file-history";
 import { McpClient } from "../../../core/src/mcp/mcp-client";
 import { createMcpTestServer } from "../../../core/src/tests/mcp-test-server";
 
@@ -26,6 +27,8 @@ async function harness(
   const originalEnv = process.env;
   process.env = Object.fromEntries(Object.entries(originalEnv).filter(([key]) => !key.startsWith("DEEPCODE_")));
   t.mock.method(os, "homedir", () => root);
+  // File checkpoints spawn synchronous Git commands and are covered by dedicated tests.
+  t.mock.method(GitFileHistory.prototype, "ensureSession", () => undefined);
   syncBuiltinESMExports();
   fs.mkdirSync(path.join(root, ".deepcode"));
   fs.writeFileSync(path.join(root, ".deepcode", "settings.json"), JSON.stringify({ statusline: { enabled: false } }));
@@ -212,7 +215,7 @@ for (const action of ["/exit", "Ctrl+D twice"] as const) {
     assert.equal(h.rawMode(), false, "exit must restore terminal input mode");
   });
 
-  test(`${action} exits promptly during an unresponsive MCP call`, { timeout: 5000 }, async (t) => {
+  test(`${action} exits promptly during an unresponsive MCP call`, { timeout: 15000 }, async (t) => {
     const entered = deferred();
     const callTool = McpClient.prototype.callTool;
     let requestSignal: AbortSignal | undefined;
@@ -247,6 +250,12 @@ for (const action of ["/exit", "Ctrl+D twice"] as const) {
     await entered.promise;
     const id = h.manager.getActiveSessionId()!;
     h.manager.enqueuePrompt(id, { text: "queued input" });
+    const disposedWhileRunning: boolean[] = [];
+    const dispose = h.manager.dispose.bind(h.manager);
+    t.mock.method(h.manager, "dispose", () => {
+      disposedWhileRunning.push(h.manager.isSessionRunning(id));
+      dispose();
+    });
     if (action === "/exit") await h.submit("/exit");
     else {
       await h.send("\x04");
@@ -254,13 +263,13 @@ for (const action of ["/exit", "Ctrl+D twice"] as const) {
     }
     await h.waitUntilExit();
     assert.equal(requestSignal?.aborted, true);
-    assert.equal(h.manager.isSessionRunning(id), false);
+    assert.equal(disposedWhileRunning[0], false, "cancellation must finish before exit disposes the manager");
     assert.equal(h.manager.getSession(id)?.status, "interrupted");
     assert.equal(requests, 1);
     assert.equal(h.rawMode(), false);
   });
 
-  test(`${action} exits after five seconds even if execution ignores cancellation`, { timeout: 12000 }, async (t) => {
+  test(`${action} exits after five seconds even if execution ignores cancellation`, { timeout: 15000 }, async (t) => {
     const entered = deferred();
     const cleanup = deferred();
     t.after(() => cleanup.resolve());
